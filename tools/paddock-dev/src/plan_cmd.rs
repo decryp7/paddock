@@ -571,6 +571,11 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
                 .collect();
             legs_of = crate::plan_ci::partition_linux_legs(legs_of, &packages, crate::plan_ci::LINUX_PARTITIONS);
         }
+        // paddock-dev is one package with about 2,700 tests: its Linux tests run as parallel nextest partitions (user decision 107a,
+        // 2026-11-27; it has no coverage run, so every run splits). A narrowed leg stays whole.
+        if key == "paddockDev" {
+            legs_of = crate::plan_ci::partition_nextest_legs(legs_of, crate::plan_ci::LINUX_PARTITIONS);
+        }
         // Packages with a valid pass of the same key are left out of the legs' tests (never the declared filter: the run stays whole).
         let job = if key == "crates" { "crate" } else { "paddock-dev" };
         let applied = crate::test_cache::plan::apply(legs_of, job, &reuse_plan, key != "crates" || !coverage_run(env));
@@ -579,10 +584,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         emitted_legs.insert(if key == "crates" { "crate" } else { "paddock-dev" }, legs_of.clone());
         workspace_oses.insert(
             if key == "crates" { "crate" } else { "paddock-dev" },
-            legs_of
-                .iter()
-                .filter_map(|l| l["os"].as_str().map(str::to_string))
-                .collect::<BTreeSet<String>>(),
+            crate::plan_graph::legs_oses(&legs_of),
         );
         outputs.push((name.into(), serde_json::to_string(&legs_of).unwrap_or_default()));
     }
@@ -620,11 +622,6 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         let (smoke, affected) = crate::plan_graph::partial_projects(&plan);
         ran.smoke = smoke;
         ran.affected = affected;
-        // A narrowed `crate` or `paddock-dev` job runs on the legs the selection kept.
-        ran.jobs.retain(|j| match j.split_once('@') {
-            Some((job, os)) => workspace_oses.get(job).is_none_or(|o| o.contains(os)),
-            None => true,
-        });
     }
 
     // A push to main is its own measure (its plan is the diff from the last green main), and so is a train's landing run (its plan is
@@ -664,7 +661,16 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     .map_err(fail)?;
     // A push to main's scope has no WebKit and no reference-app end-to-end jobs (the nightly's), so a train's full run is complete
     // without them (user, 2026-11-24).
-    let need = scope_of(&model, &need_plan, &need_legs, false, &os_legs, &[]);
+    let mut need = scope_of(&model, &need_plan, &need_legs, false, &os_legs, &[]);
+    // A narrowed `crate` or `paddock-dev` job runs on the legs the selection kept, and a push's or a landing's need (its own plan)
+    // asks for it there only: one definition for both (ER-22; train y, run 9243). The whole tree's need is not narrowed.
+    crate::plan_graph::declare_selected_legs(
+        &mut ran,
+        &mut need,
+        graph_mode && !reused,
+        graph_mode && !need_whole,
+        &workspace_oses,
+    );
     // A push's or a landing's need is its own diff: the line names the base it was diffed from (a push reuses a landing run of
     // the same diff only, review round 2 P1-A).
     let need_base = if need_whole { None } else { base.as_deref() };
