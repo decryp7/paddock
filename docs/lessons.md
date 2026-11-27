@@ -4509,3 +4509,16 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   the files' current paths, so a rewritten entry is not growth. C135 and C104 pass a `rekey`; C53's liveness baseline already followed a move by hash
   (`moved`, not growth). C171 reads `git diff -M`, and its waiver may sit above the statement that holds the literal. A moved file's changed content is
   judged as usual: a new offending line still fails, and a new entry is still growth.
+
+## A wait ended on a 401 its own token had not earned (2026-11-28, fix/ci-wait-token, ER-28)
+- **What happened.** On 2026-11-27/28 five `./dev wait --ci-run` waiters (runs 9284, 9285, 9286, 9320, 9321) ended after five failed looks with
+  `HTTP 401 invalid username, password or token`, while a fresh `curl` or `./dev ci trial-verdict` with the same `GITEA_TOKEN` worked.
+- **Causes ruled out (ER-28).** A temp config file removed by a reaper: the main-tree client sends the token on standard input (`-K -`), there is no file (the
+  `curl_config` writer on `fix/test-cache-windows-records` is for the S3 and download paths). A child that lost the environment: the token is read once and
+  held in the probe; a running waiter's environment held the same token as `~/.zshenv` (hash compared, never printed), unchanged since 2026-11-14. A lazy
+  or expiring secret: none exists. A per-wait-age timer: the failures end at the same wall-clock minutes for waiters that started at different times
+  (about 00:08 and 00:29), so the cause is not the age of the process. Reproduction: a 10-minute `./dev wait --ci-run` and 17 minutes of the same
+  request through `-K -` every 15 s stayed 200; the refusal did not recur, so it is a transient Gitea or proxy refusal (Gitea behind Caddy), not proven further.
+- **Fix.** `CiRunProbe` holds through a 401 that follows a good look in the same wait (up to 40 looks, 10 minutes at 15 s; the length of a real refusal is
+  not measured), writes one `::warning::` and one "answers again" line, and at the end prints one `::error::` naming the likely causes and the check to run.
+  A 401 on the first look is a wrong token and ends as before.
