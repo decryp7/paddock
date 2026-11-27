@@ -11,12 +11,17 @@ use std::path::{Path, PathBuf};
 
 struct Repo {
     dir: tempfile::TempDir,
+    /// Folders this repository owns besides its own (a bare `origin`): removed with it.
+    _owned: std::cell::RefCell<Vec<tempfile::TempDir>>,
 }
 
 impl Repo {
     fn new() -> Repo {
         let dir = tempfile::tempdir().unwrap();
-        let r = Repo { dir };
+        let r = Repo {
+            dir,
+            _owned: Default::default(),
+        };
         r.git(&["init", "-q", "-b", "main"]);
         r
     }
@@ -2856,11 +2861,33 @@ mod member_trial {
         r.write("x2.txt", "x2\n");
         r.commit("feat: x2");
         r.git(&["merge", "-q", "--no-edit", "main"]);
-        let bare = r.path().join("..").join(format!("origin-{}.git", std::process::id()));
+        // Its own temp folder (ER-51): a name shared through the temp parent let a stale or concurrent origin reject the push.
+        let owned = tempfile::tempdir().unwrap();
+        let bare = owned.path().join("origin.git");
+        r._owned.borrow_mut().push(owned);
         r.git(&["init", "-q", "--bare", bare.to_str().unwrap()]);
         r.git(&["remote", "add", "origin", bare.to_str().unwrap()]);
         r.git(&["push", "-q", "origin", "feat/x"]);
         r
+    }
+
+    /// A leftover origin at the name the old fixture shared (temp parent, process id) must not reach a new test's origin.
+    #[test]
+    fn a_leftover_origin_at_the_old_shared_name_does_not_reject_the_push() {
+        let probe = Repo::new();
+        let stale = probe.path().join("..").join(format!("origin-{}.git", std::process::id()));
+        let _ = std::fs::remove_dir_all(&stale);
+        probe.git(&["init", "-q", "--bare", stale.to_str().unwrap()]);
+        probe.write("s.txt", "s\n");
+        probe.commit("feat: stale");
+        probe.git(&["push", "-q", stale.to_str().unwrap(), "main:refs/heads/feat/x"]);
+        let r = pushed();
+        let origin = r.git(&["remote", "get-url", "origin"]);
+        let _ = std::fs::remove_dir_all(&stale);
+        assert_eq!(
+            r.git(&["--git-dir", &origin, "rev-parse", "refs/heads/feat/x"]),
+            r.git(&["rev-parse", "HEAD"])
+        );
     }
 
     fn stand_ins(dir: &Path, rows: &str) {
