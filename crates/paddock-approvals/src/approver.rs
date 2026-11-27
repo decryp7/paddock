@@ -1,5 +1,7 @@
 //! Who gives an approval, and what an entry claims about it.
 
+use crate::verdict::Verdict;
+
 /// Who approved. A rule says which approver an exception needs; the user's approval satisfies every rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Approver {
@@ -45,6 +47,38 @@ pub enum Claim {
 }
 
 impl Claim {
+    /// The claim of a record that carries its approver as one word (a JSON string, a TOML string read as text, a trailer's word): no
+    /// word, or an empty one, is [`Claim::Absent`].
+    pub fn from_word(word: Option<&str>) -> Claim {
+        match word.map(str::trim).filter(|w| !w.is_empty()) {
+            None => Claim::Absent,
+            Some(w) => {
+                Approver::parse(w).map_or_else(|| Claim::Unrecognised(w.to_string()), Claim::By)
+            }
+        }
+    }
+
+    /// The verdict on this claim for a record that `needs` an approver: the ONE judgement every approval kind shares (user decision
+    /// 125). `field` names the record's field in the message and `line_to_add` is what the approver records when there is no claim.
+    pub fn verdict(&self, field: &str, needs: Approver, line_to_add: impl Into<String>) -> Verdict {
+        match self {
+            Claim::Absent => Verdict::Missing {
+                line_to_add: line_to_add.into(),
+            },
+            Claim::Unrecognised(v) => Verdict::Mismatch {
+                why: format!("{field} = {v:?} must be \"coordinator\" or \"user\""),
+            },
+            Claim::By(a) if a.satisfies(needs) => Verdict::Approved,
+            Claim::By(a) => Verdict::Mismatch {
+                why: format!(
+                    "{field} = \"{}\" but this needs the {}",
+                    a.as_str(),
+                    needs.as_str()
+                ),
+            },
+        }
+    }
+
     pub(crate) fn from_value(value: Option<&toml::Value>) -> Claim {
         match value {
             None => Claim::Absent,

@@ -84,3 +84,26 @@ fn a_stage_has_a_name_that_parses_back_and_a_caller_that_says_nothing_gets_the_s
     );
     assert_eq!(Stage::parse("lenient"), None);
 }
+
+#[test]
+fn a_ref_names_its_stage_and_anything_unknown_is_the_strictest() {
+    for (r, want) in [
+        ("refs/heads/trial/feat-x", Stage::MemberGate),
+        ("refs/heads/train/2026-11-27-z", Stage::MemberGate),
+        ("refs/heads/main", Stage::Landing),
+        ("refs/tags/v1.2.3", Stage::Landing),
+        ("refs/tags/trial/not-a-branch", Stage::Landing),
+        ("refs/heads/feat/paddock-approvals", Stage::Landing),
+        ("refs/heads/trainer", Stage::Landing),
+        ("refs/heads/train", Stage::Landing),
+        ("refs/pull/1/merge", Stage::Landing),
+        ("", Stage::Landing),
+    ] {
+        assert_eq!(Stage::from_ref(r), want, "{r:?}");
+    }
+    assert_eq!(
+        Stage::from_ref(" refs/heads/train/x "),
+        Stage::MemberGate,
+        "whitespace is trimmed"
+    );
+}

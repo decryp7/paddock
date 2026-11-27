@@ -44,22 +44,11 @@ impl EntryRecord {
 
     /// The verdict on this entry's approval (never Stale: an entry the register carries is not an exception that landed elsewhere).
     pub fn verdict(&self) -> Verdict {
-        match &self.claim {
-            Claim::Absent => Verdict::Missing {
-                line_to_add: format!("approved = \"{}\"", self.needs.as_str()),
-            },
-            Claim::Unrecognised(v) => Verdict::Mismatch {
-                why: format!("approved = {v:?} must be \"coordinator\" or \"user\""),
-            },
-            Claim::By(a) if a.satisfies(self.needs) => Verdict::Approved,
-            Claim::By(a) => Verdict::Mismatch {
-                why: format!(
-                    "approved = \"{}\" but this entry needs the {}",
-                    a.as_str(),
-                    self.needs.as_str()
-                ),
-            },
-        }
+        self.claim.verdict(
+            "approved",
+            self.needs,
+            format!("approved = \"{}\"", self.needs.as_str()),
+        )
     }
 }
 

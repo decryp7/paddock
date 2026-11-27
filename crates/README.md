@@ -2192,6 +2192,14 @@ and the merge-base diff (`tools/paddock-dev`) and hands in text and sets.
   a warning at a push and an error at the member gate and landing (an entry main already carries without it: an error always); Stale is a
   warning on a branch and an error at landing; Mismatch is always an error. `judge_entries` applies it to a whole register against the
   target branch's. `Stage::or_strictest(None)` is landing.
+- The kinds that carry one word are judged by the same `Claim::verdict` (user decision 125: one crate judges every approval kind): an npm
+  audit exception's `approvedBy` (`tools/paddock-dev/src/audit/allow.rs`; `scripts/npm-audit.mjs` keeps its copy, and the shared
+  `scripts/npm-audit-fixtures.json` make both answer alike), the active apps' `by` (`active_apps.rs`) and the `Gates-date:` trailers
+  (`date_move_claim`, over the trailer block git's own parser gives: `%(trailers:only,unfold)`, never the message). A `Copies-date:` trailer
+  and a `[[date_move]]` record have no reader: the first is only a comment in docs/known-copies.toml (check C58 is not built), the second is
+  ADR 0075, which the user dropped on 2026-11-11.
 - Used by `paddock-dev` through `check::growth_approval` (a thin adapter), C100's register row (`gates check`) and C155. The stage reaches
-  them through `PADDOCK_APPROVAL_STAGE`, which `./dev check --pre-push` sets (`branch-push`, or `member-gate` with `--member-gate`).
+  them through `PADDOCK_APPROVAL_STAGE`, which `./dev check --pre-push` sets (`branch-push`, or `member-gate` with `--member-gate`); in CI,
+  ci.yml declares `PADDOCK_APPROVAL_STAGE_FROM_REF: ${{ github.ref }}` once and `Stage::from_ref` maps it (a `trial/*` or `train/*` branch is
+  the member gate, `main`, a tag and anything else landing); an explicit `PADDOCK_APPROVAL_STAGE` wins.
   The JavaScript copy of the growth reader stays in `conformance/src/util/baseline.mjs`; a parity test holds both to the same digest and answers.

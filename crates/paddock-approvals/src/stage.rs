@@ -30,6 +30,20 @@ impl Stage {
             .find(|s| s.name() == name.trim())
     }
 
+    /// The stage of the ref a CI run is on (`github.ref`): a trial or train branch is the member gate, anything else (`main`, a tag, any
+    /// other branch, an empty ref) is landing, the strictest. The one definition of the mapping; a caller reads the ref, never matches it.
+    pub fn from_ref(git_ref: &str) -> Stage {
+        let r = git_ref.trim();
+        let is_member = ["refs/heads/trial/", "refs/heads/train/"]
+            .iter()
+            .any(|p| r.strip_prefix(p).is_some_and(|rest| !rest.is_empty()));
+        if is_member {
+            Stage::MemberGate
+        } else {
+            Stage::Landing
+        }
+    }
+
     /// The stage of a caller that may have given none: the strictest, so a caller that says nothing (CI) is never more lenient than
     /// landing. A name that is not a stage is an error for the caller to report, not a silent default.
     pub fn or_strictest(name: Option<&str>) -> Result<Stage, String> {

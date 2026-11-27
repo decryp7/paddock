@@ -19,3 +19,20 @@ fn the_registers_never_panic_on_a_corpus_of_bad_text() {
         .is_empty()
     );
 }
+
+#[test]
+fn the_trailer_reader_never_panics_on_a_corpus_of_bad_text() {
+    const TRAILERS: &[u8] = b"Gates-date: C13 2026-12-06 -> 2026-12-20; approved: coordinator\nSigned-off-by: x\n: ;\nGates-date:\n";
+    let text = |b: &[u8]| String::from_utf8_lossy(b).into_owned();
+    assert!(
+        never_panics(&corpus(TRAILERS), |b| {
+            paddock_approvals::date_move_claim(
+                &text(b),
+                "Gates-date",
+                "C13 2026-12-06 -> 2026-12-20",
+            );
+            true
+        })
+        .is_empty()
+    );
+}
