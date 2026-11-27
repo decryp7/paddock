@@ -3064,7 +3064,7 @@ mod member_trial {
         r.git(&["checkout", "-q", "-b", "sync/feat/x", "feat/x"]);
         r.write("x2.txt", "x2\n");
         r.commit("feat: x2");
-        let bare = r.path().join("..").join(format!("origin-{}.git", std::process::id()));
+        let bare = r.owned_file("origin.git");
         r.git(&["init", "-q", "--bare", bare.to_str().unwrap()]);
         r.git(&["remote", "add", "origin", bare.to_str().unwrap()]);
         // Before the merge: the revert is listed as the member's own, none as another branch's.
