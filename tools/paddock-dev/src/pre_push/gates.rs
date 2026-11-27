@@ -50,7 +50,7 @@ pub struct Gate {
     /// whose folder holds no build yet is COLD, and the history keeps cold and warm apart.
     pub build_dir: Option<String>,
     /// The row runs CI's own tests (the member gate's `tests <ws>`): its child gets CI's job environment
-    /// ([`crate::ci_run::job_env`]) less the secrets, not the [`super::exec::PASS`] list of the other rows.
+    /// ([`crate::ci_run::job_env`]) less the secrets, not the [`crate::child_env::PASS`] list of the other rows.
     pub ci_env: bool,
 }
 
@@ -198,6 +198,7 @@ pub const ROW_SET: &[&str] = &[
     "conformance-tests",
     "dyno-wire-fixtures",
     "gates-register",
+    "job-model",
     "locks-guard",
     "member-audits",
     "pitwall-deny",
@@ -444,6 +445,7 @@ fn plan_rows(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
     out.push(conformance_tests(plan, facts));
     out.extend(commit_lint(change));
     out.push(member_audits(facts));
+    out.push(job_model(facts));
     out.extend(member_tests(plan, change, facts));
     let reaches_pitwall = plan["apps"].as_array().is_some_and(|a| a.iter().any(|x| x == "pitwall"));
     if reaches_pitwall && app_inactive(facts, "pitwall") {
@@ -499,6 +501,7 @@ fn plan_rows(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
         facts,
         Gate {
             args: strs(&["gates", "check"]),
+            env: approval_stage_env(facts),
             ..gate(
                 "gates-register".into(),
                 "",
@@ -570,6 +573,18 @@ fn conformance_not_ready(id: &str, facts: &Facts) -> Option<Planned> {
     })
 }
 
+/// Where this run is for the approvals ([`paddock_approvals::Stage`]): a developer's push is a branch push, the member gate of
+/// `./dev merge check --gates` is the member gate. The rows that judge approvals (the Rust conformance checks and C100) read it from
+/// the environment ([`crate::check::growth_approval::STAGE_ENV`]); a caller that sets nothing (CI) gets landing, the strictest.
+fn approval_stage_env(facts: &Facts) -> Vec<(String, String)> {
+    let stage = if facts.member_gate {
+        paddock_approvals::Stage::MemberGate
+    } else {
+        paddock_approvals::Stage::BranchPush
+    };
+    vec![(crate::check::growth_approval::STAGE_ENV.to_string(), stage.name().to_string())]
+}
+
 /// The conformance row runs on every push, whatever changed and whatever the plan says (ER-41, user 2026-11-14): its checks read
 /// app code, specs and workflows, and a check skipped on the change that brings in its class never sees it. The planner marks
 /// conformance on every plan too (`conformance always runs`); this gate does not depend on that.
@@ -583,6 +598,7 @@ fn conformance(facts: &Facts) -> Planned {
         // so a flag or field added to the contract reaches the push gate with no change here.
         Some(Ok(_)) => dev_run(facts, Gate {
             args: strs(&["ci", "run", "conformance", "paddock"]),
+            env: approval_stage_env(facts),
             ..gate(id, "", "", &[], 0, "fix the finding it printed; the list of checks is the `conformance` field of conformance/paddock.ci.json (CI's \"Paddock itself\" step runs the same)".into())
         }),
         Some(Err(e)) => Planned::Broken { id, cause: e.clone(), next: "fix the `conformance` object in conformance/paddock.ci.json (app, root, only, strict)".into() },
@@ -823,6 +839,33 @@ fn locks_guard(change: &Change, facts: &Facts) -> Planned {
                 &[],
                 1,
                 "read the warning it printed: a dependency added to a shared crate changed the workspace hack, a watched crate's features or a lockfile; regenerate with `./dev locks sync` and `./dev locks guard --write` and commit them with the change".into(),
+            )
+        },
+    )
+}
+
+/// ADR 0123 §7: `./dev ci job-model check`, the member gate's copy of the plan job's step, so a layout change in ci.yml (a job without
+/// the rerun gate, a name two legs share) fails before a train and not in its CI run (ER-9, ER-53). Whatever changed (ER-41): the
+/// planner's legs and the action files can break it as well as ci.yml. Report-only until its first green run on the real tree is
+/// recorded (`ci_job_model::BLOCKING`): the command prints warnings and exits 0, so this row passes.
+fn job_model(facts: &Facts) -> Planned {
+    if !facts.member_gate {
+        return Planned::Skip {
+            id: "job-model".into(),
+            reason: "it runs in the member gate of `./dev merge check --gates` (`--member-gate`) and in ci.yml's plan job, not in a developer's push".into(),
+        };
+    }
+    dev_run(
+        facts,
+        Gate {
+            args: strs(&["ci", "job-model", "check"]),
+            ..gate(
+                "job-model".into(),
+                "",
+                "",
+                &[],
+                1,
+                "read the warning it printed: ci.yml's job layout broke a convention or two legs render one name (ADR 0123 section 7); fix ci.yml, docs/repo-graph.toml [ci.jobs] or the planner".into(),
             )
         },
     )

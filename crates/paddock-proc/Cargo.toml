@@ -10,6 +10,11 @@ publish = ["decryp7"]
 [lib]
 doctest = false # doctests are off (crates/README.md, "Doctests")
 
+[features]
+# `statewait`: waits on a process's run state for tests (rule 99: never in a shipped build). paddock-testkit-start turns it on and
+# re-exports it; this package's own unit tests have it under cfg(test).
+test-support = []
+
 [dependencies]
 log = "0.4"
 paddock-env = { workspace = true }
@@ -33,4 +38,7 @@ tempfile = "3"
 # What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
 # repository root; `[]` says the blind reads touch no repository file.
 # `tests/it/scope.rs`: a child program of the test prints its own working folder.
+# Root rules (ADR 0116 §6), read site by site: also `current_exe` (the test binary started again, or files beside it: build output);
+# paths taken from the environment (`HOME`, `XDG_*`, `OUT_DIR`, `CARGO_*`, tool and runtime folders, folders a test passes). None is
+# a repository file outside the globs.
 test-reads = []

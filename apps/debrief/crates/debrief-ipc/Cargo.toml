@@ -52,3 +52,9 @@ paddock-testkit-start = { path = "../../../../crates/paddock-testkit-start" }
 # The paused clock: a test of a wait that runs for virtual minutes (link.rs).
 tokio = { workspace = true, features = ["test-util"] }
 
+[package.metadata.paddock]
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `src/bin/fake_child.rs` starts itself again (`current_exe`) and `src/endpoint.rs` takes socket folders from `XDG_RUNTIME_DIR` and
+# the temp folder: no repository file.
+test-reads = []

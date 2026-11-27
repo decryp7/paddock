@@ -7,7 +7,7 @@
 use super::config::Config;
 use super::outcome::{self, exit_status};
 use super::util::full_checkout;
-use super::{Check, RunOptions, registry, report, run_checks, sources, today_utc};
+use super::{Check, RunOptions, registry, report, run_checks_at, sources, today_utc};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::io::Write;
@@ -180,7 +180,12 @@ pub fn run(argv: &[String], out: &mut dyn Write, err: &mut dyn Write, env: &dyn 
         ci: None,
     };
     let reg = registry();
-    let result = match run_checks(&opts, &reg) {
+    // The push gate and the member gate say where the run is; a caller that says nothing (CI) gets landing, the strictest stage.
+    let stage = match super::growth_approval::stage_from_env(env) {
+        Ok(s) => s,
+        Err(m) => return usage_error(err, &m),
+    };
+    let result = match run_checks_at(&opts, &reg, stage) {
         Ok(r) => r,
         Err(u) => {
             let known: Vec<&str> = reg.iter().map(|c| c.id()).collect();

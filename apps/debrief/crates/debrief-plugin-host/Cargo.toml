@@ -40,3 +40,10 @@ paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 # Pids the fakes record, read as records (rule 53).
 paddock-testkit-start = { path = "../../../../crates/paddock-testkit-start" }
 tempfile.workspace = true
+
+[package.metadata.paddock]
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `src/builtins.rs` finds the plugins binary beside the program (`current_exe`) and `src/bin/fake_plugin.rs` reads its own name and
+# files beside it: build output, no repository file.
+test-reads = []

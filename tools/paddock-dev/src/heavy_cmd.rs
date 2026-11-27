@@ -1,9 +1,9 @@
 //! `dev throttle -- <command...>`: run a command through the machine-wide heavy slot (ER-24), found by the one resolver the push gate and
-//! `./dev gen check` use ([`crate::pre_push::exec::throttle_command_for`]: `PADDOCK_THROTTLE` or `heavy` on PATH, else the
+//! `./dev gen check` use ([`crate::heavy_tool::throttle_command_for`]: `PADDOCK_THROTTLE` or `heavy` on PATH, else the
 //! `heavy` built from tools/throttle). When none can be found it is an error with the next step: never an unthrottled run.
 
-use crate::pre_push::exec::{on_path, throttle_command_for};
-use crate::pre_push::heavy_tool::BUILD_LIMIT;
+use crate::heavy_tool::{BUILD_LIMIT, throttle_command_for};
+use crate::throttle::on_path;
 use crate::tool_cache::Held;
 use clap::Args;
 use paddock_cli::{CliError, Report};

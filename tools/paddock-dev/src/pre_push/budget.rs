@@ -1,5 +1,5 @@
-//! The push gate's timing vocabulary. A row's run time is its own and is bounded by its own cap ([`super::exec::ROW_CAP`]); the time
-//! it waits for the machine-wide heavy slot is never run time and has its own bound, the queue's progress ([`super::exec::QUEUE_STALL`]).
+//! The push gate's timing vocabulary. A row's run time is its own and is bounded by its own cap ([`crate::throttle::ROW_CAP`]); the time
+//! it waits for the machine-wide heavy slot is never run time and has its own bound, the queue's progress ([`crate::throttle::QUEUE_STALL`]).
 //! There is no total budget shared by the rows of a push (2026-11-21, ADR 0102 amendment). Pure: instants and text in, numbers out.
 //!
 //! - [`parse_throttle_timing`]: the `<agent> timing queued Q s, ran R s` line `throttle` prints for every run.
@@ -121,7 +121,7 @@ pub fn with_throttle_flags(
     run_max: Duration,
     hang: Option<Duration>,
 ) -> Vec<String> {
-    let ours = prefix.len() >= 3 && prefix[1] == "run" && prefix.last().is_some_and(|l| l == "--");
+    let ours = crate::throttle::is_ours(prefix);
     if !ours {
         return prefix.to_vec();
     }
@@ -136,31 +136,6 @@ pub fn with_throttle_flags(
     let mut out = prefix[..2].to_vec();
     out.extend(flags);
     out.extend_from_slice(&prefix[2..]);
-    out
-}
-
-/// `prefix` with only the priority lane (`--high`) when `train`: for a caller that sets no limits of its own (`./dev gen check`). Anything
-/// that is not our `throttle run <agent> --` is returned unchanged.
-pub fn with_priority(prefix: &[String], train: bool) -> Vec<String> {
-    let ours = prefix.len() >= 3 && prefix[1] == "run" && prefix.last().is_some_and(|l| l == "--");
-    if !ours || !train {
-        return prefix.to_vec();
-    }
-    let mut out = prefix[..2].to_vec();
-    out.push("--high".into());
-    out.extend_from_slice(&prefix[2..]);
-    out
-}
-
-/// `prefix` (our `throttle run <agent> --`) with `name` as the agent: a step's own name, so its lines in a log are told from any other
-/// step's (`<name> holds the lock (pid`). Anything else (not our `throttle`) is returned unchanged.
-pub fn with_agent_name(prefix: &[String], name: &str) -> Vec<String> {
-    let ours = prefix.len() >= 3 && prefix[1] == "run" && prefix.last().is_some_and(|l| l == "--");
-    let mut out = prefix.to_vec();
-    if ours {
-        let at = out.len() - 2;
-        out[at] = name.to_string();
-    }
     out
 }
 
@@ -215,28 +190,6 @@ mod tests {
             "an ordinary push waits its turn"
         );
         assert!(!takes_priority_lane(Normal, &[]));
-    }
-
-    #[test]
-    fn train_work_takes_the_priority_lane_in_our_throttle_only() {
-        let ours: Vec<String> = ["throttle", "run", "pre-push", "--"].map(String::from).to_vec();
-        assert_eq!(with_priority(&ours, true).join(" "), "throttle run --high pre-push --");
-        assert_eq!(with_priority(&ours, false), ours, "normal work is unchanged");
-        let other = vec!["heavy.sh".to_string()];
-        assert_eq!(with_priority(&other, true), other, "someone else's wrapper has no such flag");
-    }
-
-    #[test]
-    fn a_step_gets_its_own_agent_name_in_our_heavy_only() {
-        let ours: Vec<String> = ["throttle", "run", "--high", "--queue-stall", "1", "pre-push", "--"]
-            .map(String::from)
-            .to_vec();
-        assert_eq!(
-            with_agent_name(&ours, "pre-push-7-1").join(" "),
-            "throttle run --high --queue-stall 1 pre-push-7-1 --"
-        );
-        let other = vec!["heavy.sh".to_string()];
-        assert_eq!(with_agent_name(&other, "x"), other);
     }
 
     #[test]

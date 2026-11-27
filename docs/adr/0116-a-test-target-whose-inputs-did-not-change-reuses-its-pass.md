@@ -439,6 +439,15 @@ crate that depends on it (`blind through <dependency>`). On macOS-ARM64 that lef
    git, a tool on `PATH`) are outside the repository and in no key, as before. A deleted declared file does not reach its crate in a
    plan (the base tree is not read for declarations); the key moves, so the cache is not affected.
 
+6. **Blind by root (decision 122, follow-up).** Judging every `fs` read made a loader that takes a path parameter blind, and with it
+   its dependents. A read is now judged by where its path **starts**: a literal or resolved `CARGO_MANIFEST_DIR` chain is resolved
+   to its files; a folder the test made and the crate's own working folder (`"."` or a relative literal: cargo and nextest start tests in
+   the crate folder, which is in the key) are safe; a path handed in as a parameter defers to the caller, which is classified where
+   it builds the path. These roots are blind: an environment variable turned into a path (`PathBuf::from(env::var(..))`,
+   `var_os(..).map(PathBuf::from)`), `current_exe`, `current_dir`, `home_dir`, `.ancestors()`, `.pop()` as a boolean (an upward walk) and
+   a `..` literal that reaches the repository root or leaves it. Limit: an environment value bound to a name and turned into a path
+   elsewhere is not followed; a crate whose tests do that declares what they read (§1).
+
 ## Consequences
 
 - A change to shared CI configuration, docs or another app no longer reruns an app's unchanged tests; a change to a shared crate reruns
