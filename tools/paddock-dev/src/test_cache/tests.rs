@@ -685,6 +685,43 @@ fn a_matched_target_that_ran_and_failed_is_a_soundness_finding_and_a_missing_one
 }
 
 #[test]
+fn a_filtered_local_run_reports_matched_targets_it_never_ran_as_not_seen_never_as_findings() {
+    // Train x's member gate: `test-cache run --filter 'package(=a)'` over a workspace whose other targets b and c matched local records.
+    // Only a ran; b was outside the filter (not seen) and must not be a finding. d ran and failed without a record: not stored.
+    let (a, b, c, d) = (cand("a", "h"), cand("b", "h"), cand("c", "h"), cand("d", "h"));
+    let log = [
+        "    Starting 2 tests across 2 binaries",
+        "        PASS [   0.010s] ( 1/2) a t::ok",
+        "        FAIL [   0.010s] ( 2/2) d t::broken",
+        "     Summary [   0.050s] 2 tests run: 1 passed, 1 failed, 0 skipped",
+        "        FAIL [   0.010s] ( 2/2) d t::broken",
+    ]
+    .join("\n");
+    let judged = judge(&log, &names(&["a", "b", "c", "d"]));
+    let out = super::run_outcome(&[&a, &b, &c, &d], &[&a, &b, &c], &judged);
+    assert_eq!(
+        out.shadow,
+        shadow_outcome(&[&a, &b, &c], &judged),
+        "one rule for the local run and the CI record step"
+    );
+    assert!(
+        out.shadow.findings.is_empty(),
+        "a target outside the filter is not a finding: {:?}",
+        out.shadow.findings
+    );
+    assert_eq!((out.shadow.matched, out.shadow.passed), (1, 1));
+    assert_eq!(out.not_seen, 2, "b and c are not seen");
+    assert_eq!(out.not_stored.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), vec!["rust:d"]);
+    // The nightly invalidates only what ran and failed: d, never b or c (not seen) or a (passed).
+    assert!(out.ran_and_failed("rust:d"));
+    assert!(!out.ran_and_failed("rust:a") && !out.ran_and_failed("rust:b") && !out.ran_and_failed("rust:c"));
+    // A matched target that ran and failed is still the finding.
+    let red = super::run_outcome(&[&a, &d], &[&a, &d], &judged);
+    assert_eq!(red.shadow.findings, vec!["rust:d".to_string()]);
+    assert!(red.not_stored.is_empty() && red.not_seen == 0 && red.ran_and_failed("rust:d"));
+}
+
+#[test]
 fn the_shadow_lines_of_several_jobs_sum_and_no_line_is_not_measured() {
     let logs = vec![
         "2026-11-26T00:00:00Z test-cache shadow: matched 3, passed 3, findings 0".to_string(),
