@@ -2179,7 +2179,7 @@ fn forge(w: &World, f: Forged) -> String {
         if let Some(x) = m.extra {
             put(x);
         }
-        let msg = real::merge_message(m.branch, &m.msg_head);
+        let msg = real::merge_message(m.branch, m.msg_head);
         git(a, &["commit", "--quiet", "-m", &msg]);
     }
     let mut body = format!("Queue-Prs: {}\nQueue-Round: 1", f.prs);
