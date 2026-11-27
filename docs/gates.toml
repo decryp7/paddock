@@ -1235,3 +1235,4 @@ reason = "ER-41: report-only until the back-edges are gone (the test-split ADR's
 owner = "ER-21 class: paddock-dev's modules form one reference cycle (45 of 66 modules, 90% of the lines), so no crate split or per-area test unit is possible"
 since = 2026-11-27
 review_by = 2026-12-11
+approved = "user"
