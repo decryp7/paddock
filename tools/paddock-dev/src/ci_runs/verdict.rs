@@ -409,6 +409,9 @@ fn declared_scope_of_trial(client: &mut Client, run: &RunInfo) -> Trial {
         Some(Err(e)) => return not_measured(e),
         None => return not_measured(format!("its plan job logged no \"{SCOPE_LINE}\" line")),
     };
+    if d.expected.is_empty() {
+        return not_measured("its scope line expects no job, so nothing was measured".into());
+    }
     let pairs: Vec<(String, JobOutcome)> = jobs.iter().map(|j| (j.name.clone(), j.outcome.clone())).collect();
     match run_scope::check_ran(&d, &pairs) {
         Ok(()) => Trial::Green { run: run.id },
@@ -1942,6 +1945,15 @@ mod tests {
         assert_eq!(green(run_scope::TEST_PARTIAL, "success"), Trial::Green { run: 9 });
         // The narrowed run with an expected job skipped: red.
         assert!(matches!(green(run_scope::TEST_PARTIAL, "skipped"), Trial::Red { run: 9, .. }));
+        // A scope line expecting no job: nothing was measured, never a pass (ER-33).
+        let empty = run_scope::TEST_PARTIAL.replace(
+            "{\"conformance (checks, release scripts)\":{\"job\":\"conformance\",\"leg\":{},\"projects\":[\"conformance\"]}}",
+            "{}",
+        );
+        // Nothing ran either, so `check_ran` alone would pass it.
+        let empty = empty.replacen("\"ran\":{\"jobs\":[\"conformance\"]", "\"ran\":{\"jobs\":[]", 1);
+        assert_ne!(empty, run_scope::TEST_PARTIAL);
+        assert!(matches!(green(&empty, "success"), Trial::NotMeasured(_)));
         // A plan job with no readable scope line: not measured.
         assert!(matches!(green("plan verdict: complete=true\n", "success"), Trial::NotMeasured(_)));
     }
