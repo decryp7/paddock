@@ -228,3 +228,40 @@ fn an_fs_read_of_a_literal_or_a_resolved_chain_is_not_blind_the_negative_control
         assert!(blind(src).is_empty(), "{src}: {:?}", blind(src));
     }
 }
+
+/// A path whose root is a folder the test made holds only what the test wrote: its reads are not repository reads. The constructors are
+/// the tempfile ones (`tempdir`, `tempdir_in`, `TempDir::new*`, `NamedTempFile::new*`, `Builder::..tempdir()`) and the testkit's
+/// (`private_tempdir`, `canonical_tempdir`, `PrivateTemp::new*`, `Scratch::new`/`try_new*`), followed through let-bindings, `.path()`,
+/// `.work()`, `.home()`, `.tmp()` and `.join(..)`.
+#[test]
+fn a_read_of_a_path_rooted_in_a_folder_the_test_made_is_not_blind() {
+    for src in [
+        "fn t() { let d = tempfile::tempdir().unwrap(); let p = d.path().join(\"a\"); std::fs::write(&p, \"x\").unwrap(); let _ = std::fs::read_to_string(&p); }",
+        "fn t() { let d = paddock_testkit::private_tempdir().unwrap(); assert!(d.path().join(\"s\").is_dir()); let _ = std::fs::read_dir(d.path()); }",
+        "fn t() { let s = Scratch::new(); let f = s.work().join(\"f\"); let _ = std::fs::read(f); }",
+        "fn t() { let d = tempfile::TempDir::new().unwrap(); let r = d.path().to_path_buf(); let _ = std::fs::File::open(r.join(\"x\")); }",
+        "fn t() { let d = tempfile::Builder::new().prefix(\"p\").tempdir().unwrap(); let _ = d.path().join(\"x\").exists(); }",
+        "fn t() { let d = canonical_tempdir(); let p = d.path().join(\"a\").join(\"b\"); let _ = std::fs::metadata(&p); }",
+        "fn t() { let d = tempdir(); let again = d.path().join(\"a\"); let q = again.join(\"b\"); let _ = std::fs::read(q); }",
+    ] {
+        assert!(blind(src).is_empty(), "{src}: {:?}", blind(src));
+    }
+}
+
+/// The controls: a temp folder handed through a parameter, a walk out of the folder, a name rebound to something else, and a repository
+/// file copied into the folder (the copy's source is its own site) are blind.
+#[test]
+fn a_temp_folder_through_a_parameter_a_walk_out_a_rebinding_or_a_copy_source_is_blind() {
+    for src in [
+        "fn read(dir: &std::path::Path) { let _ = std::fs::read(dir.join(\"a\")); }",
+        "fn t() { let d = tempfile::tempdir().unwrap(); let _ = std::fs::read(d.path().join(\"../x\")); }",
+        "fn t(other: &std::path::Path) { let d = tempfile::tempdir().unwrap(); let d = other.join(\"x\"); let _ = std::fs::read(d); }",
+        "fn t(repo: &std::path::Path) { let d = tempfile::tempdir().unwrap(); std::fs::copy(repo.join(\"f\"), d.path().join(\"f\")).unwrap(); }",
+        "fn t() { let d = tempfile::tempdir().unwrap(); let _ = std::fs::read(d.path().join(\"/etc/passwd\")); }",
+    ] {
+        assert!(!blind(src).is_empty(), "{src}");
+    }
+    // The same copy from a resolved manifest chain is not blind, and its source is a read of the repository.
+    let ok = "fn t() { let d = tempfile::tempdir().unwrap(); std::fs::copy(std::path::Path::new(env!(\"CARGO_MANIFEST_DIR\")).join(\"tests/f\"), d.path().join(\"f\")).unwrap(); }";
+    assert!(blind(ok).is_empty(), "{:?}", blind(ok));
+}
