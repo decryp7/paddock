@@ -155,6 +155,9 @@ pub fn reconcile<T>(
 /// Files git's own rename detection pairs between two trees: old path to new path.
 pub type Renames = HashMap<String, String>;
 
+/// Gives an entry the path its file has now ([`growth_following`]).
+pub type Rekey<'a, T> = dyn Fn(T, &Renames) -> T + 'a;
+
 /// The merge base of HEAD and `base_ref`; on the target branch itself (HEAD is its own merge base) the commit's first parent.
 pub(super) fn merge_base(root: &Path, base_ref: &str) -> Result<String, (String, String)> {
     let head = git(root, &["rev-parse", "HEAD"])?.trim_matches(is_js_space).to_string();
@@ -332,7 +335,7 @@ pub fn growth_following<T: Clone>(
     entries_of: &dyn Fn(&str) -> Option<Vec<T>>,
     exact: &dyn Fn(&T) -> String,
     loose: Option<&dyn Fn(&T) -> String>,
-    rekey: Option<&dyn Fn(T, &Renames) -> T>,
+    rekey: Option<&Rekey<'_, T>>,
 ) -> Growth<T> {
     let base = match merge_base(root, base_ref) {
         Ok(b) => b,
