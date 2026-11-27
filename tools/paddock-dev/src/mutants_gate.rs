@@ -747,7 +747,7 @@ mod tests {
 
     fn measure_with(f: &Fake) -> Summary {
         let scratch = tempfile::tempdir().unwrap();
-        measure(f, Path::new("/repo"), "headsha", "base", scratch.path(), Mode::ReportOnly)
+        measure(f, scratch.path(), "headsha", "base", scratch.path(), Mode::ReportOnly)
     }
 
     #[test]
