@@ -66,26 +66,26 @@ mod tests {
     #[test]
     fn the_state_round_trips_and_a_missing_file_gives_defaults() {
         let d = temp();
-        assert_eq!(AppState::load(d.as_path()), AppState::default());
+        assert_eq!(AppState::load(d.path()), AppState::default());
         let s = AppState {
             service_registered_version: Some("9.9.9".into()),
             ..AppState::default()
         };
-        s.save(&d.as_path().join("sub")).unwrap();
-        assert_eq!(AppState::load(&d.as_path().join("sub")), s);
+        s.save(&d.path().join("sub")).unwrap();
+        assert_eq!(AppState::load(&d.path().join("sub")), s);
     }
 
     #[test]
     fn an_old_file_without_the_new_key_loads_and_a_damaged_or_newer_one_falls_back() {
         let d = temp();
-        let f = d.as_path().join(FILE_NAME);
+        let f = d.path().join(FILE_NAME);
         std::fs::write(&f, r#"{"version":1}"#).unwrap();
-        assert_eq!(AppState::load(d.as_path()).service_registered_version, None);
+        assert_eq!(AppState::load(d.path()).service_registered_version, None);
         std::fs::write(&f, "{ not json").unwrap();
-        assert_eq!(AppState::load(d.as_path()), AppState::default());
+        assert_eq!(AppState::load(d.path()), AppState::default());
         std::fs::write(&f, r#"{"version":99,"serviceRegisteredVersion":"1"}"#).unwrap();
-        assert_eq!(AppState::load(d.as_path()), AppState::default());
+        assert_eq!(AppState::load(d.path()), AppState::default());
         std::fs::write(&f, vec![b' '; 70 * 1024]).unwrap();
-        assert_eq!(AppState::load(d.as_path()), AppState::default());
+        assert_eq!(AppState::load(d.path()), AppState::default());
     }
 }

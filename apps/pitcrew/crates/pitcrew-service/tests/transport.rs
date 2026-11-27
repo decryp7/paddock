@@ -34,7 +34,8 @@ fn connect(_data: &std::path::Path) -> Box<dyn Stream> {
 #[test]
 fn a_client_talks_to_the_running_service() {
     let scratch = paddock_testkit::canonical_tempdir();
-    let data = scratch.join("it-transport");
+    // A short name: the Unix socket of the service lives in this folder (the length limit of a socket path).
+    let data = scratch.join("pt");
     std::fs::create_dir_all(&data).unwrap();
     std::fs::write(data.join("pitcrew.toml"), "schema_version = 1\n").unwrap();
     let host = pitcrew_service::host::Host::start(data.clone(), |e| panic!("the IPC server failed: {e}")).unwrap();
