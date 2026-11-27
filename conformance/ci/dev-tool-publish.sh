@@ -57,7 +57,7 @@ trap 'rm -rf "$work"' EXIT
 phase "built"
 
 bin="$work/target/release/paddock-dev$exe"
-"$bin" self hash 2>/dev/null | grep -q "^embedded $hash\$" || err "the built tool does not report 'embedded $hash'; the build ignored PADDOCK_DEV_HASH."
+selfhash=$("$bin" self hash 2>/dev/null || true); grep -q "^embedded $hash\$" <<<"$selfhash" || err "the built tool does not report 'embedded $hash'; the build ignored PADDOCK_DEV_HASH."
 "$bin" --version >/dev/null || err "the built tool does not run."
 cp "$bin" "$work/$name"
 if command -v sha256sum >/dev/null 2>&1; then sum=$(sha256sum "$work/$name" | awk '{print $1}'); else sum=$(shasum -a 256 "$work/$name" | awk '{print $1}'); fi

@@ -37,8 +37,8 @@ echo "Building (a first build takes a few minutes)..."
 (cd app && CI=true npx tauri build --bundles app,dmg -- --profile dist)
 
 target="${CARGO_TARGET_DIR:-$root/target}"
-app=$(find "$target/dist/bundle/macos" -maxdepth 1 -name 'Pitcrew.app' 2>/dev/null | head -1)
-dmg=$(find "$target/dist/bundle/dmg" -maxdepth 1 -name '*.dmg' 2>/dev/null | head -1)
+app=$(find "$target/dist/bundle/macos" -maxdepth 1 -name 'Pitcrew.app' 2>/dev/null); app=${app%%$'\n'*}
+dmg=$(find "$target/dist/bundle/dmg" -maxdepth 1 -name '*.dmg' 2>/dev/null); dmg=${dmg%%$'\n'*}
 echo
 echo "Built:"
 echo "  app: ${app:-not found}"

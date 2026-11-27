@@ -26,7 +26,7 @@ tool() {
   if ! command -v "$1" >/dev/null 2>&1; then bad "$label is missing"; return 1; fi
   local full
   if ! full=$("$@" 2>&1); then bad "$label is missing or broken ($*)"; return 1; fi
-  OUT=$(printf '%s\n' "$full" | head -1)
+  OUT=${full%%$'\n'*}
   note "$label: ${OUT:-present}"
 }
 
@@ -71,7 +71,7 @@ fi
 
 pw=${PLAYWRIGHT_BROWSERS_PATH:-/ms-playwright}
 for b in chromium webkit; do
-  if ls -d "$pw/$b"-* >/dev/null 2>&1; then note "playwright $b: $(ls -d "$pw/$b"-* | head -1)"; else bad "Playwright $b is missing in $pw"; fi
+  if ls -d "$pw/$b"-* >/dev/null 2>&1; then note "playwright $b: $(ls -d "$pw/$b"-* | sed -n 1p)"; else bad "Playwright $b is missing in $pw"; fi
 done
 [ -z "${EXPECT_PLAYWRIGHT:-}" ] || note "playwright pinned: $EXPECT_PLAYWRIGHT"
 
@@ -80,7 +80,7 @@ if [ -n "${EXPECT_CHROME:-}" ]; then
   if [ -z "$chrome" ] || [ ! -x "$chrome" ]; then
     bad "Chrome for Testing is missing (CHROMIUM_TEST_PATH='$chrome')"
   else
-    cv=$("$chrome" --version 2>&1 | head -1)
+    cv=$("$chrome" --version 2>&1); cv=${cv%%$'\n'*}
     case "$cv" in *"$EXPECT_CHROME"*) note "chrome for testing: $cv" ;; *) bad "Chrome for Testing is '$cv', the image pins $EXPECT_CHROME" ;; esac
   fi
 fi
