@@ -1259,6 +1259,7 @@ fn guarded_child_with_a_helper(
     let _acting = ActAsUser::here();
     let mut cmd = crate::testchild::child(crate::testchild::Mode::Leave);
     cmd.stdout(Stdio::piped());
+    let spawned = crate::recorded::Stamp::now();
     let mut s = Supervised::spawn(cmd).unwrap();
     let child = s.process().unwrap();
     assert!(s.guard.is_some(), "the child is guarded");
@@ -1281,7 +1282,8 @@ fn guarded_child_with_a_helper(
             break pid;
         }
     };
-    let helper = crate::recorded::descendant_of(child, helper_pid)
+    // The child exits at once, so its helper is no longer below it: the helper's holder must have started after this stamp.
+    let helper = crate::recorded::printed(helper_pid, spawned)
         .running()
         .unwrap_or_else(|| fail(&[child], "the helper has no identity"));
     let exited =
