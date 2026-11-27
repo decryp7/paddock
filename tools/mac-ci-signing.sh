@@ -57,7 +57,7 @@ if [ "$ci_hook" -eq 1 ] && ! ci_job; then exit 0; fi
 keychain="${PADDOCK_CI_SIGNING_KEYCHAIN:-${HOME:-}/Library/Keychains/paddock-ci-signing.keychain-db}"
 pass_file="${PADDOCK_CI_SIGNING_PASS_FILE:-${HOME:-}/.config/paddock/ci-signing.pass}"
 name="${PADDOCK_CI_SIGNING_NAME:-Paddock CI code signing}"
-if [ -n "$leaf" ] && ! printf '%s' "$leaf" | grep -Eq '^[0-9A-Fa-f]{40}$'; then fail "--leaf-sha1 must be 40 hex digits" "" 2; fi
+if [ -n "$leaf" ] && ! grep -Eq '^[0-9A-Fa-f]{40}$' <<<"$leaf"; then fail "--leaf-sha1 must be 40 hex digits" "" 2; fi
 
 # Passwords never reach the output: an argument equal to one is printed as ***.
 secrets=()

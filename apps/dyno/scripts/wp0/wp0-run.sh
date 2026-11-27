@@ -35,7 +35,7 @@ while [ $# -gt 0 ]; do case "$1" in --step) step=$2; shift 2;; --as) as=$2; shif
 [ -f "$VMX" ] || { echo "::error::the pinned VM is missing: $VMX" >&2; exit 2; }
 # Only the pinned VM may be running under this script's control: any other running VM stops it (never touch the user's own).
 running=$("$VMRUN" list | tail -n +2)
-if [ -n "$running" ] && echo "$running" | grep -vqxF "$VMX"; then echo "::error::another VM is running ($running); stop it yourself, this script never touches it" >&2; exit 2; fi
+if [ -n "$running" ] && grep -vqxF "$VMX" <<<"$running"; then echo "::error::another VM is running ($running); stop it yourself, this script never touches it" >&2; exit 2; fi
 key="$PINNED/keys/$as"; [ -f "$key" ] || { echo "::error::no key $key" >&2; exit 2; }
 admin_key="$PINNED/keys/paddock-admin"
 
@@ -83,12 +83,12 @@ if [ "$step" = tasks-register ]; then
   known='\Microsoft\Windows\Defrag\ScheduledDefrag'
   S "$admin_key" paddock-admin "schtasks /query /tn $known" >"$OUT/$step/cleanup-control.txt" 2>&1 || { echo "::error::check broken: schtasks /query as paddock-admin cannot see the known task $known, so a clean result would mean nothing. Next: pick another known task or fix the admin key." >&2; exit 1; }
   S "$admin_key" paddock-admin 'schtasks /query /fo csv' >"$OUT/$step/cleanup-all.txt" 2>&1
-  if grep -q 'DynoTest-' "$OUT/$step/cleanup-all.txt"; then echo "::error::a DynoTest- task is left in the guest: $(grep -o 'DynoTest-[^\",]*' "$OUT/$step/cleanup-all.txt" | head -3 | tr '\n' ' '). Next: delete it with schtasks /delete as paddock-admin, or let the snapshot revert remove it." >&2; exit 1; fi
+  if grep -q 'DynoTest-' "$OUT/$step/cleanup-all.txt"; then echo "::error::a DynoTest- task is left in the guest: $(grep -o 'DynoTest-[^\",]*' "$OUT/$step/cleanup-all.txt" | sed -n 1,3p | tr '\n' ' '). Next: delete it with schtasks /delete as paddock-admin, or let the snapshot revert remove it." >&2; exit 1; fi
   # schtasks lists tasks, not empty folders: list the folders too (a \DynoTest-<uuid> folder outlives its deleted task).
   scp -i "$admin_key" "${opts[@]}" "$here/wp0-collect.ps1" "paddock-admin@$host:wp0-collect.ps1"
   S "$admin_key" paddock-admin "$P -Step tasks-folders" >"$OUT/$step/cleanup-folders.txt" 2>&1
   grep -q '^CONTROL ok' "$OUT/$step/cleanup-folders.txt" || { echo "::error::check broken: the folder listing as paddock-admin did not print an ok control. Next: read $OUT/$step/cleanup-folders.txt." >&2; exit 1; }
-  if grep -q 'DynoTest-' "$OUT/$step/cleanup-folders.txt"; then echo "::error::a DynoTest- task folder is left in the guest: $(grep -o 'DynoTest-[^ |]*' "$OUT/$step/cleanup-folders.txt" | head -3 | tr '\n' ' '). Next: remove it as paddock-admin (Schedule.Service DeleteFolder), or let the snapshot revert do it." >&2; exit 1; fi
+  if grep -q 'DynoTest-' "$OUT/$step/cleanup-folders.txt"; then echo "::error::a DynoTest- task folder is left in the guest: $(grep -o 'DynoTest-[^ |]*' "$OUT/$step/cleanup-folders.txt" | sed -n 1,3p | tr '\n' ' '). Next: remove it as paddock-admin (Schedule.Service DeleteFolder), or let the snapshot revert do it." >&2; exit 1; fi
   echo "CLEANUP ok: the known task was listed and no DynoTest- task or task folder remains"
 fi
 echo "WP-0 $step done: $OUT/$step"

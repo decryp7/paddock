@@ -848,8 +848,8 @@ jobs:
           # The image from v3 on has it (system packages belong to the image, not to a job). Until then: the same pinned package, checked
           # by SHA-256 (the Dockerfile's ARGs are the one source) and unpacked beside the job, not installed; its libraries are the image's.
           if command -v drawio >/dev/null 2>&1; then exit 0; fi
-          v=$(sed -n 's/^ARG DRAWIO_VERSION=//p' ci-image/Dockerfile | head -n 1)
-          sum=$(sed -n 's/^ARG DRAWIO_SHA256_AMD64=//p' ci-image/Dockerfile | head -n 1)
+          v=$(sed -n 's/^ARG DRAWIO_VERSION=//p' ci-image/Dockerfile); v=${v%%$'\n'*}
+          sum=$(sed -n 's/^ARG DRAWIO_SHA256_AMD64=//p' ci-image/Dockerfile); sum=${sum%%$'\n'*}
           echo "::notice::the CI image has no draw.io yet (it comes with the next image rebuild, ci-image/README.md); unpacking the pinned $v"
           bash ci-image/fetch-verified.sh "https://github.com/jgraph/drawio-desktop/releases/download/v${v}/drawio-amd64-${v}.deb" "$sum" "$RUNNER_TEMP/drawio.deb" \
             || { echo "::error::could not fetch the pinned draw.io $v (see the line above). Fix: re-run, or check the release still exists and the SHA-256 in ci-image/Dockerfile."; exit 1; }
@@ -1498,7 +1498,7 @@ jobs:
             # A here-string, not a pipe into `grep -q` (which stops at its first match and, under `pipefail`, can turn the writer's SIGPIPE into a
             # failure); on a miss the first lines of the graph are printed, so a broken probe says what it saw (ER-27).
             grep '^paddock-proc ' <<<"$tree" >/dev/null || {
-              echo "$tree" | head -n 5 >&2 || true
+              sed -n '1,5p' <<<"$tree" >&2
               echo "::error::check broken: the dependency graph of tools/$tool has no paddock-proc, so a GTK crate there would not be seen."
               rc=1; continue; }
             hits=$(echo "$tree" | grep -E '^(gtk|gdk|gio|glib|gobject|pango|cairo|atk|gdk-pixbuf|soup|webkit2gtk|javascriptcore-rs)[a-z0-9-]*-(sys|sys-rs) ' | sort -u || true)

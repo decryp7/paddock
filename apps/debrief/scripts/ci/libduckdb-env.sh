@@ -14,7 +14,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 cd "$here/../.."
 fetch=${DEBRIEF_FETCH_LIBDUCKDB:-crates/debrief-store-duck/scripts/fetch-libduckdb.sh}
 isolation=${DEBRIEF_JOB_ISOLATION:-../../conformance/ci/job-isolation.sh}  # Paddock's job isolation (kept folders of the job slot)
-want=$(sed -n 's/^VERSION=//p' "$fetch" | head -n 1)
+want=$(sed -n 's/^VERSION=//p' "$fetch"); want=${want%%$'\n'*}
 [ -n "$want" ] || { echo "::error::no VERSION= line in $fetch"; exit 1; }
 out=${GITHUB_ENV:?GITHUB_ENV is not set}
 # The loader paths as the job has them: fetch-libduckdb.sh's exports prepend to them too, and are not what is written.
@@ -29,7 +29,8 @@ header_version() {
   elif [ -f "$dir/duckdb.h" ]; then h="$dir/duckdb.h" prefix=DUCKDB_API_VERSION
   else return 0; fi
   for part in MAJOR MINOR PATCH; do
-    v="$v${v:+.}$(sed -n "s/^#define ${prefix}_$part \([0-9][0-9]*\).*/\1/p" "$h" | head -n 1)"
+    n=$(sed -n "s/^#define ${prefix}_$part \([0-9][0-9]*\).*/\1/p" "$h")
+    v="$v${v:+.}${n%%$'\n'*}"
   done
   echo "$v"
 }
