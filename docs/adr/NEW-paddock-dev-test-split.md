@@ -1,8 +1,10 @@
 # NEW-paddock-dev-test-split. paddock-dev's tests are split by what they read, and the crate is layered before it is split by area
 
-- Status: **Proposed** 2026-11-27, for the user's decisions D1 to D3 below. Written for user decision 107 (2026-11-27: split
-  tools/paddock-dev's tests into units the ADR 0116 test cache can skip). The number is assigned when it lands (AGENTS.md, the
-  `NEW-` rule).
+- Status: **Accepted** 2026-11-27 by the user, relayed by the coordinator: D1 = (d) and (e) now, (a) the crate split deferred until
+  after train y's measurements, revisited only if paddock-dev is still the bottleneck; D2 = the whole-repository target is keyed on
+  the HEAD tree id; D3 = the layer check lands report-only (ER-41). Written for user decision 107 (2026-11-27: split tools/paddock-dev's tests into units the ADR 0116 test
+  cache can skip). Revision 2 (this text) records the decisions, the work packages and the cost.
+  The number is assigned when it lands (AGENTS.md, the `NEW-` rule).
 - Date: 2026-11-27
 - Related: ADR [0116](0116-a-test-target-whose-inputs-did-not-change-reuses-its-pass.md) (the test-result cache: one target per Cargo
   package, `test_cache/key.rs` `Target`), ADR [0117](0117-the-repository-graph-is-the-one-model-and-every-plan-is-a-query.md) (the
@@ -124,21 +126,55 @@ In job-minutes: with about 30 train runs and 17 member trial runs a week, (a) wo
 and Windows runners (macOS about 0.35 min a train run and 1.2 min a member run; Windows about 0.25 and 0.5), for 7 to 9 agent-days.
 For comparison, the 4.7-minute `./dev` tool-cache miss of job 52161 alone is larger than any per-run saving above (ADR 0115).
 
-## Decision (proposed)
+## Decision
 
-1. **(d) now.** The whole-repository tests (`graph_`, `tree_`, `live_` names; 72 tests in `tests/it`, 17 in `src`) move to a second
-   integration binary, `tests/whole/main.rs`. The test cache gains a binary-level target (`rust:tools/paddock-dev#whole`, nextest
-   `binary_id(paddock-dev::whole)`), keyed on the HEAD tree id; the package target becomes "the package minus `whole`". The planner's
-   reach for the paddock-dev job does not change. This is what ADR 0116 §2 asks of a key ("the target's source closure through declared
-   edges"), applied to tests that read the whole tree.
-2. **(e) next, report-only.** `docs/paddock-dev-layers.toml` lists the layers (base, host, model, gates, ci, binary), and a test in
-   `tools/paddock-dev/tests/it` reads every `crate::` path with `syn` (already a dependency) and reports each back-edge. It blocks only
-   after its first green run on the real tree. Back-edges are removed in small refactor batches beside feature work.
-3. **(a) only after (e) shows no back-edge, and only if two more weeks of churn show a layer that stays quiet.** Then the split is a
-   mechanical move in one freeze window. (b) is not done: its key is sound only for test-only changes.
+The program is (d), then (e); (a) is deferred (D1). (d) makes the cache's paddock-dev reuse sound; (e) removes the cycle that makes
+any later split, by crate or by module, impossible. Whether (a) is worth its cost is decided after train y's measurements, and only
+if paddock-dev is still the bottleneck then.
+
+1. **(d) The whole-repository tests are their own test-cache target, keyed on the tree (D2).** The target is the tests whose names
+   declare that they read the whole repository: the ADR 0121 classes (`test_cost::Class`, `graph_` and `tree_`) and the `live_` tests
+   that read the real tree. It is defined by **one filterset owned by `src/test_cost.rs`** (ER-22: the class's one definition, beside
+   `Class::filter`), not by a second test binary: 17 of the 89 tests are unit tests in `src/` that use private items, so a binary
+   could not hold them without widening the API, and moving 72 tests between files would conflict with every open paddock-dev branch.
+   nextest selects by filterset (`binary_id`, `test(/../)`), so a filter-defined target is reused and run exactly like a binary.
+   The target id is `rust:tools/paddock-dev#whole`; its key is the ADR 0116 key over the **HEAD tree id** (`git rev-parse
+   HEAD^{tree}`) instead of the node hash, with the same epoch, runner class and profile; the package target becomes "the package
+   minus the whole-repository filter". Residual risk: a test that reads the whole tree under an unprefixed name stays in the package
+   target; ADR 0121's `charge` catches the `cargo metadata` case at run time, the tree case only by cost, and the shadow mode and the
+   nightly bypass are the net (ADR 0116 §6).
+2. **(e) The layer check, report-only (D3).** `docs/paddock-dev-layers.toml` lists the layers and their modules; a test in
+   `tools/paddock-dev/tests/it` reads every `crate::` path with `syn` (already a dependency) and reports each reference that points up a
+   layer, with a positive control. It blocks after its first green run on the real tree (ER-41). One in, one out: it replaces no check;
+   its class is the module cycle that blocks any split, and it is deleted if (a) lands, because cargo then refuses a crate cycle itself.
+3. **(a) Deferred: the crate split, by the five layers of the sketch,** if it is revisited after train y and (e) reports no
+   back-edge. The boundaries it would start from:
+
+   | Crate | Modules (from §Measured's sketch) | Lines |
+   |---|---|---|
+   | `paddock-dev-base` | git_env, process_env, child_env, log_text, pathfind, cargo_target, input_hash, test_sleeper, wait_lock, job_outcome, repo_inputs, places, full_tree, nextest_log, test_cost, escape | about 7,200 |
+   | `paddock-dev-host` | ci_host, ci_isolation, ci_setup_rust, ci_s3_guard, ci_tool, ci_build_jobs, ci_build_env, ci_rust_pin, ci_dyno_linux_units, local_sccache, disk, worktree, safe_remove, tool_cache, deps_cache, slots, heavy_cmd, heavy_install, health, wait, load, locks, locks_guard, release_isolation, hook, audit | about 41,900 |
+   | `paddock-dev-model` | plan, plan_ci, plan_cmd, plan_gitea, plan_graph, plan_repo, plan_since, repo_model, gates, check, check_ids, host_tests, os_placement, test_features, generators, ipc_endpoints, run_scope, active_apps, lessons_driver | about 41,500 |
+   | `paddock-dev-gates` | pre_push, ci_run | about 16,100 |
+   | `paddock-dev-ci` | ci_runs, queue, pr, merge_check, test_cache | about 33,500 |
+   | `paddock-dev` (binary) | main, lib dispatch, cli | about 1,100 |
+
+   The boundaries are a starting point: WP-4 may move a module down a layer where that removes back-edges more cheaply than moving
+   items, and the table in `docs/paddock-dev-layers.toml` is then the one source the split follows. Each crate gets its own `tests/`
+   binary (one per crate, matklad's advice); the 30 `tests/it` files that start `./dev` call the crate's library where they test logic
+   and stay in the binary crate where they test the command line. The whole-repository target of (d) stays one target across the crates
+   (the same filterset, every package). (b) is not done.
 
 What this removes: the unsound reuse of the whole-repository tests under the package key (1), and, once (e) blocks, the module cycle
-that makes any finer test selection, by crate or by module, impossible (2). Nothing else is deleted; no register grows.
+(2). If (a) is done later, it removes the layer check (cargo then enforces the crate graph) and the single 140k-line compile unit.
+
+### Interim measures being built (not this ADR's)
+
+- **Decision 113, the interim paddock-dev reuse exclusion** (being built): until WP-1 and WP-2 land, the paddock-dev package is not
+  reused by the test cache. It is removed when WP-2's target is live, as the last step of WP-2.
+- **Decision 114, the OS scoping** (being built): which paddock-dev tests run on macOS and Windows (ER-52). It is independent of the
+  split; if WP-5 is done, each crate's OS-scoped entries move with its modules (the `hostTests` names in `paddock.ci.json` are module paths,
+  so they change with the move).
 
 ### Interaction with the Linux partitions and the job model
 
@@ -149,27 +185,26 @@ that makes any finer test selection, by crate or by module, impossible (2). Noth
 - **Job model (ADR 0123).** (d) and (e) change no job, leg or name. (a) adds packages to the paddock-dev workspace and leaves the job
   layout alone; if it is done, the legs keep running the workspace and the cache leaves packages out, so the model needs no new field.
 
-## Decisions for the user
+## Decisions (taken 2026-11-27)
 
-- **D1.** Is the area split of decision 107 changed into (d) plus (e), with (a) deferred until (e) is green and churn data support it
-  (recommended), or is (a) done now (7 to 9 agent-days, about 6 beyond the recommended path, needs your yes, ER-37)?
-- **D2.** The whole-repository binary's key: the HEAD tree id (recommended: sound, reruns on any change), or never cached (the same in
-  practice, simpler)?
-- **D3.** May the layer check land report-only as a new check (one in, one out: it replaces no existing check; its class is the cycle
-  above, seen as the blocker of this decision)?
+- **D1 = (d) and (e) now; (a) deferred** until after train y's measurements, revisited only if paddock-dev is still the bottleneck
+  (the user). Cost of (d) and (e): 4.5 to 6.5 agent-days (§Work packages); (a) would add 4.5 to 6.
+- **D2 = the HEAD tree id** keys the whole-repository target.
+- **D3 = the layer check lands report-only** and blocks after its first green run.
 
 ## Work packages
 
 | WP | What | Files | Size |
 |---|---|---|---|
-| WP-1 | `tests/whole/main.rs`; move the class tests (names unchanged, so ADR 0121's overrides still match); nextest overrides by `binary_id` where they named `tests/it` paths | `tools/paddock-dev/tests/`, `.config/nextest.toml` | 0.5 d |
-| WP-2 | binary-level target and its key in the test cache, the record step reading it, a positive control (a change outside the package invalidates `whole` and keeps the package target) | `src/test_cache/{key,cmd,plan,mod}.rs` | 0.5 to 1 d |
-| WP-3 | layer table, the report-only check, its positive control | `docs/paddock-dev-layers.toml`, `tests/it/layers.rs` | 1 d |
-| WP-4 | back-edge batches (about 65 items), each a refactor branch | `src/` | 1 to 2 d, spread |
-| WP-5 (deferred, D1) | the crate split: workspace members, `inputs.txt`, `build.rs`, path references, test moves | the paddock-dev workspace and 85 referencing files | 5 to 7 d, in a freeze window |
+| WP-1 (d) | the whole-repository filterset in `test_cost` (graph, tree and live prefixes) with tests, failing first; the target `rust:tools/paddock-dev#whole` and the HEAD-tree key in `test_cache::key` | `src/test_cost.rs`, `src/test_cache/key.rs` | 0.5 d |
+| WP-2 (d) | lookup, plan and record use the two targets (the package filterset becomes `package(=p) & not whole`); a positive control (a change outside the package invalidates `whole` and keeps the package target, a change inside invalidates both); removes decision 113's exclusion | `src/test_cache/{cmd,plan,mod}.rs`, ci.yml's paddock-dev record step if its arguments change | 1 to 1.5 d |
+| WP-3 (e) | the layer table, the report-only check and its positive control | `docs/paddock-dev-layers.toml`, `tests/it/layers.rs` | 1 d |
+| WP-4 (e) | the about 65 back-edges removed in batches (one refactor branch each, ER-56), until the check reports none; then it blocks | `src/` | 2 to 3 d, spread |
+| WP-5 (a), deferred | the crate split in one freeze window of tools/paddock-dev: workspace members, `inputs.txt` and `build.rs`, the dev-tool cache inputs, the 321 path references in 85 files (registers, conformance, gates.toml globs, `hostTests`), test moves, per-crate nextest configuration, the Linux partitions by test; the layer check deleted | the paddock-dev workspace and the referencing files | 4.5 to 6 d |
 
-Order: WP-1 and WP-2 together (one branch: the binary and its key must land as one), then WP-3, then WP-4. WP-1 to WP-3 can run while
-the Linux partitions land; WP-2 rebases on them if they touch `test_cache/plan.rs`.
+**Total of WP-1 to WP-4: 4.5 to 6.5 agent-days** (with WP-5, 9 to 12). Order: WP-1 and WP-2 (WP-1 can land alone: it adds a definition
+and a key nothing uses yet), then WP-3, then WP-4 batches beside feature work. WP-5, if revisited after train y, runs in a window agreed
+with the train integrator (no other paddock-dev member in that train). WP-1 to WP-3 can run while the Linux partitions land; WP-2 rebases on them if they touch `test_cache/plan.rs`.
 
 ## Not checked
 
