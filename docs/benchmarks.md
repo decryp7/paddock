@@ -3213,7 +3213,7 @@ gate (the stand-in test exercises the reading of exit 81; `throttle`'s own tests
 ## paddock-dev host legs: OS-independent areas leave Windows and macOS (expected saving, 2026-11-27, ci/paddock-dev-os-scope)
 
 Expected, not measured: nothing was run on a host. **Source:** the per-area test seconds of run 9212 (jobs 52148 macOS, 52162 Windows) in the
-block "paddock-dev test time by area" of docs/benchmarks.md on branch docs/paddock-dev-test-split (ADR NEW-paddock-dev-test-split). Decision 114
+block "paddock-dev test time by area" of docs/benchmarks.md on branch docs/paddock-dev-test-split (ADR [0125](adr/0125-paddock-devs-tests-always-run-and-the-crate-is-layered-before-any-split-by-area.md)). Decision 114
 (user, 2026-11-27): the host legs run only OS-specific tests, so `tools/paddock-dev/paddock.ci.json` skips `merge_check::` (except `merge_check::git::`),
 `ci_runs::` (except `dispatch_guards::`; `reservation::` stays macOS only), `ci_run::`, the planner's model and readers and `repo_model::hash::` and
 `replay::` from both hosts. **Windows:** merge_check 545 s and ci_runs plus ci_run 228 s of 1,191 s summed per-test seconds (65%) leave; the kept
@@ -3237,4 +3237,4 @@ macOS pre_push 154 s, merge_check 88 s, ci_runs and ci_run 86 s, it/wrapper 82 s
 references; about 65 items cross a five-layer sketch upwards. **Churn:** 20 of 20 trains in two weeks changed tools/paddock-dev; the 15
 trains of 2026-11-26/27 touched 16 areas on average, and 11 of 15 changed a layer every area uses. **Replay** (share of today's test seconds
 each option would have run; whole-repository classes keyed on the whole tree): trains 93 to 98% for every option, members 55 to 78% against
-82% today. Limits: the layering is a sketch; per-test seconds sum the threads. Quoted by ADR NEW-paddock-dev-test-split.
+82% today. Limits: the layering is a sketch; per-test seconds sum the threads. Quoted by ADR [0125](adr/0125-paddock-devs-tests-always-run-and-the-crate-is-layered-before-any-split-by-area.md).

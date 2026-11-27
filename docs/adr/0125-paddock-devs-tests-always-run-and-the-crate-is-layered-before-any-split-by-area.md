@@ -1,4 +1,4 @@
-# NEW-paddock-dev-test-split. paddock-dev's tests always run, and the crate is layered before any split by area
+# 0125. paddock-dev's tests always run, and the crate is layered before any split by area
 
 - Status: **Accepted** 2026-11-27 by the user, relayed by the coordinator (revision 3, after the independent review): **D1 = paddock-dev
   stays excluded from test-cache reuse permanently** (decision 113's exclusion stays: its tests always run; the Linux partitions and the
@@ -7,7 +7,7 @@
   measurements, revisited only if paddock-dev is still the bottleneck. D2 (the tree key of (d)) falls with (d); D3 holds: the layer
   check lands report-only (ER-41). Written for user decision 107 (2026-11-27: split tools/paddock-dev's tests into units the ADR 0116
   test cache can skip). Revision 1 recommended (d) and (e); revision 2 recorded them as accepted; revision 3 (this text) records the
-  review and the simplification. The number is assigned when it lands (AGENTS.md, the `NEW-` rule).
+  review and the simplification. It took number 0125 as train 2026-11-27-y landed (the `NEW-` rule of AGENTS.md).
 - Date: 2026-11-27
 - Related: ADR [0116](0116-a-test-target-whose-inputs-did-not-change-reuses-its-pass.md) (the test-result cache: one target per Cargo
   package, `test_cache/key.rs` `Target`), ADR [0117](0117-the-repository-graph-is-the-one-model-and-every-plan-is-a-query.md) (the
