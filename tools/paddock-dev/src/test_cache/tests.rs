@@ -245,6 +245,35 @@ impl Store for Down {
     }
 }
 
+/// Run 9265, the Windows crate leg: the lookup failed, so all 50 records were "held back" and the step printed no cause. The cause is a
+/// line of its own (ER-27), and nothing is written on an answer that is not definite.
+#[test]
+fn a_failed_lookup_in_the_record_step_is_named_and_writes_nothing() {
+    let class = RunnerClass::here();
+    let meta = RunMeta {
+        run: "9265".into(),
+        job: "crate (windows-latest)".into(),
+        attempt: 1,
+        git_ref: "refs/heads/train/z".into(),
+        commit: "c0ffee".into(),
+        at: NOW,
+        os_build: String::new(),
+    };
+    let log = [
+        "    Starting 1 test across 1 binaries",
+        "        PASS [   0.010s] ( 1/1) a t::ok",
+        "     Summary [   0.050s] 1 test run: 1 passed, 0 failed, 0 skipped",
+    ]
+    .join("\n");
+    let (lines, stored) = super::cmd::record_with(&log, &[cand("crates/a", "h")], &cfg(), &class, "", &meta, &Down, OK);
+    assert_eq!(stored, 0);
+    let all = lines.join("\n");
+    assert!(
+        all.contains("::warning::test-cache: the lookup failed") && all.contains("connection refused"),
+        "{all}"
+    );
+}
+
 fn scratch() -> (tempfile::TempDir, FsStore) {
     let d = tempfile::tempdir().unwrap();
     let s = FsStore::new(&d.path().join("tc"));

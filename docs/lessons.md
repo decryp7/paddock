@@ -4509,3 +4509,12 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   the files' current paths, so a rewritten entry is not growth. C135 and C104 pass a `rekey`; C53's liveness baseline already followed a move by hash
   (`moved`, not growth). C171 reads `git diff -M`, and its waiver may sit above the statement that holds the literal. A moved file's changed content is
   judged as usual: a new offending line still fails, and a new entry is still growth.
+
+## A curl config reads backslashes in quotes as escapes (2026-11-27, fix/test-cache-windows-records, run 9265)
+- **What happened.** The Windows crate leg recorded 0 of 61 packages in a green train run: its store lookup failed (no `test-cache shadow:` line, which
+  every other leg printed), so every record counted as "no definite answer" and was held back. The record step wrote the scratch paths
+  (`D:\a\_temp\...`) into the curl config in double quotes; curl reads `\\ \" \t \n \r \v` there as escapes and drops a backslash before any other
+  letter (curl `-K` format), so it wrote the answers to other files and the call failed. Linux and macOS paths have no backslash, and
+  paddock-dev (never cached) asks no lookup, so nothing had shown it. The failed lookup printed no cause.
+- **Fix.** `s3::quoted` escapes every value written into the config (URL, keys, paths); a test shows the config of a Windows path and a real curl run
+  proves the escape on a name with `\t\r`; the record step prints a `::warning::` line with the cause when its lookup fails (ER-27, ER-44).

@@ -25,6 +25,13 @@ pub const REQUEST_SECS: u64 = 5;
 /// The budget of one call (the whole lookup).
 pub const CALL_SECS: u64 = 60;
 
+/// A value inside double quotes of a curl config. curl reads `\\`, `\"`, `\t`, `\n`, `\r` and `\v` there as escapes and drops a backslash before any
+/// other letter ("curl -K", the config file format), so a Windows path (`C:\Users\runner\_temp`) must have its backslashes doubled or curl
+/// opens another file (run 9265: the Windows leg's lookup failed and nothing was recorded). Keys and URLs go through it too.
+fn quoted(v: &str) -> String {
+    v.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 /// One transfer: URL, file the answer goes to, file to upload, method.
 type Block = (String, PathBuf, Option<PathBuf>, &'static str);
 
@@ -91,14 +98,15 @@ impl S3Store {
                 out.push_str("next\n");
             }
             out.push_str(&format!(
-                "url = \"{url}\"\naws-sigv4 = \"aws:amz:{}:s3\"\nuser = \"{}:{}\"\nconnect-timeout = {REQUEST_SECS}\nmax-time = {REQUEST_SECS}\nsilent\nshow-error\noutput = \"{}\"\nwrite-out = \"%{{http_code}}|%{{redirect_url}}|%{{filename_effective}}\\n\"\n",
+                "url = \"{}\"\naws-sigv4 = \"aws:amz:{}:s3\"\nuser = \"{}:{}\"\nconnect-timeout = {REQUEST_SECS}\nmax-time = {REQUEST_SECS}\nsilent\nshow-error\noutput = \"{}\"\nwrite-out = \"%{{http_code}}|%{{redirect_url}}|%{{filename_effective}}\\n\"\n",
+                quoted(url),
                 self.region,
-                self.keys.0.expose(),
-                self.keys.1.expose(),
-                file.display()
+                quoted(self.keys.0.expose()),
+                quoted(self.keys.1.expose()),
+                quoted(&file.display().to_string())
             ));
             if let Some(up) = up {
-                out.push_str(&format!("upload-file = \"{}\"\n", up.display()));
+                out.push_str(&format!("upload-file = \"{}\"\n", quoted(&up.display().to_string())));
             }
             if *method != "GET" && up.is_none() {
                 out.push_str(&format!("request = \"{method}\"\n"));
@@ -345,4 +353,57 @@ pub(super) fn parse_done(text: &str) -> Result<Vec<(u16, String)>, StoreError> {
         done.push((code, file.to_string()));
     }
     Ok(done)
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+
+    fn store(scratch: &str) -> S3Store {
+        S3Store {
+            base: "http://127.0.0.1:9".into(),
+            region: "us-east-1".into(),
+            keys: (
+                Secret::new(String::from("AKIDEXAMPLE")).unwrap(),
+                Secret::new(String::from("s3cr3t-value")).unwrap(),
+            ),
+            scratch: PathBuf::from(scratch),
+        }
+    }
+
+    /// Run 9265: on the Windows runner the scratch folder is `D:\a\_temp\...`; curl drops a backslash before a letter and reads `\t` and `\r`
+    /// as a tab and a return, so it wrote the answer to another file, the call failed and nothing was recorded.
+    #[test]
+    fn a_windows_path_reaches_curl_with_its_backslashes_doubled() {
+        let s = store("D:\\a\\_temp\\test-cache\\scratch");
+        let blocks = [(s.url("v2/a/b.json"), s.body_path(0), Some(s.body_path(1)), "PUT")];
+        let c = s.config(&blocks);
+        let file = format!("{}", s.body_path(0).display()).replace('\\', "\\\\");
+        assert!(c.contains(&format!("output = \"{file}\"\n")), "{c}");
+        assert!(c.contains("output = \"D:\\\\a\\\\_temp\\\\test-cache\\\\scratch"), "{c}");
+        assert!(c.contains("upload-file = \"D:\\\\a\\\\_temp"), "{c}");
+    }
+
+    /// The same, through the real curl: a folder whose name holds `\t` and `\r` (legal on Linux and macOS) receives the answer.
+    #[test]
+    fn curl_writes_the_answer_to_the_path_it_was_given_when_the_name_has_backslashes() {
+        let d = tempfile::tempdir().unwrap();
+        let src = d.path().join("src.txt");
+        std::fs::write(&src, "hello").unwrap();
+        let scratch = d.path().join("s\\t\\r");
+        std::fs::create_dir_all(&scratch).unwrap();
+        let s = store(scratch.to_str().unwrap());
+        let out = s.body_path(0);
+        let cfg = format!(
+            "url = \"file://{}\"\noutput = \"{}\"\nsilent\nshow-error\nwrite-out = \"%{{filename_effective}}\\n\"\n",
+            quoted(src.to_str().unwrap()),
+            quoted(&out.display().to_string())
+        );
+        let mut c = paddock_proc::command("curl");
+        c.args(["-q", "-K", "-"]);
+        let r = run_bounded_with_input(c, cfg.into_bytes(), Limits::new(Duration::from_secs(20))).unwrap();
+        assert!(r.success(), "{}", r.stderr_text());
+        assert_eq!(std::fs::read_to_string(&out).unwrap(), "hello");
+        assert_eq!(r.stdout_text().trim(), out.display().to_string());
+    }
 }

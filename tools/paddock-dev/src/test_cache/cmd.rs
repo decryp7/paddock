@@ -760,6 +760,13 @@ pub(super) fn record_with(
     // soundness finding: the key missed an input). Read before this run's own records are stored, and only when the lookup answered.
     let mut lines: Vec<String> = Vec::new();
     let (decisions, notice) = decide(cands, cfg, class, filter, store, meta.at, trust);
+    // A lookup that failed leaves every record "not definite", so nothing is replaced: say why, or the held-back count has no cause
+    // (run 9265: the Windows leg printed only "recorded 0", ER-27).
+    if let Some(n) = &notice {
+        lines.push(format!(
+            "::warning::test-cache: the lookup failed, so no record is replaced and none is written: {n}. Next step: fix the store's answer (credentials, address, curl), the cache cannot record without it."
+        ));
+    }
     if notice.is_none() {
         let matched: Vec<&Candidate> = cands
             .iter()
