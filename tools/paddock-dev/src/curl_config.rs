@@ -48,11 +48,18 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let src = d.path().join("src.txt");
         std::fs::write(&src, "hello").unwrap();
-        let out = d.path().join("s\\t\\r\\v\"q").join("o\\n");
+        // Names with a backslash or a quote are legal on Unix only; on Windows the path's own separators are the backslashes under test.
+        let dir = if cfg!(unix) { "s\\t\\r\\v\"q" } else { "s_t" };
+        let out = d.path().join(dir).join(if cfg!(unix) { "o\\n" } else { "o_n" });
         std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+        let url = if cfg!(windows) {
+            format!("file:///{}", src.display().to_string().replace('\\', "/"))
+        } else {
+            format!("file://{}", src.display())
+        };
         let cfg = format!(
             "{}{}silent\nshow-error\nwrite-out = \"%{{filename_effective}}\"\n",
-            line("url", &format!("file://{}", src.display())),
+            line("url", &url),
             line("output", &out.display().to_string())
         );
         let mut c = paddock_proc::command("curl");
