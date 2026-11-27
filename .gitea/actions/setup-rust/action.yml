@@ -306,7 +306,7 @@ runs:
         # storage check behind the S3 guard's 10 s stall, run 9274). Only the config file can set it; the environment outranks the rest.
         CONF="${TMPDIR:-${RUNNER_TEMP:-${TEMP:-/tmp}}}/paddock-sccache.toml"
         if printf 'server_startup_timeout_ms = 30000\n' > "$CONF" 2>/dev/null; then
-          if [ "$RUNNER_OS" = Windows ]; then CONF="$(cygpath -w "$CONF")"; fi
+          if [ "$RUNNER_OS" = Windows ] && command -v cygpath >/dev/null 2>&1; then CONF="$(cygpath -w "$CONF")"; fi
           export SCCACHE_CONF="$CONF"
           SETTINGS+=("SCCACHE_CONF=$CONF")
         else
