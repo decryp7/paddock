@@ -461,7 +461,7 @@ jobs:
   mutants:
     name: mutants (shard ${{ matrix.shard }})
     needs: [plan]
-    if: ${{ (needs.plan.outputs.paddock_dev == 'true' || needs.plan.outputs.crates == 'true') && (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/heads/train/')) && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["mutants"]'), 'mutants') }}
+    if: ${{ (needs.plan.outputs.paddock_dev == 'true' || needs.plan.outputs.crates == 'true') && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["mutants"]'), 'mutants') }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
@@ -472,6 +472,10 @@ jobs:
     env:
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
+      # Trains and manual runs only. The job's own `if` can read only the plan's outputs (the run's expected jobs are listed from them,
+      # `run_scope::expected`, and the job model reads them), so on a push to main the four legs start, set Rust up and end their two
+      # working steps at once.
+      MUTANTS_RUN: ${{ (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/heads/train/')) && 'true' || 'false' }}
     steps:
       # The whole history: the base is a merge base or a train's last green commit.
       - uses: actions/checkout@v4
@@ -485,12 +489,14 @@ jobs:
       # The pinned cargo-mutants (ER-26): the version is `mutants_gate::PIN`, read through `./dev mutants pin` (one definition), built
       # with `cargo install --locked` on every run (compiled through sccache; no Actions cache, so no cache step to report).
       - name: Install the pinned cargo-mutants
+        if: ${{ env.MUTANTS_RUN == 'true' }}
         run: |
           pin=$(./dev mutants pin)
           if [ "$(cargo mutants --version 2>/dev/null | cut -d' ' -f2)" != "$pin" ]; then
             cargo install cargo-mutants --version "$pin" --locked
           fi
       - name: Mutants in the changed functions (report-only)
+        if: ${{ env.MUTANTS_RUN == 'true' }}
         env:
           BASE: ${{ github.event.inputs.base }}
           LANDING_BASE: ${{ github.event.inputs.landing_base }}
