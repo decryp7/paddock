@@ -1,0 +1,15 @@
+2026-11-26T11:51:06.1350732Z Job: crate
+2026-11-26T11:52:05.6899955Z [32;1m    Starting[0m [1m4328[0m tests across [1m102[0m binaries ([1m123[0m tests [33;1mskipped[0m)
+2026-11-26T11:53:25.2548320Z [35;1m  TRY 1 FAIL[0m [   0.256s] (─────────) [35;1mpaddock-proc[0m [36musage::tests[0m[36m::[0m[34;1mthe_os_source_lists_the_children_of_one_pid_without_a_table[0m
+2026-11-26T11:53:25.4970954Z [31;1m  TRY 2 PASS[0m [   0.236s] (2521/4328) [35;1mpaddock-proc[0m [36musage::tests[0m[36m::[0m[34;1mthe_os_source_lists_the_children_of_one_pid_without_a_table[0m
+2026-11-26T11:55:02.1525850Z [31;1m     Summary[0m [ 176.464s] [1m4328[0m tests run: [1m4327[0m [32;1mpassed[0m, [1m1[0m [31;1mfailed[0m, [1m123[0m [33;1mskipped[0m
+2026-11-26T11:55:02.1528722Z [31;1m FLKY-FL 2/2[0m [   0.236s] (2521/4328) [35;1mpaddock-proc[0m [36musage::tests[0m[36m::[0m[34;1mthe_os_source_lists_the_children_of_one_pid_without_a_table[0m
+2026-11-26T11:55:02.2872729Z ##[error]Process completed with exit code 100.
+2026-11-26T11:55:08.1619015Z [32;1m    Starting[0m [1m140[0m tests across [1m4[0m binaries
+2026-11-26T11:55:12.7705767Z [32;1m     Summary[0m [   4.610s] [1m140[0m tests run: [1m140[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-26T11:55:15.5333134Z [32;1m    Starting[0m [1m197[0m tests across [1m7[0m binaries
+2026-11-26T11:55:18.5185192Z [32;1m     Summary[0m [   2.986s] [1m197[0m tests run: [1m197[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-26T11:55:20.8987610Z [32;1m    Starting[0m [1m119[0m tests across [1m2[0m binaries
+2026-11-26T11:55:27.2220841Z [32;1m     Summary[0m [   6.322s] [1m119[0m tests run: [1m119[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-26T11:55:31.0341947Z [32;1m    Starting[0m [1m123[0m tests across [1m2[0m binaries
+2026-11-26T11:55:32.3653868Z [32;1m     Summary[0m [   1.333s] [1m123[0m tests run: [1m123[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m

@@ -1,0 +1,3 @@
+2026-11-25T14:38:07.0617157Z Job: heavy
+2026-11-25T14:38:49.6308646Z [32;1m    Starting[0m [1m195[0m tests across [1m3[0m binaries
+2026-11-25T14:39:11.7080096Z [32;1m     Summary[0m [  22.077s] [1m195[0m tests run: [1m195[0m [32;1mpassed[0m ([1m1[0m [33;1mslow[0m), [1m0[0m [33;1mskipped[0m

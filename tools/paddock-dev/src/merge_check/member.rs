@@ -103,12 +103,7 @@ pub fn command(root: Option<&Path>, member: &str, opts: &Options) -> Result<Repo
                 &full,
             ])
             .map_err(|e| step(e, "run `git show` on the revert"))?;
-        reland_lines.extend(files.iter().map(|f| {
-            format!(
-                "Reverted: {f}: the member re-lands the work the revert {} took out (--reland)",
-                short(&full)
-            )
-        }));
+        reland_lines.extend(trailers::reland_lines(&full, &files));
         if !relands.contains(&full) {
             relands.push(full);
         }

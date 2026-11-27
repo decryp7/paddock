@@ -32,7 +32,7 @@ pub const RELAND: &str = "Paddock-Reland";
 pub struct MergeMember {
     /// The member's branch name (the subject's reading for a merge made by hand).
     pub branch: String,
-    /// The sync ref that was merged (`sync/<member>/<short sha>`), from the trailer only.
+    /// The sync ref that was merged (`sync/<member>/<short sha>`): the trailer, else `synced as <ref>` in a hand-made subject.
     pub sync_ref: Option<String>,
     /// The full sha of the member commit that was merged, from the trailer only.
     pub sync_sha: Option<String>,
@@ -59,7 +59,11 @@ pub fn merge_member(subject: &str, trailers: &str) -> MergeMember {
     let from = values(trailers, MEMBER).next();
     MergeMember {
         branch: from.map_or_else(|| branch_of(subject), str::to_string),
-        sync_ref: values(trailers, SYNC_REF).next().map(str::to_string),
+        // The trailer first; a merge made by hand names its sync ref in the subject (`synced as <ref>`).
+        sync_ref: values(trailers, SYNC_REF)
+            .next()
+            .map(str::to_string)
+            .or_else(|| synced_ref(subject)),
         sync_sha: values(trailers, SYNC_SHA).next().map(str::to_string),
         relands: values(trailers, RELAND).map(str::to_string).collect(),
         from_trailer: from.is_some(),
@@ -78,20 +82,16 @@ pub struct Named {
 /// What `arg` (a branch, a remote branch or a `sync/<member>/<hex>` ref) names.
 pub fn named(arg: &str) -> Named {
     let name = arg.strip_prefix("origin/").unwrap_or(arg);
-    if let Some(rest) = name.strip_prefix("sync/")
-        && let Some((member, sha)) = rest.rsplit_once('/')
-        && !member.is_empty()
-        && sha.len() >= 7
-        && sha.chars().all(|c| c.is_ascii_hexdigit())
-    {
-        return Named {
+    // `sync/<member>/<short sha>` is the one spelling [`super::trial_dispatch::sync_ref`] writes and reads.
+    match super::trial_dispatch::split_sync_ref(name) {
+        Some((member, _)) => Named {
             branch: member.to_string(),
             sync_ref: Some(name.to_string()),
-        };
-    }
-    Named {
-        branch: name.to_string(),
-        sync_ref: None,
+        },
+        None => Named {
+            branch: name.to_string(),
+            sync_ref: None,
+        },
     }
 }
 
@@ -105,6 +105,20 @@ pub fn member_lines(who: &Named, sha: &str, relands: &[String]) -> Vec<String> {
     lines.push(format!("{SYNC_SHA}: {sha}"));
     lines.extend(relands.iter().map(|r| format!("{RELAND}: {r}")));
     lines
+}
+
+/// The `Reverted:` lines for a re-land: one per file the revert changed, so the merge check accepts the member's re-add of work the
+/// target took out. The one generator of them (`merge member --reland` and the trial's merge).
+pub fn reland_lines(revert: &str, files: &[String]) -> Vec<String> {
+    files
+        .iter()
+        .map(|f| {
+            format!(
+                "Reverted: {f}: the member re-lands the work the revert {} took out (--reland)",
+                revert.get(..9).unwrap_or(revert)
+            )
+        })
+        .collect()
 }
 
 /// `subject`, a blank line, then `lines` as one trailer block, ending in a newline.
@@ -131,16 +145,26 @@ pub(super) fn branch_of(subject: &str) -> String {
     }
 }
 
-/// `name (abc1234)` becomes `name`.
+/// `name (abc1234)` becomes `name`; so does `name (abc1234, synced as sync/m/abc123456)`, the integrator's merge subject: the
+/// parenthesis opens with the member's commit and may go on after a comma.
 fn strip_hex_suffix(s: &str) -> &str {
     if let Some(body) = s.strip_suffix(')')
-        && let Some((head, hex)) = body.rsplit_once(" (")
-        && hex.len() >= 7
-        && hex.chars().all(|c| c.is_ascii_hexdigit())
+        && let Some((head, inside)) = body.rsplit_once(" (")
     {
-        return head.trim_end();
+        let hex = inside.split_once(',').map_or(inside, |(h, _)| h).trim();
+        if hex.len() >= 7 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+            return head.trim_end();
+        }
     }
     s
+}
+
+/// The sync ref a hand-made merge subject names, `Merge <member> (<sha>, synced as sync/<member>/<short sha>) into <train>`: the text
+/// after `synced as ` up to the closing parenthesis. `None` when the subject names none.
+fn synced_ref(subject: &str) -> Option<String> {
+    let rest = subject.split("synced as ").nth(1)?;
+    let name = rest.split([')', ' ', ',']).next()?.trim();
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 /// The reason given for `subject` under `key` (`Tests-removed` or `Hunks-dropped`): the text after `<key>: <subject>: `, which
@@ -242,12 +266,21 @@ mod tests {
             ("chore(train): merge feat/x (abc1234) into train 12", "feat/x"),
             ("Merge feat/x (abc1234def) into trial of main", "feat/x"),
             ("chore(train): merge feat/x (abc1234)", "feat/x"),
+            (
+                "Merge feat/x (d5b1ce0e4, synced as sync/feat/x/2ab388102) into train/2026-11-26-u",
+                "feat/x",
+            ),
+            ("Merge feat/x (b6d3953b3, synced as sync/feat/x) into train/2026-11-26-t", "feat/x"),
             ("something else", "something else"),
             ("fix: a (note)", "fix: a (note)"),
         ] {
             let m = merge_member(s, "");
-            assert_eq!((m.branch.as_str(), m.from_trailer, m.sync_ref), (want, false, None), "{s}");
+            assert_eq!((m.branch.as_str(), m.from_trailer), (want, false), "{s}");
         }
+        // The integrator's subject names the sync ref too.
+        let s = merge_member("Merge feat/x (d5b1ce0e4, synced as sync/feat/x/2ab388102) into train/u", "");
+        assert_eq!(s.sync_ref.as_deref(), Some("sync/feat/x/2ab388102"));
+        assert_eq!(merge_member("Merge branch 'feat/x'", "").sync_ref, None);
         // Other trailers do not name a member.
         assert!(!merge_member("Merge branch 'a' into b", "Reverted: f: why\n").from_trailer);
     }

@@ -1,0 +1,3 @@
+2026-11-25T22:15:41.1372946Z Job: escapes
+2026-11-25T22:16:14.0677725Z ::error::dev plan: the nightly runs could not be read (curl exited with exit status: 22: curl: (22) The requested URL returned error: 403 {"message":"token does not have at least one of required scope(s), required=[read:repository], token scope=read:package","url":"https://gitea.invalid/api/swagger"}); pass --since <the previous green nightly's commit>. Run `./dev plan` with the same arguments and environment locally to see it again; the usage is in the log below.
+2026-11-25T22:16:14.1063307Z ##[error]Process completed with exit code 1.

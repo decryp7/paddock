@@ -711,31 +711,56 @@ fn trial_step(root: &std::path::Path, merge: &Merge, no_trial: Option<&str>, rea
     let [_, member] = merge.parents.as_slice() else {
         return member_trial::not_run("the merge does not have two parents");
     };
-    // The member's name: the one the merge was given, else the one its trailers name (`Paddock-Member`), else (a merge made by hand)
-    // the branch its subject names (`Merge branch 'x'`); a short hash or a subject that names none is no branch.
+    // The trial of this head is of the ref sync-member pushed for it, `sync/<member>/<short sha of the second parent>`. Its name comes
+    // from the first source that has it: the merge's `Paddock-Sync-Ref` trailer (else, for a merge made by hand, `synced as <ref>` in
+    // its subject: both are [`trailers::merge_member`]'s), a sync ref of origin that points at the member's head, the second parent's
+    // own subject (`Merge <train> into sync/<member>`), then the member the trailers (or the subject) name.
+    let short_member = short(member);
     let subject = merge.message.lines().next().unwrap_or("");
     let said = trailers::merge_member(subject, &merge.trailers);
-    // The trial of this head is of the ref sync-member pushed for it, named by the commit; a merge that names that ref in its
-    // `Paddock-Sync-Ref` trailer says it.
-    if let Some(r) = said
+    let named_in_message = said
         .sync_ref
-        .as_deref()
-        .filter(|r| r.starts_with("sync/") && r.ends_with(&format!("/{}", short(member))))
-    {
-        return member_trial::interpret(reader.read(root, r, member), r);
-    }
-    let named = [merge.member_name.clone(), said.branch]
-        .into_iter()
-        .find(|n| !n.is_empty() && n != short(member) && !n.contains(char::is_whitespace));
-    let Some(named) = named else {
-        return member_trial::not_run("the merge message names no member branch, so there is no trial ref to read");
+        .clone()
+        .filter(|r| trial_dispatch::split_sync_ref(r).is_some_and(|(_, sha)| member.starts_with(sha)));
+    let pointing = || -> Option<String> {
+        let out = Git::new(root)
+            .text(&[
+                "for-each-ref",
+                "--points-at",
+                member,
+                "--format=%(refname)",
+                "refs/remotes/origin/sync/",
+                "refs/heads/sync/",
+            ])
+            .ok()?;
+        out.lines()
+            .filter_map(|l| l.strip_prefix("refs/remotes/origin/").or_else(|| l.strip_prefix("refs/heads/")))
+            .find(|r| trial_dispatch::split_sync_ref(r).is_some_and(|(_, sha)| member.starts_with(sha)))
+            .map(str::to_string)
     };
-    let branch = named.strip_prefix("origin/").unwrap_or(&named);
-    // (a member merged as its sync ref, `sync/<member>/<short sha>`, already is that name).
-    let synced = if branch.starts_with("sync/") && branch.ends_with(&format!("/{}", short(member))) {
-        branch.to_string()
-    } else {
-        trial_dispatch::sync_ref(branch, member)
+    let from_parent = || -> Option<String> {
+        let sub = Git::new(root).text(&["show", "-s", "--format=%s", member]).ok()?;
+        let m = sub.trim().rsplit_once(" into sync/")?.1.trim();
+        (!m.is_empty() && !m.contains(char::is_whitespace)).then(|| trial_dispatch::sync_ref(m, member))
+    };
+    let from_message = || -> Option<String> {
+        let named = [merge.member_name.clone(), said.branch.clone()]
+            .into_iter()
+            .find(|n| !n.is_empty() && n != short_member && !n.contains(char::is_whitespace))?;
+        let branch = named.strip_prefix("origin/").unwrap_or(&named);
+        // (a member merged as its sync ref, `sync/<member>/<short sha>`, already is that name).
+        Some(
+            if trial_dispatch::split_sync_ref(branch).is_some_and(|(_, sha)| member.starts_with(sha)) {
+                branch.to_string()
+            } else {
+                trial_dispatch::sync_ref(branch, member)
+            },
+        )
+    };
+    let Some(synced) = named_in_message.or_else(pointing).or_else(from_parent).or_else(from_message) else {
+        return member_trial::not_run(
+            "neither the merge message, a sync ref nor the member's own subject names its sync ref, so there is no trial ref to read",
+        );
     };
     member_trial::interpret(reader.read(root, &synced, member), &synced)
 }
