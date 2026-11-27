@@ -59,20 +59,13 @@ impl AppState {
 mod tests {
     use super::*;
 
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
-    fn temp(name: &str) -> std::path::PathBuf {
-        let p = std::env::temp_dir().join(format!("pitcrew-it-appstate-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&p);
-        std::fs::create_dir_all(&p).unwrap();
-        p
+    fn temp() -> paddock_testkit::CanonicalTempDir {
+        paddock_testkit::canonical_tempdir()
     }
 
     #[test]
     fn the_state_round_trips_and_a_missing_file_gives_defaults() {
-        let d = temp("roundtrip");
+        let d = temp();
         assert_eq!(AppState::load(d.as_path()), AppState::default());
         let s = AppState {
             service_registered_version: Some("9.9.9".into()),
@@ -84,7 +77,7 @@ mod tests {
 
     #[test]
     fn an_old_file_without_the_new_key_loads_and_a_damaged_or_newer_one_falls_back() {
-        let d = temp("damaged");
+        let d = temp();
         let f = d.as_path().join(FILE_NAME);
         std::fs::write(&f, r#"{"version":1}"#).unwrap();
         assert_eq!(AppState::load(d.as_path()).service_registered_version, None);

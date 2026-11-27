@@ -268,10 +268,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
     fn checks_downloads_and_refuses_disagreeing_checksums() {
         let v = RunnerVersion::parse("5.2.0").unwrap();
         let asset = "gitea-runner-5.2.0-linux-amd64";
@@ -307,8 +303,8 @@ mod tests {
             latest(&src, RunnerKind::GiteaRunner, Channel::Prerelease).unwrap().to_string(),
             "5.3.0-rc.1"
         );
-        let dir = std::env::temp_dir().join(format!("pitcrew-it-work-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let scratch = paddock_testkit::canonical_tempdir();
+        let dir = scratch.join("it-work");
         let binary = dir.join("bin/gitea-runner");
         download(&src, RunnerKind::GiteaRunner, &v, platform(), &binary).unwrap();
         assert!(layout::download_path(&binary).exists());
@@ -324,17 +320,12 @@ mod tests {
             &binary
         )
         .is_err());
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
     fn swaps_and_restores_binaries() {
-        let dir = std::env::temp_dir().join(format!("pitcrew-it-swap-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let scratch = paddock_testkit::canonical_tempdir();
+        let dir = scratch.join("it-swap");
         std::fs::create_dir_all(&dir).unwrap();
         let binary = dir.join("gitea-runner");
         assert!(swap(&binary).is_err(), "nothing downloaded");
@@ -349,6 +340,5 @@ mod tests {
         assert_eq!(std::fs::read(&binary).unwrap(), b"old");
         assert!(restore_previous(&binary).is_err(), "nothing to go back to");
         assert_eq!(binary_version(&binary), None, "not a program");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }
