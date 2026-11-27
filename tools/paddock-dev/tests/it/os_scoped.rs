@@ -434,3 +434,109 @@ fn tree_every_declared_scope_is_unscoped_on_linux_and_scoped_on_the_hosts() {
     }
     assert_eq!(declared, 7);
 }
+
+/// Decision 114 (user, 2026-11-27; ER-52): paddock-dev's Windows and macOS legs run only the OS-specific tests; the OS-independent areas
+/// (pure logic: the merge check, the CI run readers, the planner's model and readers) run on Linux only, which stays unscoped. A module
+/// of those areas that holds OS code itself (`merge_check::git` spawns git, `ci_runs::dispatch_guards` spawns a process) stays on every
+/// host (a test module touching OS-specific code stays on all OSes).
+#[test]
+fn tree_the_paddock_dev_host_legs_leave_out_the_os_independent_areas_and_linux_runs_everything() {
+    let (root, files) = real_files();
+    let contract = "tools/paddock-dev/paddock.ci.json";
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(root.join(contract)).unwrap()).unwrap();
+    let p = derive("tools/paddock-dev", &files, &DiskBulk(root.clone())).unwrap();
+    let h = read(&v, contract, &p.derived).unwrap().unwrap();
+    let linux = h.scope(LINUX);
+    assert!(linux.packages.is_empty() && linux.filter.is_empty(), "Linux runs every test");
+    let independent = [
+        "merge_check::",
+        "ci_runs::",
+        "ci_runs::verdict::",
+        "ci_run::",
+        "ci_run::select::",
+        "plan_graph::",
+        "plan_repo::",
+        "plan_since::",
+        "plan_gitea::",
+        "run_scope::",
+        "repo_model::hash::",
+        "repo_model::replay::",
+    ];
+    // Code that holds OS behaviour itself, or that only a Mac runs, stays where it is.
+    let os_specific = [
+        "merge_check::git::",
+        "ci_runs::dispatch_guards::",
+        "local_sccache::",
+        "pre_push::exec::",
+    ];
+    for os in ["windows-latest", "macos-latest"] {
+        let on = h.module_prefixes(os);
+        for m in independent {
+            assert!(!on.iter().any(|l| l == m), "{os} must not run the OS-independent {m}: {on:?}");
+        }
+        for m in os_specific {
+            assert!(on.iter().any(|l| l == m), "{os} still runs the OS-specific {m}");
+        }
+    }
+    assert!(h.module_prefixes("macos-latest").iter().any(|l| l == "ci_runs::reservation::"));
+    assert!(!h.module_prefixes("windows-latest").iter().any(|l| l == "ci_runs::reservation::"));
+}
+
+/// The register's growth is approved by the user's line in docs/gates.toml (ER-46): count and digest of exactly the added approvals.
+/// No line, or a line that names other additions, leaves the finding; a matching line clears it. The digest is computed here by its
+/// definition (SHA-256 of the sorted keys joined by a newline), an oracle independent of the check's code.
+#[test]
+fn tree_a_register_growth_is_cleared_only_by_the_users_gates_line_that_names_exactly_those_approvals() {
+    use sha2::{Digest, Sha256};
+    let d = scratch_of(&["crates"]);
+    let root = d.path();
+    git(root, &["init", "-q", "-b", "work"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "chore: base"]);
+    git(root, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    edit_contract(root, "crates/paddock.ci.json", |v| {
+        v["hostTests"]["only"] =
+            serde_json::json!([{"os": "macos-latest", "name": "paddock-proc", "reason": "a control for the unsafe direction"}]);
+    });
+    std::fs::create_dir_all(root.join("docs")).unwrap();
+    std::fs::write(
+        root.join("docs/os-removals.toml"),
+        "version = 1\n[[approved]]\ncontract = \"crates/paddock.ci.json\"\nby = \"user\"\ndate = \"2026-11-23\"\nwhy = \"a control\"\nentries = [\"only macos-latest paddock-proc\"]\n",
+    )
+    .unwrap();
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "chore: an approved only"]);
+    let grew = |findings: &[(String, String)]| {
+        findings
+            .iter()
+            .any(|(f, m)| f == "docs/os-removals.toml" && m.contains("register of approvals grew"))
+    };
+    let (findings, _) = run(root);
+    assert!(grew(&findings), "no approval of the growth: {findings:#?}");
+    let line = |count: usize, digest: &str, by: &str| {
+        format!(
+            "version = 1\n[[register_growth]]\ncheck = \"C155\"\nby = \"{by}\"\ndate = \"2026-11-27\"\ncount = {count}\ndigest = \"{digest}\"\n"
+        )
+    };
+    let digest: String = Sha256::digest("crates/paddock.ci.json only macos-latest paddock-proc".as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    // Another content (or another count): the approval names additions the user did not see.
+    let other = Sha256::digest("crates/paddock.ci.json only macos-latest paddock-env".as_bytes());
+    let other: String = other.iter().map(|b| format!("{b:02x}")).collect();
+    std::fs::write(root.join("docs/gates.toml"), line(1, &other, "user")).unwrap();
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "chore: a gates line for other additions"]);
+    let (findings, _) = run(root);
+    assert!(grew(&findings), "a digest of other additions approves nothing: {findings:#?}");
+    std::fs::write(root.join("docs/gates.toml"), line(1, &digest, "coordinator")).unwrap();
+    git(root, &["commit", "-qam", "chore: a gates line that is not the user's"]);
+    let (findings, _) = run(root);
+    assert!(grew(&findings), "a line that is not the user's approves nothing: {findings:#?}");
+    // The user's line that matches.
+    std::fs::write(root.join("docs/gates.toml"), line(1, &digest, "user")).unwrap();
+    git(root, &["commit", "-qam", "chore: the user's gates line"]);
+    let (findings, _) = run(root);
+    assert!(!grew(&findings), "a matching line approves the growth: {findings:#?}");
+}

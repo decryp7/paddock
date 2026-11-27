@@ -64,6 +64,10 @@ pub struct Job {
     pub reads_webkit: bool,
     /// Whether a step that restores the dev tool comes before the first step that runs `./dev`.
     pub tool_cache_before_first_dev: bool,
+    /// Whether the job's first dev-tool cache use (the one that does the work: later uses in the job do nothing) is the producer, the
+    /// one writer of the runner store and the Actions cache (`with: producer: "true"` on the dev-tool-cache step, or on a declared
+    /// action that hands it on; user decision 109).
+    pub tool_cache_producer: bool,
     /// The projects it runs for: derived from the plan outputs its conditions read, plus the declared ones.
     pub projects: BTreeSet<String>,
 }
@@ -196,11 +200,7 @@ fn runs_dev(run: &str) -> bool {
 
 fn tool_cache_before_first_dev(steps: &[Node], declared: &Declared) -> bool {
     for step in steps {
-        if let Some(action) = step
-            .get_text("uses")
-            .and_then(|u| u.strip_prefix("./.gitea/actions/"))
-            && (action == TOOL_CACHE_ACTION || declared.tool_cache_actions.contains(action))
-        {
+        if is_tool_cache_use(step, declared) {
             return true;
         }
         if step.get_text("run").is_some_and(runs_dev) {
@@ -256,6 +256,23 @@ pub fn tool_cache_actions(
             return Ok(found);
         }
     }
+}
+
+fn is_tool_cache_use(step: &Node, declared: &Declared) -> bool {
+    step.get_text("uses")
+        .and_then(|u| u.strip_prefix("./.gitea/actions/"))
+        .is_some_and(|action| {
+            action == TOOL_CACHE_ACTION || declared.tool_cache_actions.contains(action)
+        })
+}
+
+fn tool_cache_producer(steps: &[Node], declared: &Declared) -> bool {
+    steps
+        .iter()
+        .find(|s| is_tool_cache_use(s, declared))
+        .and_then(|s| s.get("with"))
+        .and_then(|w| w.get_text("producer"))
+        .is_some_and(|v| v.trim() == "true")
 }
 
 /// `${{ fromJSON(needs.plan.outputs.<name>) }}`: the name.
@@ -440,6 +457,7 @@ pub fn model(workflow_text: &str, declared: &Declared) -> Result<JobModel, Vec<P
                 .and_then(reads)
                 .is_some_and(|outputs| outputs.iter().any(|o| o == "webkit")),
             tool_cache_before_first_dev: tool_cache_before_first_dev(steps, declared),
+            tool_cache_producer: tool_cache_producer(steps, declared),
             projects,
         });
     }
