@@ -1412,6 +1412,19 @@ mod member_gate {
         Train { repo, gates }
     }
 
+    /// Whether the gate child was started as `check --pre-push --member-gate ... --base <base> ...` (and, when given, on the checkout whose
+    /// HEAD is `head`). Reads the logged line as words, so a flag added to the command does not break the tests that name only these.
+    fn gate_ran(log: &str, base: &str, head: Option<&str>) -> bool {
+        log.lines().any(|l| {
+            let w: Vec<&str> = l.split_whitespace().collect();
+            let at = |flag: &str| w.iter().position(|x| *x == flag);
+            w.contains(&"--pre-push")
+                && w.contains(&"--member-gate")
+                && at("--base").and_then(|i| w.get(i + 1)) == Some(&base)
+                && head.is_none_or(|h| w.contains(&format!("HEAD={h}").as_str()))
+        })
+    }
+
     #[test]
     fn a_member_that_passes_the_gates_on_the_combined_tree_is_reported_passed() {
         let t = train(false);
@@ -1466,12 +1479,7 @@ mod member_gate {
         let head = t.repo.git(&["rev-parse", "HEAD"]);
         t.run(&["--gates", "HEAD"], "5");
         let log = fs::read_to_string(t.log()).unwrap();
-        assert!(
-            log.contains(&format!(
-                "check --pre-push --member-gate --priority train --base {first_parent} --root"
-            )) && log.contains(&format!("HEAD={head}")),
-            "{log}"
-        );
+        assert!(gate_ran(&log, &first_parent, Some(&head)), "{log}");
     }
 
     /// `--gates-base <ref>` measures the gate from that ref, not from the merge's first parent: the whole train's rows, so a push of the
@@ -1484,10 +1492,7 @@ mod member_gate {
         let base = t.repo.git(&["rev-parse", "HEAD~2"]);
         t.run(&["--gates", "--gates-base", &base, "HEAD"], "5");
         let log = fs::read_to_string(t.log()).unwrap();
-        assert!(
-            log.contains(&format!("check --pre-push --member-gate --priority train --base {base} --root")),
-            "{log}"
-        );
+        assert!(gate_ran(&log, &base, None), "{log}");
         assert!(
             !log.contains(&format!("--base {first_parent} --root")),
             "the first parent is not the base now: {log}"

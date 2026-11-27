@@ -403,8 +403,7 @@ fn a_killed_train_waiter_frees_the_queue() {
     let mut train = Acquirer::new(&h.h, req_high("T")).unwrap();
     assert_eq!(train.poll(), Poll::Waiting);
     let mut normal = Acquirer::new(&n.h, req("N")).unwrap();
-    rig.clock.advance(Duration::from_secs(2));
-    assert_eq!(normal.poll(), Poll::Waiting);
+    assert_eq!(rig.poll_said(&mut normal), Poll::Waiting);
     assert!(n.said().contains("waiting behind train work: T"), "{}", n.said());
     // SIGKILL: the process is gone and ran no cleanup, so its marker is still in the folder.
     std::mem::forget(train);
@@ -424,8 +423,7 @@ fn the_wait_line_names_the_train_work_it_waits_behind() {
     let mut train = Acquirer::new(&h.h, req_high("merge-check")).unwrap();
     assert_eq!(train.poll(), Poll::Waiting);
     let mut normal = Acquirer::new(&n.h, req("N")).unwrap();
-    rig.clock.advance(Duration::from_secs(2));
-    assert_eq!(normal.poll(), Poll::Waiting);
+    assert_eq!(rig.poll_said(&mut normal), Poll::Waiting);
     let said = n.said();
     assert!(said.contains("waiting behind train work: merge-check (pid 13)"), "{said}");
     assert!(
