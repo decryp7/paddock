@@ -1,10 +1,13 @@
-# NEW-paddock-dev-test-split. paddock-dev's tests are split by what they read, and the crate is layered before it is split by area
+# NEW-paddock-dev-test-split. paddock-dev's tests always run, and the crate is layered before any split by area
 
-- Status: **Accepted** 2026-11-27 by the user, relayed by the coordinator: D1 = (d) and (e) now, (a) the crate split deferred until
-  after train y's measurements, revisited only if paddock-dev is still the bottleneck; D2 = the whole-repository target is keyed on
-  the HEAD tree id; D3 = the layer check lands report-only (ER-41). Written for user decision 107 (2026-11-27: split tools/paddock-dev's tests into units the ADR 0116 test
-  cache can skip). Revision 2 (this text) records the decisions, the work packages and the cost.
-  The number is assigned when it lands (AGENTS.md, the `NEW-` rule).
+- Status: **Accepted** 2026-11-27 by the user, relayed by the coordinator (revision 3, after the independent review): **D1 = paddock-dev
+  stays excluded from test-cache reuse permanently** (decision 113's exclusion stays: its tests always run; the Linux partitions and the
+  OS scoping of decision 114 make that run fast), **plus (e), the layer check, as low-priority code health**, to be scheduled later;
+  **(d) is rejected** (§Decision, the review's three reasons); **(a), the crate split, stays deferred** until after train y's
+  measurements, revisited only if paddock-dev is still the bottleneck. D2 (the tree key of (d)) falls with (d); D3 holds: the layer
+  check lands report-only (ER-41). Written for user decision 107 (2026-11-27: split tools/paddock-dev's tests into units the ADR 0116
+  test cache can skip). Revision 1 recommended (d) and (e); revision 2 recorded them as accepted; revision 3 (this text) records the
+  review and the simplification. The number is assigned when it lands (AGENTS.md, the `NEW-` rule).
 - Date: 2026-11-27
 - Related: ADR [0116](0116-a-test-target-whose-inputs-did-not-change-reuses-its-pass.md) (the test-result cache: one target per Cargo
   package, `test_cache/key.rs` `Target`), ADR [0117](0117-the-repository-graph-is-the-one-model-and-every-plan-is-a-query.md) (the
@@ -100,7 +103,8 @@ the areas a train did not touch. The data above says that premise holds weakly:
 Point 2 is also a soundness question for the cache as it is: the paddock-dev target's key does not cover what its whole-repository
 tests read (nothing in `test_cache/` or `repo_model/hash.rs` treats the classes). A change outside the read set that the planner still
 sends to the paddock-dev job would reuse a pass those tests might not give. Whether the planner sends such changes there was not
-checked (§Not checked).
+checked (§Not checked). The independent review widened this: unprefixed tests read repository-wide files as well, so no name-based
+subset of paddock-dev's tests has a sound narrow key (§Decision 2).
 
 ## Common practice (ER-37)
 
@@ -119,8 +123,8 @@ checked (§Not checked).
 | **(a)** crates by area | 5 library crates plus the thin binary in the paddock-dev workspace; tests move with their area; 30 spawning test files rewritten to library calls where they test logic | 2 to 9% | 5 to 21 points (macOS most) | parallel crate builds and per-crate sccache hits (the common reason to split); 5 more link steps; a crate graph that must stay acyclic | **high**: breaks the 45-module cycle (about 65 items); rewrites 321 path references in 85 files; conflicts with every open paddock-dev branch (20 of 20 trains touch it), so it needs a freeze window | 7 to 9 (range 6 to 12) |
 | **(b)** test binaries by area in one crate | `tests/it` split into area binaries; the cache gains a binary-level target | 2 to 5% | 4 to 9 points | more link steps (the 3x of matklad's measurement in reverse); no graph change | **soundness**: every binary links all of `src`, so its key must hold all of `src`; it is then reusable only for test-only changes | 1.5 to 2 |
 | **(c)** both | | 7 to 13% | 16 to 27 points | as (a) | as (a) | 8.5 to 11 |
-| **(d)** split by what tests read (recommended first) | the whole-repository classes move to their own binary (`tests/whole`), the cache keys it on the whole tree; the area tests keep the package key | none on a paddock-dev change (it is about soundness) | none | one more link step | low; makes the cache's paddock-dev reuse sound | 1 to 1.5 |
-| **(e)** layer before splitting (recommended second) | a layer table and a check that every `crate::` path points down a layer, report-only first (ER-41); back-edges removed a batch at a time | none by itself | none | none | low; each batch is a refactor (ER-56) | 2 to 3 for the check and the first batches |
+| **(d)** split by what tests read (**rejected**, §Decision) | the whole-repository classes move to their own binary (`tests/whole`), the cache keys it on the whole tree; the area tests keep the package key | none on a paddock-dev change (it is about soundness) | none | one more link step | **unsound** (review): unprefixed tests read repository-wide files, the verdict was per package, a tree key changes on every commit | 1 to 1.5 (WP-1 and WP-2 built, not landed) |
+| **(e)** layer before splitting (accepted, low priority) | a layer table and a check that every `crate::` path points down a layer, report-only first (ER-41); back-edges removed a batch at a time | none by itself | none | none | low; each batch is a refactor (ER-56) | 2 to 3 for the check and the first batches |
 
 In job-minutes: with about 30 train runs and 17 member trial runs a week, (a) would save roughly 45 minutes a week of the single macOS
 and Windows runners (macOS about 0.35 min a train run and 1.2 min a member run; Windows about 0.25 and 0.5), for 7 to 9 agent-days.
@@ -128,27 +132,32 @@ For comparison, the 4.7-minute `./dev` tool-cache miss of job 52161 alone is lar
 
 ## Decision
 
-The program is (d), then (e); (a) is deferred (D1). (d) makes the cache's paddock-dev reuse sound; (e) removes the cycle that makes
-any later split, by crate or by module, impossible. Whether (a) is worth its cost is decided after train y's measurements, and only
-if paddock-dev is still the bottleneck then.
+1. **paddock-dev is never reused by the test cache.** Decision 113's exclusion (on `ci/paddock-dev-os-scope` when this was written,
+   not yet on main) is permanent: every run that reaches the paddock-dev job runs all of its selected tests. The run is made fast by
+   other means: the Linux leg runs as nextest hash partitions (`ci/paddock-dev-linux-partitions`) and macOS and Windows run only their
+   OS-scoped share (decision 114). This is the sound answer for paddock-dev, for the reasons in point 2: its tests read more than any
+   key the cache can compute before the run, short of a key that changes on every commit.
+2. **(d) is rejected.** The independent review of revision 2 found it unsound as designed, and the user agreed:
+   - **Unprefixed tests read repository-wide files.** The whole-repository set was the tests named `graph_`, `tree_` and `live_`, but
+     unprefixed tests of the package read files outside its read set too. ADR 0121 checks the graph class at run time and the tree class
+     only by cost, so a name is no proof of what a test reads; those passes would have been reused under the package key.
+   - **The verdict was per package.** The ADR 0116 judge files a pass per Cargo package (`test_cache/result.rs` `judge` on main), so
+     splitting one package's tests into two targets needed a per-test verdict too; without it a failure in one part costs or credits the
+     other.
+   - **A tree-keyed target changes on every commit.** The HEAD tree id differs on every commit that changes any tracked file, so the
+     whole-repository target would never have been reused: the bookkeeping of a cached target with none of the saving.
 
-1. **(d) The whole-repository tests are their own test-cache target, keyed on the tree (D2).** The target is the tests whose names
-   declare that they read the whole repository: the ADR 0121 classes (`test_cost::Class`, `graph_` and `tree_`) and the `live_` tests
-   that read the real tree. It is defined by **one filterset owned by `src/test_cost.rs`** (ER-22: the class's one definition, beside
-   `Class::filter`), not by a second test binary: 17 of the 89 tests are unit tests in `src/` that use private items, so a binary
-   could not hold them without widening the API, and moving 72 tests between files would conflict with every open paddock-dev branch.
-   nextest selects by filterset (`binary_id`, `test(/../)`), so a filter-defined target is reused and run exactly like a binary.
-   The target id is `rust:tools/paddock-dev#whole`; its key is the ADR 0116 key over the **HEAD tree id** (`git rev-parse
-   HEAD^{tree}`) instead of the node hash, with the same epoch, runner class and profile; the package target becomes "the package
-   minus the whole-repository filter". Residual risk: a test that reads the whole tree under an unprefixed name stays in the package
-   target; ADR 0121's `charge` catches the `cargo metadata` case at run time, the tree case only by cost, and the shadow mode and the
-   nightly bypass are the net (ADR 0116 §6).
-2. **(e) The layer check, report-only (D3).** `docs/paddock-dev-layers.toml` lists the layers and their modules; a test in
+   WP-1 (`f24f5a0e5`, pushed) and WP-2 (`4f5bef7df`, local only) were built on `feat/paddock-dev-whole-target` before the review; they
+   are not landed, and the branch is left as a record.
+3. **(e) The layer check, report-only, low priority (D3).** `docs/paddock-dev-layers.toml` lists the layers and their modules; a test in
    `tools/paddock-dev/tests/it` reads every `crate::` path with `syn` (already a dependency) and reports each reference that points up a
-   layer, with a positive control. It blocks after its first green run on the real tree (ER-41). One in, one out: it replaces no check;
-   its class is the module cycle that blocks any split, and it is deleted if (a) lands, because cargo then refuses a crate cycle itself.
-3. **(a) Deferred: the crate split, by the five layers of the sketch,** if it is revisited after train y and (e) reports no
-   back-edge. The boundaries it would start from:
+   layer, with a positive control. It blocks after its first green run on the real tree (ER-41). Its value is code health and keeping
+   (a) possible; it buys no CI time by itself. One in, one out: it replaces no check; its class is the module cycle of §Measured, and it
+   is deleted if (a) lands, because cargo then refuses a crate cycle itself.
+4. **(a) Deferred: the crate split, by the five layers of the sketch,** revisited only after train y's measurements and only if
+   paddock-dev is still the bottleneck, and then only after (e) reports no back-edge. With paddock-dev excluded from reuse, a split
+   buys compile parallelism and structure, not cache hits, unless each crate's tests are shown to read only their own inputs. The
+   boundaries it would start from:
 
    | Crate | Modules (from §Measured's sketch) | Lines |
    |---|---|---|
@@ -159,57 +168,51 @@ if paddock-dev is still the bottleneck then.
    | `paddock-dev-ci` | ci_runs, queue, pr, merge_check, test_cache | about 33,500 |
    | `paddock-dev` (binary) | main, lib dispatch, cli | about 1,100 |
 
-   The boundaries are a starting point: WP-4 may move a module down a layer where that removes back-edges more cheaply than moving
-   items, and the table in `docs/paddock-dev-layers.toml` is then the one source the split follows. Each crate gets its own `tests/`
-   binary (one per crate, matklad's advice); the 30 `tests/it` files that start `./dev` call the crate's library where they test logic
-   and stay in the binary crate where they test the command line. The whole-repository target of (d) stays one target across the crates
-   (the same filterset, every package). (b) is not done.
+What this removes: the unsound reuse of paddock-dev's tests under a key that misses what they read (1), and, once (e) blocks, the module
+cycle (3). Nothing else is deleted; no register grows.
 
-What this removes: the unsound reuse of the whole-repository tests under the package key (1), and, once (e) blocks, the module cycle
-(2). If (a) is done later, it removes the layer check (cargo then enforces the crate graph) and the single 140k-line compile unit.
+### The class for ADR 0116: a key misses an input
 
-### Interim measures being built (not this ADR's)
+The review's finding is an instance of a class ADR 0116 owns: **a test target whose tests read beyond its declared inputs, so its key
+misses an input and a reused pass can be wrong.** For paddock-dev the readers are many and unnamed (whole-tree scans, `cargo metadata`
+over every workspace, the conformance line, registers under `docs/`), so declaring them is not practical and a tree key never hits; the
+permanent exclusion is the sound answer. For other targets the class is caught, if at all, by the shadow mode's soundness findings and
+the nightly bypass (ADR 0116 §6, §8; the nightly is paused, decision D7). It is recorded here for ADR 0116's owner; whether the shared
+crates have such readers was not checked.
 
-- **Decision 113, the interim paddock-dev reuse exclusion** (being built): until WP-1 and WP-2 land, the paddock-dev package is not
-  reused by the test cache. It is removed when WP-2's target is live, as the last step of WP-2.
-- **Decision 114, the OS scoping** (being built): which paddock-dev tests run on macOS and Windows (ER-52). It is independent of the
-  split; if WP-5 is done, each crate's OS-scoped entries move with its modules (the `hostTests` names in `paddock.ci.json` are module paths,
-  so they change with the move).
+### Interaction with the Linux partitions, the OS scoping and the job model
 
-### Interaction with the Linux partitions and the job model
-
-- **Partitions.** Partition the Linux paddock-dev leg by test (nextest `--partition slice:k/n` or `hash:k/n`), not by package: a
-  package partition after (a) would put about half the time in one leg. The cache's filterset ANDs with the partition, as the crates leg
-  does. The `whole` binary is the long pole of each partition (its ADR 0121 groups cap it at four tests at a time); with (d), a partition
-  run whose area target is reused runs only its share of `whole`.
-- **Job model (ADR 0123).** (d) and (e) change no job, leg or name. (a) adds packages to the paddock-dev workspace and leaves the job
-  layout alone; if it is done, the legs keep running the workspace and the cache leaves packages out, so the model needs no new field.
+- **Partitions.** The Linux paddock-dev leg runs as nextest partitions by test (`hash:k/n`, `ci/paddock-dev-linux-partitions`), not by
+  package: a package partition after (a) would put about half the time in one leg. With reuse excluded, the partitions are where the
+  Linux wall time comes from.
+- **OS scoping (decision 114).** macOS and Windows run only the tests that depend on their OS (ER-52). That is the lever for the single
+  runners; the Windows merge_check tests (46% of that leg's test time, §Measured) are its largest item.
+- **Job model (ADR 0123).** Nothing here changes a job, leg or name.
 
 ## Decisions (taken 2026-11-27)
 
-- **D1 = (d) and (e) now; (a) deferred** until after train y's measurements, revisited only if paddock-dev is still the bottleneck
-  (the user). Cost of (d) and (e): 4.5 to 6.5 agent-days (§Work packages); (a) would add 4.5 to 6.
-- **D2 = the HEAD tree id** keys the whole-repository target.
+- **D1 = permanent exclusion plus (e).** paddock-dev is never reused by the test cache (decision 113's exclusion stays); (e) is
+  scheduled later as low-priority code health; (d) is rejected; (a) stays deferred until after train y.
+- **D2** (the tree key) falls with (d).
 - **D3 = the layer check lands report-only** and blocks after its first green run.
 
 ## Work packages
 
 | WP | What | Files | Size |
 |---|---|---|---|
-| WP-1 (d) | the whole-repository filterset in `test_cost` (graph, tree and live prefixes) with tests, failing first; the target `rust:tools/paddock-dev#whole` and the HEAD-tree key in `test_cache::key` | `src/test_cost.rs`, `src/test_cache/key.rs` | 0.5 d |
-| WP-2 (d) | lookup, plan and record use the two targets (the package filterset becomes `package(=p) & not whole`); a positive control (a change outside the package invalidates `whole` and keeps the package target, a change inside invalidates both); removes decision 113's exclusion | `src/test_cache/{cmd,plan,mod}.rs`, ci.yml's paddock-dev record step if its arguments change | 1 to 1.5 d |
+| WP-1, WP-2 (d) | **dropped** (rejected, §Decision 2); built on `feat/paddock-dev-whole-target`, not landed | | about 1 d spent |
 | WP-3 (e) | the layer table, the report-only check and its positive control | `docs/paddock-dev-layers.toml`, `tests/it/layers.rs` | 1 d |
 | WP-4 (e) | the about 65 back-edges removed in batches (one refactor branch each, ER-56), until the check reports none; then it blocks | `src/` | 2 to 3 d, spread |
-| WP-5 (a), deferred | the crate split in one freeze window of tools/paddock-dev: workspace members, `inputs.txt` and `build.rs`, the dev-tool cache inputs, the 321 path references in 85 files (registers, conformance, gates.toml globs, `hostTests`), test moves, per-crate nextest configuration, the Linux partitions by test; the layer check deleted | the paddock-dev workspace and the referencing files | 4.5 to 6 d |
+| WP-5 (a), deferred | the crate split in one freeze window of tools/paddock-dev: workspace members, `inputs.txt` and `build.rs`, the dev-tool cache inputs, the 321 path references in 85 files (registers, conformance, gates.toml globs, `hostTests`), test moves, per-crate nextest configuration; the layer check deleted | the paddock-dev workspace and the referencing files | 4.5 to 6 d |
 
-**Total of WP-1 to WP-4: 4.5 to 6.5 agent-days** (with WP-5, 9 to 12). Order: WP-1 and WP-2 (WP-1 can land alone: it adds a definition
-and a key nothing uses yet), then WP-3, then WP-4 batches beside feature work. WP-5, if revisited after train y, runs in a window agreed
-with the train integrator (no other paddock-dev member in that train). WP-1 to WP-3 can run while the Linux partitions land; WP-2 rebases on them if they touch `test_cache/plan.rs`.
+**Remaining cost: WP-3 and WP-4, 3 to 4 agent-days, low priority** (with WP-5, 7.5 to 10). Order: WP-3, then WP-4 batches beside
+feature work. WP-5, if revisited after train y, runs in a window agreed with the train integrator.
 
 ## Not checked
 
-- Whether the planner sends a change outside paddock-dev's read set to the paddock-dev job (the soundness question of §Context): no
-  `./dev plan` was run.
-- The compile-time effect of (a): not built; the per-crate parallelism and sccache gain is common practice, not measured here.
+- Which unprefixed tests read repository-wide files: the review reported them; this revision did not list them itself.
+- Whether the planner sends a change outside paddock-dev's read set to the paddock-dev job: no `./dev plan` was run.
+- Whether the shared crates have tests that read beyond their declared inputs (the ADR 0116 class above).
+- The compile-time effect of (a): not built.
 - The layering's 65 items are from a path count, not a design; the real cut may differ.
-- Wall time of each option: the replay sums per-test seconds; partitions and thread counts change wall time.
+- Decision 113's exclusion and decision 114's OS scoping are on branches not read here (`ci/paddock-dev-os-scope`).
