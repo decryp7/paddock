@@ -2772,7 +2772,7 @@ mod sync_static {
             .unwrap();
     }
 
-    const GREEN: &str = r#"[{"id":"conformance","verdict":"passed"},{"id":"gates-register","verdict":"passed"},{"id":"clippy crates","verdict":"passed"},{"id":"clippy-windows crates","verdict":"passed"}]"#;
+    const GREEN: &str = r#"[{"id":"fmt crates","verdict":"passed"},{"id":"conformance","verdict":"passed"},{"id":"gates-register","verdict":"passed"},{"id":"clippy crates","verdict":"passed"},{"id":"clippy-windows crates","verdict":"passed"}]"#;
 
     /// The member has merged the train: HEAD is the sync tip.
     fn merged() -> Repo {
@@ -2813,13 +2813,13 @@ mod sync_static {
         let r = merged();
         let (code, text, log) = run(&r, GREEN, "0", &[]);
         assert_eq!(code, 0, "{text}");
-        for row in ["conformance", "gates-register", "clippy crates", "clippy-windows crates"] {
+        for row in ["fmt crates", "conformance", "gates-register", "clippy crates", "clippy-windows crates"] {
             assert!(text.contains(row), "{row}: {text}");
         }
         assert!(text.contains("static rows: passed"), "{text}");
         let main = r.git(&["rev-parse", "main"]);
         assert!(
-            log.contains("--only conformance,gates-register,clippy,clippy-windows") && log.contains(&format!("--base {main}")),
+            log.contains("--priority train --only fmt,conformance,gates-register,clippy,clippy-windows") && log.contains(&format!("--base {main}")),
             "{log}"
         );
     }

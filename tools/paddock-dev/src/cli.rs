@@ -220,8 +220,8 @@ enum MergeCommand {
     /// Before merging the train into a member branch: list the commands that re-apply the member's own work the train reverted
     /// (`git revert <sha>`, git's "revert a faulty merge"; run them after `git merge <train>`), and warn about reverts of other
     /// branches' merges the member holds. Run it before the merge of the train: it changes nothing. Run it again after the merge and it
-    /// also runs the fast static rows on the sync tip (`check --pre-push --only conformance,gates-register,clippy,clippy-windows
-    /// --base <train>`); a failing row is exit 5 (6 not measured) with the rows and the next step, unless `--no-static` says why not. Once
+    /// also runs the fast static rows on the sync tip (`check --pre-push --priority train --only fmt,conformance,gates-register,clippy,clippy-windows
+    /// --base <train>`, in the train lane of the queue); a failing row is exit 5 (6 not measured) with the rows and the next step, unless `--no-static` says why not. Once
     /// they pass it dispatches the member's own CI trial: it pushes the sync tip as the new ref `sync/<member>/<short sha>` (integrator role only) and runs `ci dispatch ci.yml
     /// --trial sync/<member>/<short sha> --onto <train>` (the affected jobs of the member on the train), printing the run id, unless `--no-trial` says why not.
     SyncMember(SyncMemberArgs),

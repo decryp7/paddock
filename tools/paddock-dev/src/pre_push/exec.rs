@@ -205,6 +205,8 @@ pub struct Row {
     pub first_panic: Option<String>,
     /// The earlier green run this row rests on instead of a run of its own ([`super::reuse`]); `None` for a row that ran.
     pub reused: Option<super::reuse::Reused>,
+    /// The file that holds the whole output of the step, when it ran (ER-27: the JSON reader names it beside the cause).
+    pub log: Option<String>,
 }
 
 /// The kind of a row, for the table and its JSON.
@@ -240,6 +242,7 @@ impl Row {
             failed_tests: Vec::new(),
             first_panic: None,
             reused: None,
+            log: None,
         }
     }
 
@@ -444,7 +447,8 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
     }
     // The run time of a step that went through heavy; the wall time (queue included) only when there is no timing.
     let secs = |d: &Done| d.timing.map_or_else(|| started.elapsed().as_secs_f64(), |t| t.ran);
-    match result {
+    let log = result.as_ref().ok().and_then(|d| d.log.clone());
+    let mut row = match result {
         Err(e) => Row::not_measured(e, "install the program, then re-run `./dev check --pre-push`"),
         // The queue stalled: the command never ran. Not measured, never a pass or a failure (ADR 0102 on ADR 0089's rows); the row
         // names who held the slot and for how long nothing moved.
@@ -539,7 +543,9 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
             }
             row
         }
-    }
+    };
+    row.log = log;
+    row
 }
 
 /// How a run is bounded.
