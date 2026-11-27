@@ -1163,11 +1163,11 @@ fn a_target_with_a_read_the_graph_cannot_resolve_is_never_reused_and_says_why() 
     // A valid, trusted record exists under the key: only the blind read stands between it and a reuse (ER-33).
     s.put_many(&[rec(&a, &class, NOW - 3600)]).unwrap();
     assert!(matches!(
-        decide(std::slice::from_ref(&a), &cfg(), &class, &s, NOW, OK).0[0],
+        decide(std::slice::from_ref(&a), &cfg(), &class, "", &s, NOW, OK).0[0],
         Decision::Reuse(_)
     ));
     a.blind = vec!["crates/a/tests/it.rs: `.ancestors()` walks up from a path".into()];
-    let d = decide(std::slice::from_ref(&a), &cfg(), &class, &s, NOW, OK).0.remove(0);
+    let d = decide(std::slice::from_ref(&a), &cfg(), &class, "", &s, NOW, OK).0.remove(0);
     let Decision::Run(Why::Blind(w)) = &d else { panic!("{d:?}") };
     assert!(
         w.contains("crates/a/tests/it.rs") && w.contains("ancestors"),
@@ -1186,7 +1186,7 @@ fn a_target_with_a_read_the_graph_cannot_resolve_is_never_reused_and_says_why() 
     };
     a.target.package = "nxflaky".into();
     assert_eq!(
-        records_from_log(&clean_log(), std::slice::from_ref(&a), &cfg(), &class, &meta).len(),
+        records_from_log(&clean_log(), std::slice::from_ref(&a), &cfg(), &class, "", &meta).len(),
         1
     );
 }
@@ -1195,7 +1195,10 @@ fn d_text(d: &Decision) -> String {
     match d {
         Decision::Run(w) => w.text(),
         Decision::Reuse(_) => String::new(),
+    }
+}
 
+#[test]
 fn a_filtered_host_leg_records_under_its_filter_and_an_identical_one_reuses_but_another_filter_does_not() {
     let (_d, s) = scratch();
     let class = RunnerClass::of("macos", "aarch64");
