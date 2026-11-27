@@ -242,10 +242,18 @@ fn the_shipped_config_never_offers_paddock_dev_for_reuse_but_still_offers_other_
         dirty: false,
     };
     let other = cand("crates/a", "h");
-    s.put_many(&[rec(&dev, &class, NOW - 3600), rec(&other, &class, NOW - 3600)]).unwrap();
+    s.put_many(&[rec(&dev, &class, NOW - 3600), rec(&other, &class, NOW - 3600)])
+        .unwrap();
     let (d, _) = decide(&[dev.clone(), other], &cfg(), &class, &s, NOW, OK);
-    assert_eq!(d[0], Decision::Run(Why::Never), "paddock-dev runs although a record of its key exists");
-    assert!(matches!(d[1], Decision::Reuse(_)), "the control: another target with a record is still reused");
+    assert_eq!(
+        d[0],
+        Decision::Run(Why::Never),
+        "paddock-dev runs although a record of its key exists"
+    );
+    assert!(
+        matches!(d[1], Decision::Reuse(_)),
+        "the control: another target with a record is still reused"
+    );
 }
 
 #[test]
