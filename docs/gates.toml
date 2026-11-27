@@ -1235,3 +1235,4 @@ reason = "ER-41: report-only until its first green run on the real tree, recorde
 owner = "ER-21 class: one blind crate (paddock-testkit, a dev-dependency of nearly every crate) kept 121 of 137 test crates Never; ADR 0116 amendment 2026-11-27"
 since = 2026-11-27
 review_by = 2026-12-11
+approved = "user"
