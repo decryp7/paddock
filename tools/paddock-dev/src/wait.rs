@@ -586,13 +586,13 @@ impl Probe for CiRunProbe<'_> {
     }
 }
 
-/// The real HTTP: `curl`, with the URL and the Authorization header on standard input (`-K -`) so the token is in no argument list.
-pub struct CurlHttp;
+/// One curl call per request, no retry: `curl`, with the URL and the Authorization header on standard input (`-K -`) so the token is in no argument list.
+pub struct CurlOnce;
 
-impl CurlHttp {
+impl CurlOnce {
     /// One GET through curl: the body, at most `max_bytes`, within `seconds`.
     fn get(url: &str, token: &str, accept: &str, max_bytes: u64, seconds: u32) -> Result<Vec<u8>, String> {
-        CurlHttp::request("GET", url, token, accept, None, max_bytes, seconds)
+        CurlOnce::request("GET", url, token, accept, None, max_bytes, seconds)
     }
 
     /// One request through curl; a body is sent as JSON through the config on standard input (never an argument).
@@ -671,25 +671,163 @@ impl CurlHttp {
     }
 }
 
-impl Http for CurlHttp {
+impl Http for CurlOnce {
     fn get_json(&mut self, url: &str, token: &str) -> Result<Value, String> {
-        let body = CurlHttp::get(url, token, "application/json", 16 << 20, 20)?;
+        let body = CurlOnce::get(url, token, "application/json", 16 << 20, 20)?;
         serde_json::from_slice(&body).map_err(|e| format!("the server's answer is not JSON: {e}"))
     }
 
     fn get_text(&mut self, url: &str, token: &str) -> Result<String, String> {
         // A job log is a few MB; 64 MiB bounds a runaway one.
-        let body = CurlHttp::get(url, token, "text/plain", 64 << 20, 120)?;
+        let body = CurlOnce::get(url, token, "text/plain", 64 << 20, 120)?;
         Ok(String::from_utf8_lossy(&body).into_owned())
     }
 
     fn send_json(&mut self, method: &str, url: &str, token: &str, body: Option<&Value>) -> Result<Value, String> {
         let text = body.map(Value::to_string);
-        let answer = CurlHttp::request(method, url, token, "application/json", text.as_deref(), 16 << 20, 30)?;
+        let answer = CurlOnce::request(method, url, token, "application/json", text.as_deref(), 16 << 20, 30)?;
         if answer.iter().all(u8::is_ascii_whitespace) {
             return Ok(Value::Null);
         }
         serde_json::from_slice(&answer).map_err(|e| format!("the server's answer is not JSON: {e}"))
+    }
+}
+
+/// Answers this process has had from the server (a body, or a 4xx other than 401): once there is one, a read that meets a 401 or a
+/// 5xx is held and retried by [`CurlHttp`] ([`Retrying`]); before it, a 401 is a wrong token and ends the call at once.
+static GOOD_ANSWERS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// The most a read waits in total for a refusing server (backoff 2, 4, 8, 16, then 30 s). Cause: 2026-11-27/28, Gitea (it shares a
+/// host with the CI lanes) refused valid tokens for at least 2.5 minutes under load; the real length is not measured, so the hold is
+/// bounded and ends with an `::error::` naming the causes.
+pub const READ_HOLD: Duration = Duration::from_secs(300);
+
+/// The HTTP status curl's `--fail-with-body` text carries (`returned error: 401`), if any.
+fn http_status(error: &str) -> Option<u16> {
+    let rest = error.split("error: ").nth(1)?;
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok().filter(|s| (100..600).contains(s))
+}
+
+/// A refusal that a server under load gives to a valid request: 401 or any 5xx.
+fn is_transient(error: &str) -> bool {
+    is_refused(error) || http_status(error).is_some_and(|s| s >= 500)
+}
+
+/// The pause before retry `attempt` (0-based): 2, 4, 8, 16, then 30 s.
+fn backoff(attempt: u32) -> Duration {
+    Duration::from_secs([2, 4, 8, 16].get(attempt as usize).copied().unwrap_or(30))
+}
+
+/// Wraps an [`Http`]: READS (`get_json`, `get_text`) that meet a 401 or 5xx after the process has had a good answer are held and
+/// retried with backoff for at most [`READ_HOLD`], with one `::warning::`, one recovery line, and at the end one error naming the
+/// causes. Writes (`send_json`, `post_json`: a dispatch, a PUT, a DELETE) are passed on once, never retried: a retried dispatch could
+/// start two runs. A 401 before any good answer is a wrong token and is returned at once.
+pub struct Retrying<'g, H: Http> {
+    inner: H,
+    good: &'g std::sync::atomic::AtomicU32,
+    sleep: Box<dyn FnMut(Duration) + 'g>,
+    log: Box<dyn FnMut(&str) + 'g>,
+}
+
+impl<'g, H: Http> Retrying<'g, H> {
+    /// Over `inner`, counting good answers in `good`; `sleep` and `log` are the real ones outside the tests.
+    pub fn new(
+        inner: H,
+        good: &'g std::sync::atomic::AtomicU32,
+        sleep: Box<dyn FnMut(Duration) + 'g>,
+        log: Box<dyn FnMut(&str) + 'g>,
+    ) -> Retrying<'g, H> {
+        Retrying { inner, good, sleep, log }
+    }
+
+    fn read<T>(&mut self, mut once: impl FnMut(&mut H) -> Result<T, String>) -> Result<T, String> {
+        use std::sync::atomic::Ordering::Relaxed;
+        let (mut waited, mut attempt, mut warned) = (Duration::ZERO, 0u32, false);
+        loop {
+            match once(&mut self.inner) {
+                Ok(v) => {
+                    if warned {
+                        (self.log)(&format!(
+                            "the server answers again after {attempt} retries and {}",
+                            fmt_duration(waited)
+                        ));
+                    }
+                    self.good.fetch_add(1, Relaxed);
+                    return Ok(v);
+                }
+                Err(e) if is_transient(&e) && self.good.load(Relaxed) > 0 => {
+                    let pause = backoff(attempt);
+                    if waited + pause > READ_HOLD {
+                        return Err(format!(
+                            "{e}: the server answered this process before, so the token is probably not wrong; it kept refusing for {} \
+                             ({attempt} retries): Gitea or its proxy is overloaded or down, or the token was revoked. Check with \
+                             `curl -H \"Authorization: token $GITEA_TOKEN\" <server>/api/v1/user` (never print the token), then run again",
+                            fmt_duration(waited)
+                        ));
+                    }
+                    if !warned {
+                        warned = true;
+                        (self.log)(&format!(
+                            "::warning::the server refused a read ({}); it answered earlier, so holding and retrying for up to {}",
+                            http_status(&e).map_or("no status".to_string(), |s| format!("HTTP {s}")),
+                            fmt_duration(READ_HOLD)
+                        ));
+                    }
+                    (self.sleep)(pause);
+                    waited += pause;
+                    attempt += 1;
+                }
+                Err(e) => {
+                    // An answer such as 404 shows the server and the token work.
+                    if http_status(&e).is_some_and(|s| (400..500).contains(&s) && s != 401) {
+                        self.good.fetch_add(1, Relaxed);
+                    }
+                    return Err(e);
+                }
+            }
+        }
+    }
+}
+
+impl<H: Http> Http for Retrying<'_, H> {
+    fn get_json(&mut self, url: &str, token: &str) -> Result<Value, String> {
+        self.read(|h| h.get_json(url, token))
+    }
+    fn get_text(&mut self, url: &str, token: &str) -> Result<String, String> {
+        self.read(|h| h.get_text(url, token))
+    }
+    fn send_json(&mut self, method: &str, url: &str, token: &str, body: Option<&Value>) -> Result<Value, String> {
+        // Never retried: the call may have reached the server (a dispatch could start two runs).
+        self.inner.send_json(method, url, token, body)
+    }
+}
+
+/// The real HTTP for every caller: [`CurlOnce`] under [`Retrying`], the good-answer count shared by the whole process.
+pub struct CurlHttp;
+
+impl CurlHttp {
+    fn retrying() -> Retrying<'static, CurlOnce> {
+        Retrying::new(
+            CurlOnce,
+            &GOOD_ANSWERS,
+            Box::new(std::thread::sleep),
+            Box::new(|line| {
+                let _ = writeln!(std::io::stderr(), "http: {line}");
+            }),
+        )
+    }
+}
+
+impl Http for CurlHttp {
+    fn get_json(&mut self, url: &str, token: &str) -> Result<Value, String> {
+        CurlHttp::retrying().get_json(url, token)
+    }
+    fn get_text(&mut self, url: &str, token: &str) -> Result<String, String> {
+        CurlHttp::retrying().get_text(url, token)
+    }
+    fn send_json(&mut self, method: &str, url: &str, token: &str, body: Option<&Value>) -> Result<Value, String> {
+        CurlOnce.send_json(method, url, token, body)
     }
 }
 
@@ -760,7 +898,8 @@ pub struct Env<'a> {
 pub fn command(args: &WaitArgs) -> Result<Report, CliError> {
     let var = |k: &str| std::env::var(k).ok();
     let presence = |id: ProcessId| id.presence();
-    let mut http = CurlHttp;
+    // One look per poll: the probe holds through a refusal itself, in step with `--max` and its clock.
+    let mut http = CurlOnce;
     let mut reach = crate::health::CurlReach;
     let vars: std::collections::HashMap<String, String> = crate::process_env::vars().collect();
     let services = wait_services(&args.server, &vars);
@@ -1349,6 +1488,119 @@ mod tests {
         let (o, log, _) = go(&mut probe, 3600, 15);
         assert!(matches!(o, Outcome::Broken { .. }), "{o:?}");
         assert_eq!(http.urls.len(), MAX_CONSECUTIVE_ERRORS as usize, "{log}");
+    }
+
+    /// RetryScript answers for the shared retry layer: reads pop `gets` (the last repeats), writes are counted.
+    struct RetryScript {
+        gets: Vec<Result<Value, String>>,
+        get_calls: usize,
+        sends: usize,
+        send_answer: Result<Value, String>,
+    }
+    impl RetryScript {
+        fn new(gets: Vec<Result<Value, String>>) -> RetryScript {
+            RetryScript {
+                gets,
+                get_calls: 0,
+                sends: 0,
+                send_answer: Err("curl exited with exit status: 22: curl: (22) The requested URL returned error: 503".into()),
+            }
+        }
+    }
+    impl Http for RetryScript {
+        fn get_json(&mut self, _url: &str, _token: &str) -> Result<Value, String> {
+            self.get_calls += 1;
+            self.gets[self.get_calls.min(self.gets.len()) - 1].clone()
+        }
+        fn send_json(&mut self, _m: &str, _url: &str, _token: &str, _body: Option<&Value>) -> Result<Value, String> {
+            self.sends += 1;
+            self.send_answer.clone()
+        }
+    }
+
+    const UNAVAILABLE: &str = "curl exited with exit status: 22: curl: (22) The requested URL returned error: 503 upstream down";
+
+    /// Runs `f` over a [`Retrying`] with `good` answers already counted; returns the result, the pauses and the log lines.
+    fn through<T>(inner: &mut RetryScript, good: u32, f: impl FnOnce(&mut dyn Http) -> T) -> (T, Vec<Duration>, Vec<String>) {
+        let counter = std::sync::atomic::AtomicU32::new(good);
+        let (sleeps, lines) = (RefCell::new(Vec::new()), RefCell::new(Vec::new()));
+        let out = {
+            let mut r = Retrying::new(
+                inner,
+                &counter,
+                Box::new(|d| sleeps.borrow_mut().push(d)),
+                Box::new(|l| lines.borrow_mut().push(l.to_string())),
+            );
+            f(&mut r)
+        };
+        (out, sleeps.into_inner(), lines.into_inner())
+    }
+
+    impl Http for &mut RetryScript {
+        fn get_json(&mut self, url: &str, token: &str) -> Result<Value, String> {
+            (**self).get_json(url, token)
+        }
+        fn send_json(&mut self, m: &str, url: &str, token: &str, body: Option<&Value>) -> Result<Value, String> {
+            (**self).send_json(m, url, token, body)
+        }
+    }
+
+    #[test]
+    fn a_read_after_a_good_answer_rides_out_a_401_and_a_5xx_with_backoff() {
+        let mut http = RetryScript::new(vec![
+            Err(REFUSED.into()),
+            Err(UNAVAILABLE.into()),
+            Err(REFUSED.into()),
+            Ok(json!({"a": 1})),
+        ]);
+        let (r, sleeps, lines) = through(&mut http, 1, |h| h.get_json("u", "t"));
+        assert_eq!(r.unwrap(), json!({"a": 1}));
+        assert_eq!(sleeps, [2, 4, 8].map(Duration::from_secs));
+        assert_eq!(lines.iter().filter(|l| l.starts_with("::warning::")).count(), 1, "{lines:?}");
+        assert!(lines.last().unwrap().contains("answers again after 3 retries"), "{lines:?}");
+    }
+
+    #[test]
+    fn a_read_before_any_good_answer_is_a_wrong_token_and_is_not_retried() {
+        let mut http = RetryScript::new(vec![Err(REFUSED.into())]);
+        let (r, sleeps, lines) = through(&mut http, 0, |h| h.get_json("u", "t"));
+        assert!(r.unwrap_err().contains("401"));
+        assert!(sleeps.is_empty() && lines.is_empty(), "{sleeps:?} {lines:?}");
+        assert_eq!(http.get_calls, 1);
+    }
+
+    #[test]
+    fn a_read_that_keeps_failing_ends_within_the_hold_with_one_error_naming_the_causes() {
+        let mut http = RetryScript::new(vec![Err(UNAVAILABLE.into())]);
+        let (r, sleeps, lines) = through(&mut http, 1, |h| h.get_json("u", "tok-secret"));
+        let e = r.unwrap_err();
+        assert!(
+            e.contains("503") && e.contains("overloaded or down") && e.contains("revoked"),
+            "{e}"
+        );
+        assert!(!e.contains("tok-secret"));
+        assert!(sleeps.iter().sum::<Duration>() <= READ_HOLD && sleeps.iter().sum::<Duration>() > READ_HOLD - Duration::from_secs(31));
+        assert_eq!(lines.iter().filter(|l| l.starts_with("::warning::")).count(), 1, "{lines:?}");
+    }
+
+    #[test]
+    fn a_404_is_an_answer_and_is_not_retried() {
+        let mut http = RetryScript::new(vec![Err("curl: (22) The requested URL returned error: 404".into())]);
+        let (r, sleeps, _) = through(&mut http, 1, |h| h.get_json("u", "t"));
+        assert!(r.is_err() && sleeps.is_empty());
+        assert_eq!(http.get_calls, 1);
+    }
+
+    #[test]
+    fn a_write_is_never_retried_even_after_a_good_answer_and_a_503() {
+        let mut http = RetryScript::new(vec![Ok(json!(1))]);
+        let (r, sleeps, lines) = through(&mut http, 5, |h| h.post_json("https://x/dispatch", "t", &json!({})));
+        assert!(r.unwrap_err().contains("503"));
+        assert_eq!(http.sends, 1, "a retried dispatch could start two runs");
+        let (_, sleeps2, _) = through(&mut http, 5, |h| h.send_json("DELETE", "u", "t", None));
+        let (_, sleeps3, _) = through(&mut http, 5, |h| h.send_json("PUT", "u", "t", None));
+        assert_eq!(http.sends, 3);
+        assert!(sleeps.is_empty() && sleeps2.is_empty() && sleeps3.is_empty() && lines.is_empty());
     }
 
     fn args(rest: &[&str]) -> WaitArgs {

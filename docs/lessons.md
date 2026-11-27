@@ -4522,3 +4522,9 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
 - **Fix.** `CiRunProbe` holds through a 401 that follows a good look in the same wait (up to 40 looks, 10 minutes at 15 s; the length of a real refusal is
   not measured), writes one `::warning::` and one "answers again" line, and at the end prints one `::error::` naming the likely causes and the check to run.
   A 401 on the first look is a wrong token and ends as before.
+- **Shared layer (same branch, coordinator's step, ER-22).** The hold also lives in the one HTTP layer: `CurlHttp` is now `Retrying<CurlOnce>`, so every
+  READ caller (ci_runs client, trial-verdict, verdict, load, the artifact reader) holds and retries a 401 or 5xx with backoff (2, 4, 8, 16, then 30 s,
+  at most 5 minutes in total) once the process has had a good answer, with one `::warning::`, one recovery line and one final error naming the causes.
+  Writes (`send_json`, `post_json`: a dispatch, PUT, DELETE) are never retried, because a retried dispatch could start two runs; a test pins it. A 401 before
+  any good answer stays a wrong token. `wait --ci-run` uses `CurlOnce` and keeps its own probe-level hold, which respects `--max` and the clock.
+  `ci_runs::client::Client::retry` (4 short attempts on any error) stays as it was; folding it into the layer is open.
