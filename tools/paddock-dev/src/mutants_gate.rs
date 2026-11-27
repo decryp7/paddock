@@ -50,10 +50,10 @@ pub const MUTANT_TIMEOUT_SECS: u64 = 900;
 
 /// The most mutants one run tests, over all workspaces. A diff with more runs one slice of consecutive mutants in source order
 /// (cargo-mutants `--shard 0/k`, `k = ceil(n / cap)`) and the rest is reported as not measured. Measured (docs/benchmarks.md, "Mutation
-/// testing of the diff in the member gate", train y's `refactor/test-cache-outcome-type`): the unmutated build and tests took 51 s and
-/// 170 s, and each mutant 8 s of build and about 150 s of the package's tests, so 4 minutes plus 2.7 minutes per mutant: 16 mutants fit
-/// the run limit and the 60-minute row cap of a push step with a margin.
-pub const MAX_MUTANTS: usize = 16;
+/// testing of the diff in the member gate"): in `tools/paddock-dev` the unmutated build and tests take 4 minutes and each mutant 2.5 to
+/// 4 minutes (8 s of build, the package's tests the rest), so 12 mutants took 3162 s on a busy machine (train y's `fix/gate-row-stall`);
+/// in `crates` a mutant took 13 s. 12 fits the run limit and the 60-minute row cap of a push step.
+pub const MAX_MUTANTS: usize = 12;
 
 /// The whole run's hang limit: the baseline, the control and [`MAX_MUTANTS`] mutants.
 pub const RUN_LIMIT: Duration = Duration::from_secs(3300);
@@ -214,7 +214,7 @@ impl Tool for Real {
         cmd.arg("mutants")
             .args(args)
             .current_dir(cwd)
-            .env("TMPDIR", tmp)
+            .env("TMPDIR", scratch_tmp(tmp))
             .env("RUSTUP_AUTO_INSTALL", "0");
         let out = run_bounded(cmd, Limits::new(RUN_LIMIT).max_output(1 << 26)).map_err(|e| format!("cargo mutants could not run: {e}"))?;
         Ok(Ran {
@@ -622,9 +622,25 @@ pub fn command_gate(root: Option<PathBuf>, base: &str) -> Result<Report, CliErro
     Ok(report(&summary, MODE, started))
 }
 
+/// The temporary folder the tests of the mutants get: `tmp` below the run's scratch folder. Apart from the checkout, because the tests leave
+/// repositories of their own there (no remote: [`crate::safe_remove`] refuses a folder that holds one), and it is removed first by
+/// [`crate::safe_remove::remove_under`], which asks for no proof beyond "strictly under the run's folder".
+fn scratch_tmp(scratch: &Path) -> PathBuf {
+    let dir = scratch.join("tmp");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
 /// Removes the run's own scratch folder through [`crate::safe_remove`] (it has an owner record, its checkout is clean and has a
 /// remote branch at its one commit). A refusal is a warning that names the folder, never silent.
 fn remove_scratch(parent: &Path, scratch: &Path) {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    if let Err(e) = crate::safe_remove::remove_under(scratch, &scratch.join("tmp"), home.as_deref()) {
+        eprintln!(
+            "::warning::mutants gate: the tests' temporary folder in {} was not removed ({e:?})",
+            scratch.display()
+        );
+    }
     if let Err(e) = crate::safe_remove::remove(scratch, std::slice::from_ref(&parent.to_path_buf())) {
         eprintln!(
             "::warning::mutants gate: the scratch folder {} was not removed ({e}); remove it with `./dev` or by hand",
