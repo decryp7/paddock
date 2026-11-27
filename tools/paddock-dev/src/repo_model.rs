@@ -340,6 +340,9 @@ pub fn build_world_with(
     for u in more.model.unresolved() {
         model.add_unresolved(u.clone());
     }
+    for u in more.model.blind() {
+        model.add_blind(u.clone());
+    }
     errors.extend(more.errors);
     let world = World {
         inputs,

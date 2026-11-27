@@ -102,7 +102,7 @@ fn targets(graph: &paddock_repo_graph::Graph, workspace: &str) -> Vec<Target> {
     t
 }
 
-/// The model's unresolved references by the Cargo package folder of their referrer, one line each: a package with any is blind
+/// The model's blind reads (a plan does not see them) by the Cargo package folder of their referrer, one line each: a package with any is blind
 /// (its key cannot say what it reads, ADR 0116 §2).
 fn blind_reads(
     cargo: &paddock_repo_graph::Graph,
@@ -161,7 +161,7 @@ pub fn candidates_in(root: &Path, w: &World, workspace: &str, os: &str) -> Resul
     };
     let nodes: Vec<String> = ts.iter().map(|t| t.node.clone()).collect();
     let hashes = crate::repo_model::hash::node_hashes(&crate::input_hash::Real, &ctx, root, world, &tree, &nodes)?;
-    let blind = blind_reads(&w.graph.cargo, world.model.unresolved());
+    let blind = blind_reads(&w.graph.cargo, world.model.blind());
     ts.into_iter()
         .map(|t| {
             let h = hashes.get(&t.node).ok_or_else(|| {

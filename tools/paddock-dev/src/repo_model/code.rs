@@ -282,7 +282,7 @@ impl CodeExtractor {
                         if r.how == How::Blind {
                             // The source reads something the extractor cannot follow: its crate is unresolved (ADR 0116 §2).
                             if unresolved {
-                                x.unresolved.push(Unresolved {
+                                x.blind.push(Unresolved {
                                     referrer: f.clone(),
                                     node: None,
                                     reference: r.path,
@@ -306,7 +306,7 @@ impl CodeExtractor {
                     stats.syn_fallbacks += 1;
                     // A source `syn` cannot parse cannot be followed: with a trigger in its text it is unresolved too.
                     if unresolved && BLIND_TRIGGERS.iter().any(|t| text.contains(t)) {
-                        x.unresolved.push(Unresolved {
+                        x.blind.push(Unresolved {
                             referrer: f.clone(),
                             node: None,
                             reference: format!("source that does not parse ({e}) and reads the crate folder or the tree"),
