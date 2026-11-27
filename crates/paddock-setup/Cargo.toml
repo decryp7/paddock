@@ -12,6 +12,9 @@ build = "build.rs"
 # Unfinished until `paddock-proc::installed` (ADR 0053 section 3, plan S1) is on the branch: `stop-all` is compiled in by
 # build.rs (cfg `has_proc_installed`) when that module exists, so no feature has to be named and `--all-features` works.
 scaffold = true
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root. `build.rs` tests whether `../paddock-proc/src/installed.rs` exists (a cfg), through a path built from `CARGO_MANIFEST_DIR`.
+test-reads = ["crates/paddock-proc/src/installed.rs"]
 
 [lib]
 doctest = false # doctests are off (crates/README.md, "Doctests")

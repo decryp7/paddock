@@ -26,3 +26,9 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage
 paddock-jobs = { workspace = true, features = ["test-support"] }
 paddock-testkit = { workspace = true }
 serde_json = "1"
+
+[package.metadata.paddock]
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `src/disk.rs`: `existing_ancestor` walks up a caller's output folder (a machine path), not a repository path.
+test-reads = []

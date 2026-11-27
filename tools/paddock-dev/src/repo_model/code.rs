@@ -22,7 +22,7 @@
 //!   get an `imports` edge from each importer, so their change selects the specs that import them. A helper no spec imports stays code (D6: cannot prove), and so does every helper of a
 //!   project with an unresolved import in its specs or helpers (the project runs in full on a test reach).
 
-use super::reads::{Parsed, rust_reads};
+use super::reads::{How, Parsed, rust_reads};
 use super::ts::{self, Target};
 use paddock_repo_graph::Graph;
 use paddock_repo_graph::model::Unresolved;
@@ -183,20 +183,41 @@ pub fn grep_files(code: Option<i32>, stdout: &str, stderr: &str, truncated: bool
         .collect()
 }
 
+/// What `git grep -E` looks for in a Rust source: every construct [`rust_reads`] resolves or marks blind.
+pub const READ_PATTERN: &str =
+    r"include(_str|_bytes)?!|CARGO_MANIFEST_DIR|CARGO_MANIFEST_PATH|#\[path|rerun-if-changed|ancestors\(|current_dir|ls-files";
+
+/// Text that makes an unparseable source a blind one.
+pub const BLIND_TRIGGERS: &[&str] = &[
+    "CARGO_MANIFEST_DIR",
+    "CARGO_MANIFEST_PATH",
+    ".ancestors(",
+    "current_dir",
+    "ls-files",
+];
+
+/// What a source's reads cannot resolve, one line each (the reference text of a blind read): the [`How::Blind`] reads of a parse, or, for
+/// a source `syn` could not parse, one line when its text names a trigger ([`BLIND_TRIGGERS`]). The one definition for the model
+/// ([`CodeExtractor::reads_of`]) and for the declared-reads check (C179).
+pub fn blind_of(parsed: &Parsed, text: &str) -> Vec<String> {
+    match parsed {
+        Parsed::Reads(r) => r.iter().filter(|r| r.how == How::Blind).map(|r| r.path.clone()).collect(),
+        Parsed::Fallback(e) if BLIND_TRIGGERS.iter().any(|t| text.contains(t)) => {
+            vec![format!("source that does not parse ({e}) and reads the crate folder or the tree")]
+        }
+        Parsed::Fallback(_) => Vec::new(),
+    }
+}
+
 impl CodeExtractor {
     /// The `.rs` files that may read a path: one `git grep -l` over the tracked tree at `rev` (`None`: the working tree, files
     /// mode).
     fn read_candidates(&self, rev: Option<&str>) -> Result<Vec<String>, String> {
         self.spawned.set(self.spawned.get() + 1);
         let mut cmd = crate::git_env::git();
-        cmd.arg("-C").arg(&self.root).args([
-            "-c",
-            "core.quotePath=false",
-            "grep",
-            "-l",
-            "-E",
-            r"include(_str|_bytes)?!|CARGO_MANIFEST_DIR|#\[path|rerun-if-changed",
-        ]);
+        cmd.arg("-C")
+            .arg(&self.root)
+            .args(["-c", "core.quotePath=false", "grep", "-l", "-E", READ_PATTERN]);
         if let Some(rev) = rev {
             cmd.arg(rev);
         }
@@ -267,10 +288,22 @@ impl CodeExtractor {
         for ((f, text, reader), rr) in sources.iter().zip(parsed) {
             let (f, reader) = (*f, *reader);
             stats.rust_sources += 1;
+            // The source reads something the extractor cannot follow: its crate is blind (ADR 0116 §2).
+            if unresolved {
+                for reference in blind_of(&rr, text) {
+                    x.blind.push(Unresolved {
+                        referrer: f.clone(),
+                        node: None,
+                        reference,
+                        why: "a read the extractor cannot resolve (the test cache never reuses this crate unless it declares test-reads)"
+                            .into(),
+                    });
+                }
+            }
             let paths: BTreeSet<String> = match rr {
                 Parsed::Reads(r) => {
                     let mut found = BTreeSet::new();
-                    for r in r {
+                    for r in r.into_iter().filter(|r| r.how != How::Blind) {
                         if exists(&r.path) {
                             found.insert(r.path);
                         } else if unresolved && r.how.required() {

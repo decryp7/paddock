@@ -142,3 +142,11 @@ tauri = { version = "2.12.4", features = ["test"] }
 paddock-shell = { path = "../../../../crates/paddock-shell", features = ["tray", "mock-runtime"] }
 # The menu bar's no-window route (Quit with the last window closed to the tray) is tested with the shell's NativeMenu state.
 paddock-menu = { path = "../../../../crates/paddock-menu", features = ["tauri"] }
+
+[package.metadata.paddock]
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `tests/it/shell.rs` compares the generated TypeScript of the app; `src/lib.rs` reads the process's working folder.
+test-reads = [
+    "apps/pitwall/app/src/app/generated/*",
+]
