@@ -326,14 +326,22 @@ fn a_browser_whose_owner_is_killed_is_ended_and_its_throwaway_profile_removed() 
     owner.kill().unwrap();
     owner.wait().unwrap();
     if running_as_root() {
-        // Root (the Linux CI containers): the guardian is off for root binaries (ADR 0076 amendment 2026-11-09), so the
-        // orphaned browser stays. Asserted, then ended by identity; the guarded path runs as a user.
-        let stayed = paddock_proc::run_state(browser) == paddock_proc::RunState::Running;
+        // Root (the Linux CI containers): the guardian is off for root binaries (ADR 0076 amendment 2026-11-09), so nothing removes the
+        // throwaway profile: the owner's clean-up was skipped by the SIGKILL, and only a guardian would do it. That is what is
+        // asserted. Whether the browser is still running is not: the fake ends itself within one watch tick (10 ms) of its owner's
+        // death (`a_fake_browser_ends_when_its_owner_dies_even_without_a_guardian`), so a look right after `wait` races it (run 9201).
+        // Ended by identity, then waited for, so the test leaves no browser behind (ER-14); the profile goes with the tempdir.
+        let kept = profile.exists();
         paddock_proc::kill_tree(browser);
         assert!(
-            stayed,
-            "a root owner's browser was ended without a guardian"
+            kept,
+            "a root owner's profile was removed without a guardian"
         );
+        let ended =
+            paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+                paddock_proc::run_state(browser) == paddock_proc::RunState::Exited
+            });
+        assert!(ended, "the orphaned browser did not end");
         return;
     }
     let gone = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
