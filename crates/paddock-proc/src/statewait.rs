@@ -35,10 +35,15 @@ fn read(id: ProcessId) -> RunState {
 /// identity-checked like [`run_state`](crate::run_state): a pid that was handed on is [`RunState::Exited`].
 #[must_use]
 pub fn wait_state(id: ProcessId, max: Duration, pred: impl Fn(RunState) -> bool) -> bool {
+    poll(max, || pred(read(id)))
+}
+
+/// Polls `done` until it holds or `max` has passed; whether it held.
+fn poll(max: Duration, done: impl Fn() -> bool) -> bool {
     let end = Instant::now() + max;
     let mut pause = FIRST;
     loop {
-        if pred(read(id)) {
+        if done() {
             return true;
         }
         if Instant::now() >= end {
@@ -50,10 +55,24 @@ pub fn wait_state(id: ProcessId, max: Duration, pred: impl Fn(RunState) -> bool)
     }
 }
 
-/// [`wait_state`] for the process having ended (gone, a zombie, or its pid handed on).
+/// Whether the process has ended (gone, a zombie, or its pid handed on). On Windows that is its handle being signaled, never "no longer
+/// in the process table": an ended process stays listed, and reads [`RunState::Unknown`], while any handle to it is open (a
+/// monitor's, the runner's, the test's own `Child`), so a table read there can hold off for ever (trial run 9253).
+fn ended(id: ProcessId) -> bool {
+    #[cfg(windows)]
+    {
+        crate::sys::has_ended_by_handle(id)
+    }
+    #[cfg(not(windows))]
+    {
+        read(id) == RunState::Exited
+    }
+}
+
+/// Polls until the process has ended (see [`ended`]), for at most `max`; whether it had. The state is identity-checked.
 #[must_use]
 pub fn wait_exited(id: ProcessId, max: Duration) -> bool {
-    wait_state(id, max, |s| s == RunState::Exited)
+    poll(max, || ended(id))
 }
 
 /// The state of `id` read once, after `event` returned: `event` blocks until the thing that would change the state, if the code were
@@ -74,6 +93,57 @@ mod tests {
     use super::*;
     use crate::testchild::{Mode, child};
     use paddock_testkit::HANG_GUARD;
+
+    /// A second handle to the child, held open on purpose (a monitor's, the runner's): it keeps the ended process listed.
+    #[cfg(windows)]
+    struct OtherHolder(windows_sys::Win32::Foundation::HANDLE);
+
+    #[cfg(windows)]
+    impl OtherHolder {
+        fn of(id: ProcessId) -> OtherHolder {
+            use windows_sys::Win32::System::Threading::{
+                OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+            };
+            // SAFETY: OpenProcess takes plain values; the handle is closed in `drop`.
+            let h = unsafe {
+                OpenProcess(
+                    PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+                    0,
+                    id.pid(),
+                )
+            };
+            assert!(!h.is_null(), "the child is there to be opened");
+            OtherHolder(h)
+        }
+    }
+
+    #[cfg(windows)]
+    impl Drop for OtherHolder {
+        fn drop(&mut self) {
+            // SAFETY: the handle was opened in `of` and is closed once.
+            unsafe { windows_sys::Win32::Foundation::CloseHandle(self.0) };
+        }
+    }
+
+    /// Windows lists an ended process while any handle to it is open and reads it as `Unknown`: the wait for the end must not depend
+    /// on the process table. The positive control is the table read: it still says "not exited" while the handle is held.
+    #[cfg(windows)]
+    #[test]
+    fn an_ended_child_is_ended_while_another_handle_to_it_is_open() {
+        let mut c = crate::Supervised::spawn(child(Mode::Sleep)).unwrap();
+        let id = ProcessId::of(c.id().unwrap()).unwrap();
+        let other = OtherHolder::of(id);
+        crate::kill_tree(id);
+        let _ = c.wait();
+        // `c` is not dropped either: two handles are open.
+        assert!(wait_exited(id, HANG_GUARD), "the handle is signaled");
+        assert_ne!(
+            state_after(id, || {}),
+            RunState::Exited,
+            "the table read cannot see the end (the probe sees the thing)"
+        );
+        drop(other);
+    }
 
     #[test]
     fn a_running_process_is_waited_for_until_it_ends_and_the_ending_is_seen() {
