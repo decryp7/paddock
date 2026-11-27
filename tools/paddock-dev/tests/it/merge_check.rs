@@ -3013,6 +3013,102 @@ mod member_trial {
         assert!(log.contains(&format!("trial_dir={}", dt.join("trials").display())), "{log}");
     }
 
+    /// An old flat `sync/<member>` on origin cannot sit beside `sync/<member>/<sha>`: one error names it and `ci trial-prune`, and
+    /// nothing is pushed or dispatched.
+    #[test]
+    fn an_old_flat_sync_ref_is_named_with_the_next_step_and_nothing_is_pushed() {
+        let r = pushed();
+        for old in ["sync/feat/x", "trial/sync/feat/x"] {
+            let bare = r.git(&["remote", "get-url", "origin"]);
+            r.git(&["push", "-q", "origin", &format!("HEAD:refs/heads/{old}")]);
+            let (code, text, log) = sync(&r, GREEN, "run 4242", "0", &[]);
+            assert_eq!(code, 6, "{old}: {text}");
+            assert_eq!(text.matches("::error::").count(), 1, "{text}");
+            assert!(
+                text.contains(&format!("old flat ref {old}")) && text.contains("ci trial-prune") && !log.contains("ci dispatch"),
+                "{text}\n{log}"
+            );
+            assert!(
+                r.git(&["--git-dir", &bare, "for-each-ref", "refs/heads/sync/feat/x/"]).is_empty(),
+                "nothing was pushed beside the old ref"
+            );
+            r.git(&["push", "-q", "origin", "--delete", old]);
+        }
+        let (code, text, _) = sync(&r, GREEN, "run 4242", "0", &[]);
+        assert_eq!(code, 0, "with the old refs gone the sync goes through: {text}");
+    }
+
+    /// Re-landing a member whose merge the train reverted: the member's own reverted merge is its own (the subject carries a
+    /// parenthesis and the member works on `sync/<member>`), and the revert the sync tip re-applies is handed to the trial.
+    #[test]
+    fn a_member_whose_own_merge_was_reverted_is_recognised_and_its_reapply_goes_to_the_trial() {
+        let r = Repo::new();
+        r.write("base.txt", "base\n");
+        r.commit("base");
+        r.git(&["checkout", "-q", "-b", "feat/x"]);
+        r.write("x.txt", "x\n");
+        r.commit("feat: x");
+        r.git(&["checkout", "-q", "main"]);
+        r.git(&[
+            "merge",
+            "-q",
+            "--no-ff",
+            "-m",
+            "Merge feat/x (abc1234, synced as sync/feat/x) into train/t",
+            "feat/x",
+        ]);
+        let m = r.git(&["rev-parse", "HEAD"]);
+        let revert = revert_merge(&r, &m);
+        r.write("other.txt", "other\n");
+        r.commit("feat: other");
+        r.git(&["checkout", "-q", "-b", "sync/feat/x", "feat/x"]);
+        r.write("x2.txt", "x2\n");
+        r.commit("feat: x2");
+        let bare = r.path().join("..").join(format!("origin-{}.git", std::process::id()));
+        r.git(&["init", "-q", "--bare", bare.to_str().unwrap()]);
+        r.git(&["remote", "add", "origin", bare.to_str().unwrap()]);
+        // Before the merge: the revert is listed as the member's own, none as another branch's.
+        let dir = tempfile::tempdir().unwrap();
+        let (code, text, _) = sync_in(
+            &r,
+            &dir,
+            &[("PADDOCK_TRIAL_DIR", dir.path().join("trial"))],
+            GREEN,
+            "run 1",
+            "0",
+            &[],
+        );
+        assert_eq!(code, 0, "{text}");
+        assert!(
+            text.contains("1 revert(s) of this member's own merges") && text.contains("0 of other branches"),
+            "{text}"
+        );
+        // After the merge and the `git revert` of the revert: re-applied, and the trial is told.
+        r.git(&["merge", "-q", "--no-edit", "main"]);
+        r.git(&["revert", "--no-edit", &revert]);
+        let (code, text, log) = sync(&r, GREEN, "run 4242", "0", &[]);
+        assert_eq!(code, 0, "{text}");
+        assert!(
+            text.contains("0 of other branches") && text.contains("1 already re-applied"),
+            "{text}"
+        );
+        assert!(log.contains(&format!("--reland {revert}")), "{log}");
+        assert!(
+            log.contains(&format!("--trial sync/feat/x/{} ", short_head(&r))),
+            "the ref is named by the member, not by the sync branch: {log}"
+        );
+        // The same with the revert named by hand; a name that is no commit is refused.
+        let (code, text, log) = sync(&r, GREEN, "run 4243", "0", &["--reland", &revert]);
+        assert_eq!(code, 0, "{text}");
+        assert_eq!(
+            log.matches(&format!("--reland {revert}")).count(),
+            1,
+            "named twice, handed once: {log}"
+        );
+        let (code, text, _) = sync(&r, GREEN, "run 4244", "0", &["--reland", "not-a-commit"]);
+        assert_eq!(code, 2, "{text}");
+    }
+
     /// A re-sync is a new commit and pushes a second, new ref: a plain push, no force and no lease, and the first ref is untouched.
     #[test]
     fn a_re_sync_pushes_a_second_new_ref_with_no_force() {
@@ -3115,14 +3211,29 @@ mod member_trial {
 
     /// A train with member `a` merged under git's own subject, so the member's branch name is known; the gates stand-in passes.
     fn merged_member() -> (Repo, tempfile::TempDir) {
+        merged_member_as(|_| "Merge branch 'feat/a'".to_string(), None)
+    }
+
+    /// [`merged_member`] with the merge's subject made from the member head's first nine characters, and the member's tip optionally a
+    /// merge commit with the given subject (the sync merge: `Merge <train> into sync/<member>`).
+    fn merged_member_as(subject: impl Fn(&str) -> String, tip_subject: Option<&str>) -> (Repo, tempfile::TempDir) {
         let repo = Repo::new();
         repo.write("base.txt", "base\n");
         repo.commit("base");
         repo.git(&["checkout", "-q", "-b", "feat/a", "main"]);
         repo.write("a.txt", "a\n");
         repo.commit("feat: a");
+        if let Some(tip) = tip_subject {
+            // The train moves on, and the member merges it (the sync merge).
+            repo.git(&["checkout", "-q", "main"]);
+            repo.write("train.txt", "train\n");
+            repo.commit("train: moves on");
+            repo.git(&["checkout", "-q", "feat/a"]);
+            repo.git(&["merge", "-q", "--no-ff", "-m", tip, "main"]);
+        }
+        let head = repo.git(&["rev-parse", "feat/a"]);
         repo.git(&["checkout", "-q", "main"]);
-        repo.git(&["merge", "-q", "--no-ff", "-m", "Merge branch 'feat/a'", "feat/a"]);
+        repo.git(&["merge", "-q", "--no-ff", "-m", &subject(&head[..9]), "feat/a"]);
         let dir = tempfile::tempdir().unwrap();
         let ev = r#"{{"check":"pre-push","subject":{{"kind":"commit","sha":"{run:git|rev-parse|HEAD}","tree":"{run:git|rev-parse|HEAD:}"}},"tool":"fake","at":1}}"#;
         StandIn::new(dir.path(), "gates")
@@ -3173,6 +3284,49 @@ mod member_trial {
             log.contains(&format!("ci trial-verdict --branch {synced} --member-sha")) && log.contains(&head),
             "{log}"
         );
+    }
+
+    /// The reader finds the member's trial without the merge message naming a branch: from `synced as <ref>` in the subject, from the
+    /// member's own subject (`Merge <train> into sync/<member>`), and from a sync ref of origin that points at the member's head.
+    #[test]
+    fn the_member_is_found_from_the_sync_ref_the_subject_the_parent_or_a_ref_not_only_the_message() {
+        let case = |subject: &dyn Fn(&str) -> String, tip: Option<&str>, with_ref: bool, want_branch: &str| {
+            let (r, dir) = merged_member_as(|s| subject(s), tip);
+            let head = r.git(&["rev-parse", "feat/a"]);
+            if with_ref {
+                r.git(&["update-ref", &format!("refs/remotes/origin/sync/feat/a/{}", &head[..9]), &head]);
+            }
+            let (code, text, log) = check(&r, &dir, "green", "0", &[]);
+            assert_eq!(code, 0, "{text}");
+            assert!(!text.contains("names no member branch"), "{text}");
+            let want = format!("--branch {}/{} ", want_branch, &head[..9]);
+            assert!(log.contains(&want), "{want}: {log}\n{text}");
+        };
+        // The integrator's own subject: the parenthesis carries the commit and the sync ref.
+        case(
+            &|s| format!("Merge feat/a ({s}, synced as sync/feat/a/{s}) into train/t"),
+            None,
+            false,
+            "sync/feat/a",
+        );
+        // A message that names nothing, a member tip that is the sync merge.
+        case(
+            &|_| "chore: take the member".to_string(),
+            Some("Merge train/t (abc1234) into sync/feat/a"),
+            false,
+            "sync/feat/a",
+        );
+        // A message that names nothing, a sync ref of origin at the member's head.
+        case(&|_| "chore: take the member".to_string(), None, true, "sync/feat/a");
+    }
+
+    /// Positive control (ER-33): with no source that names the member the reader is not asked, and it says so (never a pass).
+    #[test]
+    fn a_member_no_source_names_is_not_read_and_says_so() {
+        let (r, dir) = merged_member_as(|_| "chore: take the member".to_string(), None);
+        let (code, text, log) = check(&r, &dir, "green", "0", &[]);
+        assert_eq!(code, 0, "{text}");
+        assert!(text.contains("member trial not read") && log.is_empty(), "{text}\n{log}");
     }
 
     /// A member merged as its own sync ref already carries the trial's name: it is not prefixed twice.

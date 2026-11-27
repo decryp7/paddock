@@ -14,8 +14,24 @@ fn fixture(name: &str) -> String {
     std::fs::read_to_string(format!("{}/tests/ci-runs/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap()
 }
 
+/// The shipped config with `[switch] green_runs` cleared. The runs in it are a record a train writes (`shadow-run --write`), not part of
+/// the schema these tests check, so the tests start from no green run whatever the shipped file holds.
+fn cfg_text() -> String {
+    let lines: Vec<&str> = CFG
+        .lines()
+        .map(|l| {
+            if l.trim_start().starts_with("green_runs") {
+                "green_runs = []"
+            } else {
+                l
+            }
+        })
+        .collect();
+    lines.join("\n") + "\n"
+}
+
 fn cfg() -> Config {
-    Config::parse(CFG).unwrap()
+    Config::parse(&cfg_text()).unwrap()
 }
 
 fn cand(dir: &str, hash: &str) -> Candidate {
@@ -88,7 +104,7 @@ fn the_key_changes_with_each_part_and_only_with_them() {
 }
 
 #[test]
-fn the_shipped_config_is_in_shadow_and_two_distinct_green_runs_switch_it_on() {
+fn a_config_with_no_green_run_is_in_shadow_and_two_distinct_green_runs_switch_it_on() {
     let c = cfg();
     assert_eq!(c.mode(), Mode::Shadow);
     let mut on = c.clone();
@@ -682,7 +698,7 @@ fn the_shadow_lines_of_several_jobs_sum_and_no_line_is_not_measured() {
 
 #[test]
 fn a_run_is_added_to_the_green_runs_once_and_the_file_still_parses() {
-    let one = with_green_run(CFG, 9001).unwrap();
+    let one = with_green_run(&cfg_text(), 9001).unwrap();
     assert_eq!(Config::parse(&one).unwrap().switch.green_runs, vec![9001]);
     assert_eq!(Config::parse(&one).unwrap().mode(), Mode::Shadow);
     assert_eq!(with_green_run(&one, 9001).unwrap(), one, "the same run twice changes nothing");
