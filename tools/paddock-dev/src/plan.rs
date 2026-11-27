@@ -401,48 +401,48 @@ pub fn conformance_apps(root: &Path) -> Vec<String> {
     out
 }
 
+/// Whether a reason the planner gives for reaching a project can alter what a package of it builds or tests: the one property the
+/// FLAKY grade reads (ER-12: a FLAKY test blocks only a change touching the test or its source; ER-21's class: lockfiles, then
+/// ci.yml, then manifest metadata).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Alters {
+    /// It can (or nobody classified it): every test of the project is touched. The default of [`State::mark`].
+    Yes,
+    /// It cannot (a ci.yml step that runs no test, see `plan_gitea::ci_change_is_inert`): no test is touched by this reason.
+    No,
+    /// Only for the packages it names (a lockfile whose changed packages were read, `plan_cargo_lock`): those packages are touched.
+    PerPackage,
+}
+
 #[derive(Default)]
 struct State {
     why: BTreeMap<String, Vec<String>>,
     /// Projects with a reason that is not a Cargo reach (a UI file, an installer file, a lockfile, a script, a workflow...): their
     /// whole test set is wanted, never a package subset (`cargoOnly` of the plan).
     beyond_cargo: BTreeSet<String>,
-    /// Projects with a reason beyond Cargo that is not a lockfile whose changed packages were read ([`State::mark_lock`]).
+    /// Projects with a reason beyond Cargo that [`Alters::Yes`]: the FLAKY grade reads every test of them.
     beyond_other: BTreeSet<String>,
-    /// Projects with a lockfile reason whose changed packages were read: they run whole (they are in `beyond_cargo`), and only the
-    /// FLAKY grade narrows them (`lockGraded` of the plan).
-    lock_graded: BTreeSet<String>,
-    /// Projects reached by a ci.yml change that cannot alter what a package builds or tests (`plan_gitea::ci_change_is_inert`): they
-    /// run whole, and only the FLAKY grade narrows them (`ciGraded` of the plan).
-    ci_graded: BTreeSet<String>,
+    /// Projects with a reason beyond Cargo that is not [`Alters::Yes`]: they run whole (they are in `beyond_cargo`), and only the FLAKY
+    /// grade narrows them to packages (`packageGraded` of the plan).
+    graded: BTreeSet<String>,
     kinds: BTreeMap<String, BTreeSet<&'static str>>,
 }
 
 impl State {
-    /// A reason that is not a Cargo reach: the project's nextest cannot be narrowed to packages.
+    /// A reason that is not a Cargo reach: the project's nextest cannot be narrowed to packages, and the reason is taken to alter what
+    /// a package builds or tests ([`Alters::Yes`]: the default, so a reason nobody classified is the safe side).
     fn mark(&mut self, project: Option<String>, reason: String) {
-        if let Some(p) = project {
-            self.beyond_cargo.insert(p.clone());
-            self.beyond_other.insert(p.clone());
-            self.why.entry(p).or_default().push(reason);
-        }
+        self.mark_alters(project, reason, Alters::Yes);
     }
 
-    /// A lockfile reason whose changed packages were read (decision 95, ER-12): the project's tests still run whole, because a
-    /// lockfile reaches tests no package list names, but the FLAKY grade reads the packages ([`crate::plan_cargo_lock`]).
-    fn mark_lock(&mut self, project: Option<String>, reason: String) {
+    /// A reason beyond Cargo with its declared [`Alters`]. The project's tests run whole whatever it says.
+    fn mark_alters(&mut self, project: Option<String>, reason: String, alters: Alters) {
         if let Some(p) = project {
             self.beyond_cargo.insert(p.clone());
-            self.lock_graded.insert(p.clone());
-            self.why.entry(p).or_default().push(reason);
-        }
-    }
-
-    /// A ci.yml reason that cannot alter what a package builds or tests: the project still runs whole, the FLAKY grade reads packages.
-    fn mark_ci_graded(&mut self, project: Option<String>, reason: String) {
-        if let Some(p) = project {
-            self.beyond_cargo.insert(p.clone());
-            self.ci_graded.insert(p.clone());
+            match alters {
+                Alters::Yes => self.beyond_other.insert(p.clone()),
+                Alters::No | Alters::PerPackage => self.graded.insert(p.clone()),
+            };
             self.why.entry(p).or_default().push(reason);
         }
     }
@@ -488,6 +488,25 @@ pub fn reaches_conformance(plan: &Value) -> bool {
 
 /// The crate folders of the workspace of lockfile `file` whose resolved dependencies changed ([`crate::plan_cargo_lock`]); `None`
 /// (fail closed) when the lock texts are missing or unreadable, or a changed package is no crate of the graph's workspace.
+/// Whether a manifest's two revisions differ only in `package.metadata` and `workspace.metadata`: cargo ignores those tables, so such
+/// an edit cannot alter what a crate builds or tests (a test-reads declaration, a tool's table). `false` whenever it cannot be told
+/// (a side missing, not TOML): the edit then counts as altering (fail closed).
+fn manifest_metadata_only((before, after): (Option<String>, Option<String>)) -> bool {
+    let strip = |text: Option<String>| -> Option<toml::Table> {
+        let mut t: toml::Table = text?.parse().ok()?;
+        for k in ["package", "workspace"] {
+            if let Some(toml::Value::Table(inner)) = t.get_mut(k) {
+                inner.remove("metadata");
+            }
+        }
+        Some(t)
+    };
+    match (strip(before), strip(after)) {
+        (Some(b), Some(a)) => a == b,
+        _ => false,
+    }
+}
+
 fn lock_changed_crates(file: &str, graph: &RepoGraph, opts: &Options) -> Option<Vec<String>> {
     let dir = file.rsplit_once('/').map_or("", |(d, _)| d);
     let (before, after) = opts.cargo_locks.get(file)?;
@@ -515,6 +534,8 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
     let mut everything = opts.all;
     let mut docs = false;
     let mut changed_crates: Vec<String> = Vec::new();
+    // Crates whose only change is a manifest's metadata tables: they run (run narrowing reads them) but cannot alter a test (the grade).
+    let mut meta_crates: Vec<String> = Vec::new();
     let mut changed_pkgs: Vec<String> = Vec::new();
     let push_unique = |v: &mut Vec<String>, s: &str| {
         if !v.iter().any(|x| x == s) {
@@ -532,7 +553,7 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
     let mark_all_ci = |st: &mut State, reason: &str, everything: &mut bool| {
         *everything = true;
         for p in &every {
-            st.mark_ci_graded(Some(p.clone()), reason.to_string());
+            st.mark_alters(Some(p.clone()), reason.to_string(), Alters::No);
             st.kind(Some(p), "all");
         }
     };
@@ -596,7 +617,7 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
                     .is_some_and(|g| ci_change_is_inert(g.before(f).as_deref(), g.after(f).as_deref()));
             let mark = |st: &mut State, p: Option<String>, reason: String| {
                 if inert {
-                    st.mark_ci_graded(p, reason);
+                    st.mark_alters(p, reason, Alters::No);
                 } else {
                     st.mark(p, reason);
                 }
@@ -678,7 +699,11 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
             && graph.cargo.node_of(f).is_none()
             && let Some(dirs) = lock_changed_crates(f, graph, opts)
         {
-            st.mark_lock(project_of_dir(f.rsplit_once('/').map_or("", |(d, _)| d)), f.clone());
+            st.mark_alters(
+                project_of_dir(f.rsplit_once('/').map_or("", |(d, _)| d)),
+                f.clone(),
+                Alters::PerPackage,
+            );
             for d in dirs {
                 push_unique(&mut changed_crates, &d);
             }
@@ -712,7 +737,14 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
         if let Some(c) = &c
             && project_of_dir(c).is_some_and(|p| own.contains(&p))
         {
-            push_unique(&mut changed_crates, c);
+            if *f == format!("{c}/Cargo.toml")
+                && let Some(content) = opts.content
+                && manifest_metadata_only(content(f))
+            {
+                push_unique(&mut meta_crates, c);
+            } else {
+                push_unique(&mut changed_crates, c);
+            }
         }
         if let Some(n) = &n
             && project_of_dir(n).is_some_and(|p| own.contains(&p))
@@ -814,6 +846,11 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
         }
     }
 
+    // The run reads every changed crate; a crate with code changes elsewhere is in `changed_crates` too, so it counts as altered.
+    let grade_changed = changed_crates.clone();
+    for d in &meta_crates {
+        push_unique(&mut changed_crates, d);
+    }
     let crates = graph.cargo.dependents(&changed_crates.iter().cloned().collect());
     let mut sorted_changed = changed_crates.clone();
     sorted_changed.sort();
@@ -843,6 +880,13 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
         }
     }
     packages.values_mut().for_each(|v| v.sort());
+    let mut grade_packages: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for d in graph.cargo.dependents(&grade_changed.iter().cloned().collect()) {
+        if let Some(n) = graph.cargo.get(&d) {
+            grade_packages.entry(n.workspace.clone()).or_default().push(n.name.clone());
+        }
+    }
+    grade_packages.values_mut().for_each(|v| v.sort());
     let app_names: Vec<String> = st
         .why
         .keys()
@@ -878,17 +922,15 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
     // The projects whose every reason is a Cargo reach: only these may run a subset of their packages (a member run's nextest filter).
     let cargo_only: Vec<&String> = st.why.keys().filter(|p| !st.beyond_cargo.contains(*p)).collect();
     out.insert("cargoOnly".into(), json!(cargo_only));
-    // Projects whose only reason beyond Cargo is a lockfile with its changed packages read: they run whole, and the FLAKY grade
-    // narrows them like a Cargo-only reach. Absent when there is none.
-    let lock_graded: Vec<&String> = st.lock_graded.iter().filter(|p| !st.beyond_other.contains(*p)).collect();
-    if !lock_graded.is_empty() {
-        out.insert("lockGraded".into(), json!(lock_graded));
+    // Projects whose reasons beyond Cargo all declare they cannot alter a test, or only for the packages the plan names: they run whole,
+    // and the FLAKY grade reads `gradePackages` for them like for a Cargo-only reach. Absent when there is none.
+    let graded: Vec<&String> = st.graded.iter().filter(|p| !st.beyond_other.contains(*p)).collect();
+    if !graded.is_empty() {
+        out.insert("packageGraded".into(), json!(graded));
     }
-    // Projects reached beyond Cargo only by ci.yml changes that cannot alter a package's build or tests, and by lockfiles read: same.
-    let ci_graded: Vec<&String> = st.ci_graded.iter().filter(|p| !st.beyond_other.contains(*p)).collect();
-    if !ci_graded.is_empty() {
-        out.insert("ciGraded".into(), json!(ci_graded));
-    }
+    // What the FLAKY grade reads as changed: `packages` without the crates whose only change is a manifest's metadata tables (cargo
+    // ignores them, so they cannot alter a build or a test). Run narrowing keeps reading `packages`.
+    out.insert("gradePackages".into(), json!(grade_packages));
     if opts.explain {
         out.insert("why".into(), json!(st.why));
     }
@@ -1291,8 +1333,8 @@ mod tests {
         let p = lock_plan(Some(sample_lock("1", "1")), Some(sample_lock("1", "2")), &[]);
         assert_eq!(p["packages"]["crates"], json!(["paddock-kit"]), "{p}");
         // Decision 95: the FLAKY grade reads it like a Cargo reach, while CI still runs the workspace whole (a lockfile reaches tests no
-        // package list names): `cargoOnly` is unchanged, `lockGraded` names the project.
-        assert_eq!(p["lockGraded"], json!(["crates"]), "{p}");
+        // package list names): `cargoOnly` is unchanged, `packageGraded` names the project.
+        assert_eq!(p["packageGraded"], json!(["crates"]), "{p}");
         assert!(!cargo_only(&p, "crates"), "{}", p["cargoOnly"]);
         // serde moves: paddock-core uses it, and paddock-k and paddock-kit use paddock-core.
         let p = lock_plan(Some(sample_lock("1", "1")), Some(sample_lock("2", "1")), &[]);
@@ -1309,7 +1351,7 @@ mod tests {
         let p = lock_plan(Some(sample_lock("1", "1")), Some(with_extra), &[]);
         assert_eq!(p["crates"], true, "{p}");
         assert!(p["packages"].get("crates").is_none(), "{p}");
-        assert_eq!(p["lockGraded"], json!(["crates"]), "{p}");
+        assert_eq!(p["packageGraded"], json!(["crates"]), "{p}");
     }
 
     #[test]
@@ -1324,7 +1366,7 @@ mod tests {
             ),
         ] {
             let p = lock_plan(b, a, &[]);
-            assert!(p.get("lockGraded").is_none(), "{p}");
+            assert!(p.get("packageGraded").is_none(), "{p}");
         }
         // Another reason beyond Cargo (a per-machine installer file: the sync test reads it) keeps the project whole for the grade too.
         let p = lock_plan(
@@ -1332,7 +1374,7 @@ mod tests {
             Some(sample_lock("1", "2")),
             &["crates/paddock-setup/nsis/paddock-per-machine.nsh"],
         );
-        assert!(p.get("lockGraded").is_none(), "{p}");
+        assert!(p.get("packageGraded").is_none(), "{p}");
     }
 
     #[test]
@@ -1566,6 +1608,67 @@ mod tests {
         assert_eq!(plan(&["icons/other/x"])["apps"], json!([]));
         assert_eq!(plan(&["conformance/src/a.mjs"])["apps"], json!(["debrief", "dyno"]));
         assert_eq!(plan(&["conformance/test/a.mjs"])["apps"], json!([]));
+    }
+
+    /// The plan of `files` where `content` gives the revisions of every file (the manifest tests).
+    fn plan_with_content(files: &[&str], before: &str, after: &str) -> Value {
+        let files: Vec<String> = files.iter().map(|s| s.to_string()).collect();
+        let read = |_: &str| (Some(before.to_string()), Some(after.to_string()));
+        affected(
+            &files,
+            &sample(),
+            &Options {
+                explain: true,
+                content: Some(&read),
+                ..Options::default()
+            },
+        )
+        .unwrap()
+    }
+
+    const MANIFEST: &str = "[package]\nname = \"paddock-core\"\n[dependencies]\na = \"1\"\n";
+
+    #[test]
+    fn a_manifest_edit_that_changes_only_metadata_runs_but_alters_no_test() {
+        // Train aa's `test-reads = []` declarations (ER-12, ER-21): the crate and its dependents still run (`packages`), but the grade
+        // reads `gradePackages`, which holds neither.
+        let with_meta = format!("{MANIFEST}[package.metadata.paddock]\ntest-reads = []\n");
+        let p = plan_with_content(&["crates/core/Cargo.toml"], MANIFEST, &with_meta);
+        assert_eq!(p["packages"]["crates"], json!(["paddock-core", "paddock-k", "paddock-kit"]), "{p}");
+        assert_eq!(p["gradePackages"], json!({}), "{p}");
+        // Control (ER-33): a dependency edit, a metadata edit next to one, an unparsable side and a missing side all alter.
+        for (b, a) in [
+            (MANIFEST.to_string(), MANIFEST.replace("\"1\"", "\"2\"")),
+            (
+                MANIFEST.to_string(),
+                format!("{}[package.metadata.x]\ny = 1\n", MANIFEST.replace("\"1\"", "\"2\"")),
+            ),
+            (MANIFEST.to_string(), "[package\nname =".to_string()),
+        ] {
+            let p = plan_with_content(&["crates/core/Cargo.toml"], &b, &a);
+            assert_eq!(
+                p["gradePackages"]["crates"],
+                json!(["paddock-core", "paddock-k", "paddock-kit"]),
+                "{a}\n{p}"
+            );
+        }
+        let p = plan(&["crates/core/Cargo.toml"]);
+        assert_eq!(
+            p["gradePackages"]["crates"],
+            json!(["paddock-core", "paddock-k", "paddock-kit"]),
+            "no reader: altered"
+        );
+        // A source change in the same crate alters it, whatever the manifest did.
+        let p = plan_with_content(
+            &["crates/core/Cargo.toml", "crates/core/src/lib.rs"],
+            MANIFEST,
+            &format!("{MANIFEST}[package.metadata.p]\nq = 1\n"),
+        );
+        assert_eq!(
+            p["gradePackages"]["crates"],
+            json!(["paddock-core", "paddock-k", "paddock-kit"]),
+            "{p}"
+        );
     }
 
     #[test]
@@ -1932,13 +2035,13 @@ mod tests {
     #[test]
     fn a_ci_yml_change_that_only_swaps_an_artifact_upload_or_edits_the_plan_job_is_graded_by_package() {
         // Train aa (run 9329): the plan job and the upload-artifact steps changed. Everything still runs, but no job's tests changed, so
-        // the FLAKY grade reads the packages (`ciGraded`), not "every test of the project" (ER-12).
+        // the FLAKY grade reads the packages (`packageGraded`), not "every test of the project" (ER-12).
         let mut t = base_tree();
         t.insert(CI_FILE.into(), ci_with_upload("actions/upload-artifact@v3"));
         let plan_job = ci_with_upload("fork/upload-artifact@v4").replace("plan-only", "plan-only2");
         let r = gitea_plan(&[CI_FILE], &fixed(&t, &[(CI_FILE, plan_job)], None));
         assert_eq!(r["all"], true, "{r}");
-        let graded: Vec<&str> = r["ciGraded"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+        let graded: Vec<&str> = r["packageGraded"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
         assert!(
             ["crates", "ui", "paddock-dev", "app:debrief", "app:dyno"]
                 .iter()
@@ -1955,12 +2058,12 @@ mod tests {
             &fixed(&t, &[(CI_FILE, ci_with_upload("fork/upload-artifact@v4"))], None),
         );
         assert_eq!(r["all"], false, "{r}");
-        assert_eq!(r["ciGraded"], json!(["crates"]), "{r}");
+        assert_eq!(r["packageGraded"], json!(["crates"]), "{r}");
     }
 
     #[test]
     fn a_ci_yml_change_that_can_alter_what_a_job_runs_is_not_graded_by_package() {
-        // Control (ER-33): a changed run step, a new job, a changed upload step that is not an upload, a header change: no `ciGraded`.
+        // Control (ER-33): a changed run step, a new job, a changed upload step that is not an upload, a header change: no `packageGraded`.
         let t = base_tree();
         for text in [
             ci_text("node a", "node b").replace("build-folder", "build-folder2"),
@@ -1968,12 +2071,12 @@ mod tests {
             ci_text("node a", "node b").replace("install-test-browser", "install-test-browser --x"),
         ] {
             let r = gitea_plan(&[CI_FILE], &fixed(&t, &[(CI_FILE, text.clone())], None));
-            assert!(r.get("ciGraded").is_none(), "{text}\n{r}");
+            assert!(r.get("packageGraded").is_none(), "{text}\n{r}");
         }
         // A step that is an upload and also changes a test step in the same job: not inert.
         let mixed = ci_with_upload("fork/upload-artifact@v4").replace("build-folder", "build-folder2");
         let r = gitea_plan(&[CI_FILE], &fixed(&t, &[(CI_FILE, mixed)], None));
-        assert!(r.get("ciGraded").is_none(), "{r}");
+        assert!(r.get("packageGraded").is_none(), "{r}");
     }
 
     #[test]

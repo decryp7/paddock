@@ -1677,9 +1677,9 @@ fn train_t_a_flaky_test_in_a_package_the_lock_diff_left_unchanged_is_a_fix_item_
 }
 
 /// Train aa's shape (run 9329, ER-12): the plan reached the crates workspace through ci.yml steps that cannot alter a test (the plan
-/// job, artifact uploads: `ciGraded`) and through a few changed crates. The plan's own JSON is read, so no flag is set by hand.
+/// job, artifact uploads: `packageGraded`) and through a few changed crates. The plan's own JSON is read, so no flag is set by hand.
 fn ci_graded_plan(changed: &[&str]) -> Touched {
-    let plan = json!({"crates": true, "apps": [], "packages": {"crates": changed}, "cargoOnly": [], "ciGraded": ["crates"]});
+    let plan = json!({"crates": true, "apps": [], "packages": {"crates": changed}, "cargoOnly": [], "packageGraded": ["crates"]});
     let mut t = Touched::from_plan(&plan);
     t.members = [("crates".to_string(), ["paddock-chromium", "paddock-core"].map(String::from).into())].into();
     t
@@ -1696,7 +1696,7 @@ fn train_aa_a_flaky_test_in_a_package_a_ci_yml_change_that_cannot_alter_a_test_l
     // Positive control (ER-33): the same run with the test's own package changed blocks.
     let o = grade(&mut f, &r, ci_graded_plan(&["paddock-chromium"]));
     assert!(matches!(&o.result, GradedResult::Red(why) if why.contains("touched code")), "{o:?}");
-    // Control: without `ciGraded` the project is reached for a reason beyond Cargo and every test of it is touched (fail closed).
+    // Control: without `packageGraded` the project is reached for a reason beyond Cargo and every test of it is touched (fail closed).
     let mut whole = ci_graded_plan(&["paddock-core"]);
     whole.cargo_only.clear();
     let o = grade(&mut f, &r, whole);

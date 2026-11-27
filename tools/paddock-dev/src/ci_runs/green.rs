@@ -254,7 +254,12 @@ impl Touched {
                 .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
                 .unwrap_or_default()
         };
-        let packages = plan["packages"]
+        // `gradePackages`: the changed packages without the crates whose only change is manifest metadata (cargo ignores it); a plan
+        // without it (an older recording) is read as `packages`.
+        let packages = plan
+            .get("gradePackages")
+            .filter(|v| v.is_object())
+            .unwrap_or(&plan["packages"])
             .as_object()
             .map(|o| o.iter().map(|(w, l)| (w.clone(), strings(l))).collect())
             .unwrap_or_default();
@@ -263,11 +268,11 @@ impl Touched {
             apps: strings(&plan["apps"]),
             all: false,
             packages,
-            // A lockfile reason whose changed packages the plan read (`lockGraded`) narrows the grade like a Cargo reach.
-            // A ci.yml reason that cannot alter a test (`ciGraded`) narrows the same way.
-            cargo_only: [&plan["cargoOnly"], &plan["lockGraded"], &plan["ciGraded"]]
-                .iter()
-                .flat_map(|v| strings(v))
+            // A reason that cannot alter a test, or only the named packages' (`packageGraded`: a lockfile whose changed packages the plan
+            // read, a ci.yml change that runs no test), narrows the grade like a Cargo reach.
+            cargo_only: strings(&plan["cargoOnly"])
+                .union(&strings(&plan["packageGraded"]))
+                .cloned()
                 .collect(),
             ..Touched::default()
         }

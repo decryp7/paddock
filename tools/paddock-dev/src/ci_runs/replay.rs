@@ -548,11 +548,10 @@ fn a_flaky_test_is_a_fix_item_in_untouched_code_and_red_in_reached_code_and_not_
 }
 
 #[test]
-fn a_flaky_test_of_a_package_a_ci_yml_change_that_cannot_alter_a_test_left_alone_is_a_fix_item() {
+fn a_flaky_test_on_train_aas_real_plan_is_a_fix_item_and_a_code_change_to_its_package_blocks() {
     // Run 9329 (train aa before its fix): the plan reached crates through ci.yml's plan job and artifact-upload steps, and the grade read
-    // that as "every test of crates is touched" (a throttle test blocked a train no member of which touched throttle's code). The plan
-    // now marks such a reach `ciGraded`, and the FLAKY grade reads the packages. The log is the real one; the plan is the one the
-    // planner makes for the train's diff, with the package list the diff's source changes give (the manifest-only edits aside).
+    // that as "every test of crates is touched" (a throttle test blocked a train no member of which changed throttle's code). Every
+    // reason the planner gives now says whether it can alter a test (`Alters`); the grade reads that. The log is the real one.
     use super::green::{FailedJob, GradedResult, grade_failures};
     let dir = dir_of("flaky-noncargo-reach");
     let jobs: Value = serde_json::from_slice(&std::fs::read(dir.join("jobs-9329.json")).unwrap()).unwrap();
@@ -582,6 +581,11 @@ fn a_flaky_test_of_a_package_a_ci_yml_change_that_cannot_alter_a_test_left_alone
         .find(|t| t.contains("plan scope: "))
         .unwrap();
     let expected = crate::run_scope::read(&plan_log).unwrap().unwrap().expected;
+    // The plan the planner makes for train aa's diff (`./dev plan e7e278361 f59145624`, recorded as plan-9329.json): crates is
+    // `packageGraded` (ci.yml's plan job and upload steps), and `gradePackages` holds paddock-ci-config alone: the manifests that gained
+    // `test-reads = []` (paddock-throttle's among them) changed metadata only.
+    let recorded: Value = serde_json::from_slice(&std::fs::read(dir.join("plan-9329.json")).unwrap()).unwrap();
+    assert_eq!(recorded["gradePackages"]["crates"], json!(["paddock-ci-config"]), "{recorded}");
     let members: std::collections::BTreeSet<String> = ["paddock-ci-config", "paddock-throttle", "paddock-slots"].map(String::from).into();
     let grade = |plan: Value| {
         let mut t = Touched::from_plan(&plan);
@@ -589,20 +593,28 @@ fn a_flaky_test_of_a_package_a_ci_yml_change_that_cannot_alter_a_test_left_alone
         t.expected = expected.clone();
         grade_failures("ci.yml", std::slice::from_ref(&failed), &expected, &mut || Some(t.clone()))
     };
-    let train = |changed: &[&str], graded: bool| {
-        json!({"all": true, "crates": true, "apps": [], "packages": {"crates": changed}, "cargoOnly": [],
-               "ciGraded": if graded { json!(["crates"]) } else { json!([]) }})
+    let with_crates = |changed: Value, key: &str| {
+        let mut p = recorded.clone();
+        p[key]["crates"] = changed;
+        p
     };
-    // Train aa's plan: throttle is not among the changed packages, crates is `ciGraded`: a fix item, the train lands.
-    let GradedResult::GreenWithFixItems(items) = grade(train(&["paddock-ci-config"], true)) else {
+    // Train aa's real plan: the throttle test does not block; it is a fix item and the train lands.
+    let GradedResult::GreenWithFixItems(items) = grade(recorded.clone()) else {
         panic!("a fix item expected")
     };
     assert!(items[0].test.contains("the_queue_model_has_no_wait_cycle"), "{:?}", items[0]);
-    // Control: a change that reaches paddock-throttle's own package still blocks.
-    let r = grade(train(&["paddock-ci-config", "paddock-throttle"], true));
+    // Control: a real change to paddock-throttle (code, so in `gradePackages`) still blocks.
+    let r = grade(with_crates(json!(["paddock-ci-config", "paddock-throttle"]), "gradePackages"));
     assert!(matches!(&r, GradedResult::Red(why) if why.contains("touched code")), "{r:?}");
-    // Control: the old plan (no `ciGraded`) reads every test of crates as touched.
-    let r = grade(train(&["paddock-ci-config"], false));
+    // Control: the same plan read the old way (manifest-only crates in `packages`, as an older recording has no `gradePackages`) blocks.
+    let mut old = with_crates(json!(["paddock-ci-config", "paddock-throttle"]), "packages");
+    old.as_object_mut().unwrap().remove("gradePackages");
+    let r = grade(old);
+    assert!(matches!(&r, GradedResult::Red(why) if why.contains("touched code")), "{r:?}");
+    // Control: without `packageGraded` the project is reached for a reason beyond Cargo and every test of it is touched.
+    let mut whole = recorded.clone();
+    whole.as_object_mut().unwrap().remove("packageGraded");
+    let r = grade(whole);
     assert!(matches!(&r, GradedResult::Red(why) if why.contains("not a Cargo reach")), "{r:?}");
 }
 
