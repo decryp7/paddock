@@ -422,13 +422,25 @@ fn read(text: &str) -> Result<Inputs, String> {
     };
     let hash_table = t.get("hash");
     if let Some(h) = hash_table {
-        only_keys(table(h, "hash")?, &["runner_configs", "contracts", "image_files"], "[hash]")?;
+        only_keys(
+            table(h, "hash")?,
+            &[
+                "runner_configs",
+                "contracts",
+                "image_files",
+                "workspace_files",
+                "cargo_config_folders",
+            ],
+            "[hash]",
+        )?;
     }
     let hlist = |k: &str| strings(hash_table.and_then(|p| p.get(k)), &format!("hash.{k}"));
     let hash = HashDecl {
         runner_configs: hlist("runner_configs")?,
         contracts: hlist("contracts")?,
         image_files: hlist("image_files")?,
+        workspace_files: hlist("workspace_files")?,
+        cargo_config_folders: hlist("cargo_config_folders")?,
     };
     Ok(Inputs {
         inputs,

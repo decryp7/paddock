@@ -18,7 +18,9 @@
 # [paths]    the folders and file names the adapters read: workflows, actions, apps, contract, script_folders, node_tests, e2e,
 #            checkout, root_spellings
 # [hash]     runner_configs (the nextest, Vitest and Playwright files that select and run a node), contracts (the files whose command
-#            lines run a node's phases), image_files (what pins the CI image): added to a node's input hash (§5, WP-7)
+#            lines run a node's phases), image_files (what pins the CI image), workspace_files (the lockfile and root manifest of a
+#            Cargo package's workspace folder) and cargo_config_folders (the `.cargo` folders from that folder up): added to a node's
+#            input hash (§5, WP-7; ADR 0116 §2)
 # [ci]       setup_only (actions that stay plumbing in a release job), release_actions (actions that make a job a release job),
 #            release_gate_phases (the contract phases a check of a release job runs beside the smoke set), and the sub-table
 #            [ci.jobs] (per ci.yml job, the projects it runs for by choice; see its own comment below)
@@ -403,3 +405,5 @@ test-cache-shadow = ["crates"]   # the shadow report reads the crates workspace'
 runner_configs = ["**/.config/nextest.toml", "**/vitest.config.*", "**/playwright.config.*", "**/angular.json"]
 contracts = ["paddock.ci.json"]
 image_files = ["ci-image/VERSION", "ci-image/Dockerfile"]
+workspace_files = ["Cargo.lock", "Cargo.toml"]
+cargo_config_folders = [".cargo"]
