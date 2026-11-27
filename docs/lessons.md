@@ -4497,6 +4497,26 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   fails, if the ban is removed or stops resolving the path. Callers checked across `crates/`, `apps/` and `tools/`: only `paddock-proc` itself
   (`usage.rs`, `tests/it/orphan.rs`) implements or calls the trait; Debrief's, Dyno's and Pitcrew's `ProcessSource` are their own ports.
 
+## Three FLAKY tests of runs 9225, 9237 and 9238: identity read after the event, a limit over setup, a handle that keeps a process readable (2026-11-27, test/proc-state-waits-flakes-v2)
+- **What happened.** (1) `guardian::unix::tests::an_owner_killed_the_moment_its_guarded_spawn_returns_leaves_no_child` was FLAKY on macOS (9225, 9238):
+  "children []" in 0.03 s. The owner printed the child's bare pid and the test turned it into a `ProcessId` after the guardian had already ended
+  the child, so `ProcessId::of` found nothing. (2) `session::tests::a_child_that_does_not_answer_is_ended_at_the_deadline` was FLAKY on Windows
+  (9238): the 300 ms read limit also bounded the warm-up, and a slow start of a test binary met it. (3) `stable_workspace::tests::a_hung_phase_...`
+  failed both tries on Linux (9237): the slot-folder phase does real work on disk and shared the hang's 1 s limit.
+- **First hypotheses and what refuted them.** The owner dies before it prints: `println!` flushes per line and a pipe keeps what was written. The
+  guardian leaves the child: the retry passes and child and folder are gone. A reused pid: no start time was read. For (2) the quiet read ending
+  early: the panic is at the warm-up unwrap. For (3) the hang fake failing: the error line named the earlier phase.
+- **Confirmed by** a run with the cause forced and a run without it: reading the owner's report only after the guardian finished fails 1 of 1 on
+  the old reader and passes 300 of 300 (20 CPU burners, macOS) with the identity printed by the owner; the old hung-phase shape with a 0 s limit
+  fails with the CI message and the new shape passes 100 of 100. (2) has no macOS reproduction; its evidence is the trial's Windows leg.
+- **Two sub-cases of the class** (ADR 0124: a test reads live process state at one instant, after the event that can change it). (a) The target is
+  named late: a pid looked up after the code under test acted; the identity must come from the holder while it lives (the owner prints pid and start
+  time). (b) On Windows an ended process stays readable, and its state is `Unknown`, never `Exited`, while any handle to it is open (the test's own
+  `Child` included): trial 9253's statewait test waited its 40 s bound until the handle was dropped.
+- **Fix.** The three test shapes above, and a clock mark on every phase of the hung-phase run (ADR 0103). The mechanism that makes (a), (b) and the
+  limit-over-setup case impossible is proposed on `test/proc-identity-ban`: a Clippy ban on `ProcessId::of` in test code, a `wait_ended` that drops
+  the handle first, and the existing `no-clock-mark` check extended to every phase. Open until it lands.
+
 ## Path-keyed registers follow a pure rename (2026-11-27, fix/registers-follow-renames, ER-21)
 - **What happened.** The crate move `tools/throttle/src` to `crates/paddock-throttle/src` (45ec96c97, bf651d875) re-registered entries in the C53 baseline
   and the C30 allow list by hand and re-placed a C171 waiver: the allow-list growth guard read a rewritten path as a new entry (needing the user, ER-46),
