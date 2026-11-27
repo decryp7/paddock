@@ -319,7 +319,7 @@ holder_matches() {
   for t in "$temp" "$(fill "$temp" / "$bs")"; do
     for h in "$home" "$(fill "$home" / "$bs")"; do
       line="$h/tools/paddock-dev/bin/0/paddock-dev ci slot hold --max 4 --owner $t --root $h --poll-ms 500 --max-hold-secs 12600"
-      if printf '%s\n' "$line" | grep -Eq -- "$re" 2>/dev/null; then return 0; fi
+      if grep -Eq -- "$re" <<<"$line" 2>/dev/null; then return 0; fi
     done
   done
   return 1
@@ -441,7 +441,7 @@ cmd_acquire() {
 # 2 when paddock-dev could not be asked (its own message is on stderr): that says nothing about the holder.
 held_by_us() {
   local home="$1" slot="$2" token="$3" status
-  [ "$(sed -n 's/^token=//p' "$home/slots/$slot.owner" 2>/dev/null | head -1)" = "$token" ] || return 1
+  [ "$(sed -n 's/^token=//p' "$home/slots/$slot.owner" 2>/dev/null | sed -n 1p)" = "$token" ] || return 1
   status="$(dev_tool ci slot status --max "${slot#s}" --root "$(native "$home")")" || return 2
   [ "$(printf '%s\n' "$status" | awk -v s="$slot" '$1 == s { print $2 }')" = busy ]
 }
@@ -474,8 +474,8 @@ cmd_status() {
   local home max n state owner pid
   home="$(ci_home)"; max="$(max_slots)"
   dev_tool ci slot status --max "$max" --root "$(native "$home")" | while read -r n state; do
-    owner="$(sed -n 's/^owner=//p' "$home/slots/$n.owner" 2>/dev/null | head -1)" || owner=""
-    pid="$(sed -n 's/^pid=//p' "$home/slots/$n.owner" 2>/dev/null | head -1)" || pid=""
+    owner="$(sed -n 's/^owner=//p' "$home/slots/$n.owner" 2>/dev/null | sed -n 1p)" || owner=""
+    pid="$(sed -n 's/^pid=//p' "$home/slots/$n.owner" 2>/dev/null | sed -n 1p)" || pid=""
     if [ "$state" = busy ]; then echo "  $n busy: job folder ${owner:-?} (holder pid ${pid:-?})"
     else echo "  $n free"; fi
   done

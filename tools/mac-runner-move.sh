@@ -243,7 +243,7 @@ status() {
       case $rc in
         0) echo "    signature     the Mac CI identity ($RUNNER_ID)" ;;
         6) echo "    signature     not measured: no Mac CI identity (bash $signing create)" ;;
-        *) echo "    signature     NOT the Mac CI identity: $(printf '%s' "$out" | grep -E 'has:' | head -1 | sed 's/^ *//')" ;;
+        *) echo "    signature     NOT the Mac CI identity: $(printf '%s' "$out" | grep -E 'has:' | sed -n 1p | sed 's/^ *//')" ;;
       esac
     fi
   done
@@ -342,7 +342,7 @@ stop_lanes() {
       busy+=("$name")
       echo "- $name: a job is running ($domain/$label, runner pid $pid)"
       line=$(task_line "$name" "$domain"); [ -z "$line" ] || echo "    log: $line"
-      printf '%s\n' "$procs" | head -5 | sed 's/^/    process: /'
+      sed -n '1,5s/^/    process: /p' <<<"$procs"
     fi
     if [ "$dry" -eq 1 ]; then
       [ -z "$procs" ] || echo "  would wait for the job on $name (at most ${wait_max}s), after telling its runner to take no new job: launchctl kill SIGTERM $domain/$label"
@@ -366,7 +366,7 @@ stop_lanes() {
         fail "${still[0]} still runs a job after ${wait_max} s; nothing was changed: no file and no launchd job, no process was ended (the runner takes no new job, finishes this one and launchd starts it again when it exits)" "wait for the job and run install again, or give it longer with --wait-max SECONDS"
       fi
       if [ "$SECONDS" -ge "$next" ]; then
-        echo "  .. waiting for the job on ${still[*]} ($((SECONDS - began)) s of at most ${wait_max} s): $(printf '%s\n' "$procs" | head -1)"
+        echo "  .. waiting for the job on ${still[*]} ($((SECONDS - began)) s of at most ${wait_max} s): $(sed -n 1p <<<"$procs")"
         next=$((SECONDS + report))
       fi
       sleep "$poll"; continue
