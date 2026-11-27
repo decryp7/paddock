@@ -165,6 +165,23 @@ fn list_prints_the_lines_with_their_folders_and_runs_nothing() {
     assert!(!r.root().join("a").exists());
 }
 
+/// `--list` prints the contract's lines whatever the run's selection keeps: it answers what the phase declares (the ESLint wiring test
+/// asks it from inside a CI job, which carries `PADDOCK_PLAN_SELECTION`; train run 9240 printed only the skip notice, so the test
+/// found no `npm run lint:report` line). A run without `--list` still skips the phase the selection leaves out.
+#[test]
+fn list_prints_the_declared_lines_even_when_the_runs_selection_skips_the_phase() {
+    let r = Repo::new("ui", &json(&["touch a", "cd sub", "touch b"]));
+    let sel = [(select::ENV, r#"{"ui": {"phases": ["build"]}}"#)];
+    let (code, log) = r.run("ui", "checks", |a| a.list = true, &sel);
+    assert_eq!(code, 0);
+    assert_eq!(log, "[.] touch a\ncd sub\n[sub] touch b\n");
+    // The control: without --list the same selection skips the phase and runs nothing.
+    let (code, log) = r.run("ui", "checks", |_| {}, &sel);
+    assert_eq!(code, 0);
+    assert!(log.contains("skipped, not run: this run's selection"), "{log}");
+    assert!(!r.root().join("a").exists());
+}
+
 #[test]
 fn the_conformance_field_becomes_the_argument_variable_of_every_line() {
     let c = serde_json::json!({
