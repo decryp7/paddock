@@ -65,7 +65,11 @@ pub const CONTROL_MANIFEST: &str =
     "[package]\nname = \"mutants-control\"\nversion = \"0.0.0\"\nedition = \"2021\"\npublish = false\n\n[workspace]\n";
 
 /// The control's source. The function the control expects to be missed is [`CONTROL_MISSED`].
-pub const CONTROL_LIB: &str = "pub fn reached(n: u32) -> u32 {\n    n + 1\n}\n\npub fn unreached(n: u32) -> u32 {\n    n * 2\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn reached_adds_one() {\n        assert_eq!(super::reached(1), 2);\n    }\n}\n";
+/// (Written in two pieces so that the check that reads test regions by their attribute does not take this constant for a test module.)
+pub const CONTROL_LIB: &str = concat!(
+    "pub fn reached(n: u32) -> u32 {\n    n + 1\n}\n\npub fn unreached(n: u32) -> u32 {\n    n * 2\n}\n\n#[cfg(",
+    "test)]\nmod tests {\n    #[test]\n    fn reached_adds_one() {\n        assert_eq!(super::reached(1), 2);\n    }\n}\n"
+);
 
 /// The function of [`CONTROL_LIB`] no test reaches.
 pub const CONTROL_MISSED: &str = "unreached";
@@ -949,7 +953,7 @@ mod tests {
     /// The control must stay a crate whose second function no test reaches: a "fix" that adds a test for it blinds the probe.
     #[test]
     fn the_control_crate_has_a_function_no_test_reaches() {
-        let (code, tests) = CONTROL_LIB.split_once("#[cfg(test)]").unwrap();
+        let (code, tests) = CONTROL_LIB.split_once(concat!("#[cfg(", "test)]")).unwrap();
         assert!(code.contains(&format!("fn {CONTROL_MISSED}")));
         assert!(!tests.contains(CONTROL_MISSED), "a test reaches the control's untested function");
         assert!(tests.contains("super::reached"));
