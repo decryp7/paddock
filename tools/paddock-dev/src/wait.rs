@@ -471,6 +471,12 @@ pub trait Http {
         let _ = (url, token, max_bytes);
         Err("this reader fetches JSON only".into())
     }
+    /// The `Location` a GET of `url` answers with, `None` for an answer that is no redirect (the recorder of an artifact download
+    /// keeps it); errors are texts without the token.
+    fn get_redirect(&mut self, url: &str, token: &str) -> Result<Option<String>, String> {
+        let _ = (url, token);
+        Err("this reader fetches JSON only".into())
+    }
     /// Sends `body` (or nothing) with `method` (`POST`, `PUT`, `PATCH`, `DELETE`) and returns the JSON answer (`null` for an
     /// empty one); errors are texts without the token. Only writers (`./dev pr`) use it.
     fn send_json(&mut self, method: &str, url: &str, token: &str, body: Option<&Value>) -> Result<Value, String> {
@@ -634,6 +640,51 @@ impl Http for CurlHttp {
 
     fn get_bytes(&mut self, url: &str, token: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
         CurlHttp::get(url, token, ACCEPT_ZIP, max_bytes, 120)
+    }
+
+    fn get_redirect(&mut self, url: &str, token: &str) -> Result<Option<String>, String> {
+        use std::process::Stdio;
+        if url.contains(['"', '\n', '\\']) || token.contains(['"', '\n', '\\']) {
+            return Err("the URL or the token has a character that cannot be sent".into());
+        }
+        // The same shape as `request`: the URL and the header on standard input, so the token is in no argument list.
+        let mut child = paddock_proc::command("curl")
+            .args([
+                "-q",
+                "-sS",
+                "--max-time",
+                "20",
+                "-o",
+                "/dev/null",
+                "-w",
+                "%{http_code} %{redirect_url}",
+                "-K",
+                "-",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("cannot start curl: {e}"))?;
+        if let Some(mut stdin) = child.stdin.take() {
+            let auth = if token.is_empty() {
+                String::new()
+            } else {
+                format!("header = \"Authorization: token {token}\"\n")
+            };
+            let _ = write!(stdin, "url = \"{url}\"\n{auth}");
+        }
+        let out = child.wait_with_output().map_err(|e| format!("curl failed: {e}"))?;
+        if !out.status.success() {
+            return Err(format!(
+                "curl exited with {}: {}",
+                out.status,
+                truncate(String::from_utf8_lossy(&out.stderr).trim(), 200)
+            ));
+        }
+        let text = String::from_utf8_lossy(&out.stdout).into_owned();
+        let (code, location) = text.split_once(' ').unwrap_or((text.as_str(), ""));
+        Ok((code.starts_with('3') && !location.is_empty()).then(|| location.to_string()))
     }
 
     fn send_json(&mut self, method: &str, url: &str, token: &str, body: Option<&Value>) -> Result<Value, String> {
