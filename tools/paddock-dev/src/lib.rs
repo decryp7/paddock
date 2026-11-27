@@ -85,6 +85,7 @@ pub mod locks;
 pub mod locks_guard;
 pub mod log_text;
 pub mod merge_check;
+pub mod mutants_gate;
 pub mod nextest_log;
 pub mod os_placement;
 pub mod pathfind;

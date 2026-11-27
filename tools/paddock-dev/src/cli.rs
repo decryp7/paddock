@@ -1,8 +1,8 @@
 use crate::{
     audit, check, check_ids, ci_build_env, ci_build_jobs, ci_dev_tool_store, ci_dyno_linux_units, ci_host, ci_isolation, ci_run, ci_runs,
     ci_rust_pin, ci_s3_guard, ci_setup_rust, deps_cache, disk, gates, generators, heavy_cmd, heavy_install, hook, input_hash,
-    ipc_endpoints, lessons_driver, load, local_sccache, locks, locks_guard, merge_check, places, plan_cmd, pr, pre_push, queue,
-    release_isolation, slots, test_cache, test_features, wait, worktree,
+    ipc_endpoints, lessons_driver, load, local_sccache, locks, locks_guard, merge_check, mutants_gate, places, plan_cmd, pr, pre_push,
+    queue, release_isolation, slots, test_cache, test_features, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -56,6 +56,12 @@ enum Command {
     Audit {
         #[command(subcommand)]
         command: audit::AuditCommand,
+    },
+    /// Mutation-testing of the diff (cargo-mutants `--in-diff`), the member gate's `mutants` row: a function whose every mutation passes
+    /// the tests is a finding. Report-only for now (warnings, exit 0).
+    Mutants {
+        #[command(subcommand)]
+        command: MutantsCommand,
     },
     /// Lockfiles: are they all current, and regenerate them with cargo, cargo-hakari and npm (never by hand).
     Locks {
@@ -512,6 +518,22 @@ enum SlotCommand {
 }
 
 #[derive(Subcommand)]
+enum MutantsCommand {
+    /// Run cargo-mutants over the Rust functions changed in `tools/paddock-dev` and `crates` since `--base`, after its positive control.
+    Gate(MutantsArgs),
+}
+
+#[derive(Args)]
+struct MutantsArgs {
+    /// The repository root (default: the folder containing .git, found from the current folder).
+    #[arg(long)]
+    root: Option<PathBuf>,
+    /// The commit the change is measured from (the merge base).
+    #[arg(long)]
+    base: String,
+}
+
+#[derive(Subcommand)]
 enum LocksCommand {
     /// Regenerate them (ER-40: never by hand): cargo hakari (manage-deps, generate), `cargo update --workspace`, `npm install --package-lock-only`.
     Sync(LocksArgs),
@@ -885,6 +907,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Load(a) => load::command(&a),
         Command::Places(a) => places::command(&a),
         Command::Audit { command } => audit::command(command),
+        Command::Mutants {
+            command: MutantsCommand::Gate(a),
+        } => mutants_gate::command_gate(a.root, &a.base),
         Command::Locks {
             command: LocksCommand::Sync(a),
         } => locks::sync(a.root),
