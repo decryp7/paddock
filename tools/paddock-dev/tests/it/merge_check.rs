@@ -3389,6 +3389,7 @@ mod merge_member {
     }
 
     /// The trial reader: the trailer names the member and its sync ref where the subject names neither.
+    #[cfg(unix)]
     #[test]
     fn the_trial_reader_reads_the_member_and_sync_ref_from_the_trailers() {
         let make = |trailers: &dyn Fn(&str) -> String| {
