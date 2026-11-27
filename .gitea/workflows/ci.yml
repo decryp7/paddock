@@ -216,8 +216,12 @@ jobs:
   # CreateTaskForRunner: Asc("updated", "id")); every job that needs only `plan` turns waiting in the same transaction, and the ids
   # follow the order of the jobs in this file, so the file order is the start order. A `needs` would make it wait instead.
   # It waited 5.5 to 12.8 min behind short jobs when it came last (speed audit, 2026-11-25).
+  # The Linux tests run as 3 parallel jobs of nextest's own hash partition (`matrix.part_label`: `, 2/3`; the plan's
+  # `plan_ci::partition_nextest_legs`; user decision 107a, 2026-11-27); Windows and macOS stay one leg each. The once-only steps
+  # (lockfile, format, Clippy, Deny) run on partition 1 alone (`matrix.part_extra`).
+  # A partition's log holds part of the package's tests, so the test-cache record (a whole package's pass) runs on unsplit legs only.
   paddock-dev:
-    name: paddock-dev (${{ matrix.os }})
+    name: paddock-dev (${{ matrix.os }}${{ matrix.part_label }})
     needs: [plan]
     if: ${{ needs.plan.outputs.paddock_dev == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["paddock-dev"]'), 'paddock-dev') }}
     strategy:
@@ -295,19 +299,19 @@ jobs:
       # The tool's lockfile must follow the lockfiles of the crates/ it uses by path (they change dependencies in their own PRs).
       # A leg with a filter (a rerun of failed tests) runs only the tests: its other steps passed in the earlier run.
       - name: Lockfile is current
-        if: ${{ !matrix.filter }}
+        if: ${{ !matrix.filter && matrix.part_extra != 'false' }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
         run: |
           cargo metadata --locked --format-version 1 > /dev/null || {
             echo "::error::tools/paddock-dev/Cargo.lock is stale, run cargo update -w in tools/paddock-dev and commit it"; exit 1; }
 
       - name: Format
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter && matrix.part_extra != 'false' }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
         run: cargo fmt --check
 
       - name: Clippy
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter && matrix.part_extra != 'false' }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
         run: cargo clippy --all-targets --locked -- -D warnings
 
@@ -333,6 +337,8 @@ jobs:
           TEST_SKIP: ${{ matrix.test_skip }}
           # The packages whose pass of the same key the test cache reuses (ADR 0116): see the crates job's step.
           TEST_CACHE_EXCLUDE: ${{ matrix.test_cache_exclude }}
+          # The Linux partition (`, 2/3`, empty on the other legs): nextest's hash partition of the whole package's tests.
+          PART_LABEL: ${{ matrix.part_label }}
           PADDOCK_TEST_COST_REPORT: ${{ runner.temp }}/test-cost-${{ github.run_id }}-${{ github.run_attempt }}.jsonl
           # A failed-only round (since_run): each failed test of FILTER must still select a test (./dev ci rerun-check), never a warning.
           RERUN: ${{ github.event.inputs.since_run }}
@@ -350,8 +356,11 @@ jobs:
             echo "::notice::test-cache: nextest leaves out the packages with a reusable pass of the same key (and filter): $TEST_CACHE_EXCLUDE"
             if [ -n "$TEST_FILTER" ]; then filter=(-E "($TEST_FILTER) & ($TEST_CACHE_EXCLUDE)" --no-tests=warn); else filter=(-E "$TEST_CACHE_EXCLUDE" --no-tests=warn); fi
           fi
+          # A partition runs its share of the tests the filters select; a rerun of named failed tests (FILTER) runs those whole.
+          part=()
+          if [ -n "$PART_LABEL" ] && [ -z "$FILTER" ]; then part=(--partition "hash:${PART_LABEL#, }"); echo "::notice::nextest partition ${PART_LABEL#, } (hash of the test)"; fi
           set -o pipefail
-          cargo nextest run --profile ci --locked --no-fail-fast ${filter[@]+"${filter[@]}"} 2>&1 | tee "$RUNNER_TEMP/nextest-paddock-dev.log"
+          cargo nextest run --profile ci --locked --no-fail-fast ${part[@]+"${part[@]}"} ${filter[@]+"${filter[@]}"} 2>&1 | tee "$RUNNER_TEMP/nextest-paddock-dev.log"
 
       # ADR 0116, report-only (ER-41): the test-result record of paddock-dev's package (see the crates leg's step). Unlike the crates
       # job, paddock-dev's Linux leg runs its tests plainly (no coverage run), so it is cacheable on every runner. A leg that runs only a
@@ -359,7 +368,7 @@ jobs:
       # key holds the filter, so that pass counts only for a later leg with the same filter (user decision 97). `record` stores only
       # packages whose tests all passed on the first try in a whole log (test_cache::records_from_log).
       - name: Record test results (test cache)
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/train/')) }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter && matrix.part_label == '' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/train/')) }}
         continue-on-error: true
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
         env:
@@ -383,7 +392,7 @@ jobs:
 
       # Licences, advisories, sources (tools/paddock-dev/deny.toml, the crates' rules); the image has cargo-deny.
       - name: Deny
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os == 'Linux' && !matrix.filter }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os == 'Linux' && !matrix.filter && matrix.part_extra != 'false' }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
         run: cargo deny check
 
