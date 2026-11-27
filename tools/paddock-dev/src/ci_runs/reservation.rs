@@ -7,6 +7,10 @@
 //! the holder ends or at its `--max-hold-secs`), and every dispatch that is not itself a train's waits on it, bounded by the
 //! caller's `--max`, then reports "still held" (the member gate: `not measured`). A train dispatch never waits here.
 //!
+//! Its job beside the server wait (`dispatch::yield_to_trains`, which sees only train runs that exist, queued or running): the lock
+//! covers the gaps between the workflows of a sequence, when no train run exists yet, and two dispatches from this Mac in the same
+//! second. The server wait covers train runs dispatched from anywhere else. Neither replaces the other.
+//!
 //! The lock is the machine's: all agents and the integrator run on one Mac, and the shared runners are one machine each. A lock
 //! that does not exist (nobody ever took it) is free.
 

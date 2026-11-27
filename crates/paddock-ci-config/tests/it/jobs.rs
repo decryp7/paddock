@@ -1,6 +1,6 @@
 use paddock_ci_config::jobs::{
-    APPS_PROJECT, Declared, JobModel, Leg, Legs, PROJECT_OUTPUTS, Problem, model, named_jobs,
-    render, render_name, tool_cache_actions,
+    APPS_PROJECT, Declared, JobModel, Leg, Legs, MatrixValues, PROJECT_OUTPUTS, Problem, model,
+    named_jobs, render, render_name, runner_jobs, tool_cache_actions, triggers,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -474,6 +474,71 @@ fn named_jobs_read_the_names_and_matrices_of_a_workflow_with_no_project_outputs(
             .message
             .contains("no `jobs:`")
     );
+}
+
+#[test]
+fn runner_jobs_read_labels_matrix_and_calls_without_expanding_legs() {
+    let jobs = runner_jobs(
+        "jobs:\n  a:\n    runs-on: macos-latest\n  b:\n    runs-on: [self-hosted, windows]\n  c:\n    runs-on: ${{ matrix.os }}\n    strategy:\n      matrix:\n        os: [ubuntu-latest, windows-latest]\n  d:\n    uses: ./.gitea/workflows/x.yml\n  e:\n    runs-on: ${{ matrix.os }}\n    strategy:\n      matrix:\n        include: ${{ fromJSON(needs.plan.outputs.crate_legs) }}\n  f:\n    runs-on: ${{ matrix.os }}\n    strategy:\n      matrix:\n        exclude: [x]\n        include: ${{ fromJSON(inputs.shards) }}\n",
+    )
+    .expect("read");
+    assert_eq!(jobs[0].runs_on, ["macos-latest"]);
+    assert_eq!(jobs[0].matrix, MatrixValues::None);
+    assert_eq!(jobs[1].runs_on, ["self-hosted", "windows"]);
+    assert_eq!(jobs[2].runs_on, ["${{ matrix.os }}"]);
+    assert_eq!(
+        jobs[2].matrix,
+        MatrixValues::Literal(vec!["ubuntu-latest".into(), "windows-latest".into()])
+    );
+    assert!(jobs[3].runs_on.is_empty());
+    assert_eq!(jobs[3].uses.as_deref(), Some("./.gitea/workflows/x.yml"));
+    assert_eq!(
+        jobs[4].matrix,
+        MatrixValues::Dynamic,
+        "legs the planner writes"
+    );
+    assert_eq!(
+        jobs[5].matrix,
+        MatrixValues::Dynamic,
+        "legs a caller writes, beside a matrix named_jobs refuses"
+    );
+    assert!(runner_jobs("name: x\n").is_err());
+}
+
+#[test]
+fn runner_jobs_carry_the_name_the_needs_and_the_steps_that_use_an_action() {
+    let jobs = runner_jobs(
+        "jobs:\n  plan:\n    name: Plan it\n    steps:\n      - run: x\n      - uses: ./.gitea/actions/runner-wait\n  t:\n    needs: [plan]\n    runs-on: macos-latest\n",
+    )
+    .expect("read");
+    assert_eq!(
+        (jobs[0].name.as_str(), jobs[0].needs.is_empty()),
+        ("Plan it", true)
+    );
+    assert_eq!(jobs[0].step_uses, ["./.gitea/actions/runner-wait"]);
+    assert_eq!(
+        (jobs[1].name.as_str(), jobs[1].needs.as_slice()),
+        ("t", ["plan".to_string()].as_slice())
+    );
+}
+
+#[test]
+fn triggers_carry_the_events_and_the_workflow_dispatch_inputs() {
+    let t = triggers("on:\n  push:\n  workflow_dispatch:\n    inputs:\n      since_run:\n        default: \"\"\n      dispatch_id:\n        default: \"\"\njobs:\n  a:\n    runs-on: x\n").expect("read");
+    assert_eq!(t.events, ["push", "workflow_dispatch"]);
+    assert!(t.takes_input("since_run") && t.takes_input("dispatch_id") && !t.takes_input("gates"));
+    assert_eq!(triggers("on: push\n").unwrap().events, ["push"]);
+    assert_eq!(
+        triggers("on: [push, pull_request]\n").unwrap().events,
+        ["push", "pull_request"]
+    );
+    // Positive control: a workflow that cannot be dispatched takes no input, and one with no `on:` has no event.
+    assert!(!triggers("on:\n  push:\n").unwrap().takes_input("since_run"));
+    assert_eq!(
+        triggers("jobs:\n  a:\n    runs-on: x\n").unwrap(),
+        Default::default()
+    );
+    assert!(triggers("a: [1,\n").is_err());
 }
 
 #[test]

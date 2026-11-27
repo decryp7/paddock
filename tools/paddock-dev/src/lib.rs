@@ -74,6 +74,7 @@ pub mod git_env;
 pub mod health;
 pub mod heavy_cmd;
 pub mod heavy_install;
+pub mod heavy_tool;
 pub mod hook;
 pub mod host_tests;
 pub mod input_hash;
@@ -109,12 +110,14 @@ pub mod repo_model;
 pub mod run_scope;
 pub mod safe_remove;
 pub mod slots;
+pub mod stop_signals;
 pub mod test_cache;
 pub mod test_cost;
 pub mod test_features;
 // Unix only: it starts the helper through a POSIX shell, and every test that uses it is `#[cfg(unix)]`.
 #[cfg(all(test, unix))]
 mod test_sleeper;
+pub mod throttle;
 pub mod tool_cache;
 pub mod wait;
 pub mod wait_lock;

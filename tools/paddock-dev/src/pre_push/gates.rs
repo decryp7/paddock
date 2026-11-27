@@ -50,7 +50,7 @@ pub struct Gate {
     /// whose folder holds no build yet is COLD, and the history keeps cold and warm apart.
     pub build_dir: Option<String>,
     /// The row runs CI's own tests (the member gate's `tests <ws>`): its child gets CI's job environment
-    /// ([`crate::ci_run::job_env`]) less the secrets, not the [`super::exec::PASS`] list of the other rows.
+    /// ([`crate::ci_run::job_env`]) less the secrets, not the [`crate::child_env::PASS`] list of the other rows.
     pub ci_env: bool,
 }
 
