@@ -375,7 +375,7 @@ jobs:
           PLAN_TOKEN: ${{ github.token }}
           LEG_FILTER: ${{ matrix.test_filter }}
           # The job's display name (the `name:` of this job) and the run's attempt: the reader trusts a record by its own job's result.
-          PADDOCK_JOB_NAME: paddock-dev (${{ matrix.os }})
+          PADDOCK_JOB_NAME: paddock-dev (${{ matrix.os }}${{ matrix.part_label }})
           PADDOCK_RUN_ATTEMPT: ${{ github.run_attempt }}
           PADDOCK_TEST_CACHE_KEY_ID: ${{ secrets.PADDOCK_TEST_CACHE_KEY_ID }}
           PADDOCK_TEST_CACHE_SECRET: ${{ secrets.PADDOCK_TEST_CACHE_SECRET }}
