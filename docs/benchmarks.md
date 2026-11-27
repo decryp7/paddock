@@ -87,7 +87,7 @@ uses it, results in
 ### 2026-11-28, the queue model in memory (fix/throttle-queue-model-windows)
 
 - **Commit:** base e7e278361 (the model on the real lock folder) against this branch (the model in memory, 12 seeds on the real folder).
-- **Machine:** Mac mini, 14 cores, macOS 27.2, debug test build, 5-minute load 5 to 9 (other agents); Windows: the `crate` job's Windows leg (windows-latest), measured by the CI trial, below.
+- **Machine:** Mac mini, 14 cores, macOS 27.2, debug test build, 5-minute load 5 to 9 (other agents); Windows: the `crate` job's Windows leg (windows-latest), measured by the CI trial (run 9333), below.
 - **Command:** `./dev throttle -- sh -c 'cd crates && cargo nextest run -p paddock-throttle --test it the_queue_model'`, one run each (nextest's own per-test time).
 - **Numbers:**
 
@@ -95,7 +95,7 @@ uses it, results in
   |---|---|---|
   | macOS: the queue model, 1200 seeds | 8.3 s (16 s to 28 s under the agents' load, 2026-11-27) | 1.26 s in memory (`the_queue_model_has_no_wait_cycle_and_never_exceeds_the_maximum`) |
   | macOS: the real-folder sweep | (inside the 8.3 s) | 1.53 s for the whole test, which also reruns the 1200 in-memory seeds; 12 real seeds alone 0.15 s to 0.27 s |
-  | Windows CI, run 9286, job 53444 | try 1 stopped at 180.06 s (TMT), try 2 passed in 132.5 s | WINDOWS-TBD |
+  | Windows CI, run 9286, job 53444 | try 1 stopped at 180.06 s (TMT), try 2 passed in 132.5 s | trial run 9333, job 53741 (windows-latest): 3.12 s in memory, 4.64 s the real-folder test (macOS runner, job 53714, same run: 1.23 s and 2.62 s) |
 
 - **Reach of the real-folder seeds:** the in-memory sweep reaches 20 kinds of operation on the folder (take, probe, read, write, rename, remove, each on the slot lock, the slot record, tickets, high and drain markers and the temporary files). With 1 seed per maximum 4 are missed (the high marker's write, read, rename and the log removal); with 2 per maximum none; the test uses 4 and fails naming what a smaller number would miss.
 - **Notes:** 7 ms per seed on the Mac and about 110 ms to 150 ms per seed on Windows (132 s to 180 s for 1200): file-system work, as the old waiver said. The cost moved from 1200 real runs to 12.
