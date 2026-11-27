@@ -655,8 +655,10 @@ fn owner_killed(act_as_user: bool) {
         let w: Vec<&str> = line.split_whitespace().collect();
         if let ["child", c, "grandchild", g] = w[..] {
             for p in [c, g] {
-                // conformance: recorded-pid — the owner blocks on stdin and holds both; paddock-proc's tests cannot use paddock-testkit-start (a cycle)
-                ids.push(ProcessId::of(p.parse().unwrap()).unwrap());
+                ids.push(
+                    crate::recorded::descendant_of(owner_id, p.parse().unwrap())
+                        .expect_running("a child of the owner"),
+                );
             }
         }
     }
@@ -1279,9 +1281,9 @@ fn guarded_child_with_a_helper(
             break pid;
         }
     };
-    // conformance: recorded-pid — the helper sleeps in the child's group for its lifetime; paddock-proc's tests cannot use paddock-testkit-start (a cycle)
-    let helper =
-        ProcessId::of(helper_pid).unwrap_or_else(|| fail(&[child], "the helper has no identity"));
+    let helper = crate::recorded::descendant_of(child, helper_pid)
+        .running()
+        .unwrap_or_else(|| fail(&[child], "the helper has no identity"));
     let exited =
         paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
             s.exit_status().is_some()
