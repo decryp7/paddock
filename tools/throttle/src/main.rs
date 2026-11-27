@@ -1,23 +1,14 @@
 //! The `throttle` program: arguments and environment in, ports wired to the real clock, process table and load.
 
+use paddock_throttle::boot::{self, env_get};
+use paddock_throttle::cli::{self, Cli, USAGE};
+use paddock_throttle::clock::{Clock, SystemClock};
+use paddock_throttle::exit::{self, process_exit};
+use paddock_throttle::lock::{Request, Throttle};
+use paddock_throttle::runner::{RunOpts, announce, run};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use throttle::cli::{self, Cli, USAGE};
-use throttle::clock::{Clock, SystemClock};
-use throttle::config::Config;
-use throttle::exit::{self, process_exit};
-use throttle::gate::SysLoad;
-use throttle::lock::{Request, Throttle};
-use throttle::log::Logger;
-use throttle::procs::OsProcs;
-use throttle::runner::{RunOpts, announce, run};
-
-/// One variable of the environment; `HEAVY_X` stands in for `THROTTLE_X` until the old names are retired (`config::aliased`).
-fn env_get(k: &str) -> Option<String> {
-    let raw = |k: &str| std::env::var(k).ok();
-    throttle::config::aliased(&raw, k).filter(|v| !v.is_empty())
-}
 
 /// Stop flags: (interrupt, terminate, hangup).
 fn stop_flags() -> (Arc<AtomicBool>, Arc<AtomicBool>, Arc<AtomicBool>) {
@@ -41,40 +32,49 @@ fn stop_flags() -> (Arc<AtomicBool>, Arc<AtomicBool>, Arc<AtomicBool>) {
     (int, term, hup)
 }
 
-/// The dev-targets folder by the tools' rule (docs/dev-setup.md, "Where things live"; `throttle::capture::dev_targets_of`):
-/// `PADDOCK_DEV_TARGETS`, else the parent of `git config paddock.worktreeRoot` read from the current folder, else of
-/// `PADDOCK_WORKTREE_ROOT`. `None` when none gives one: the run logs then go under the lock folder.
-fn dev_targets() -> Option<std::path::PathBuf> {
-    use throttle::capture::{DEV_TARGETS_ENV, dev_targets_of};
-    if let Some(v) = env_get(DEV_TARGETS_ENV) {
-        return dev_targets_of(Some(&v), None);
-    }
-    let mut git = paddock_proc::command("git");
-    git.args(["config", "--get", "paddock.worktreeRoot"]);
-    let from_git = paddock_proc::run_bounded(
-        git,
-        paddock_proc::Limits::new(std::time::Duration::from_secs(10)).max_output(1 << 16),
-    )
-    .ok()
-    .filter(paddock_proc::Output::success)
-    .map(|o| o.stdout_text().trim().to_string())
-    .filter(|v| !v.is_empty());
-    let root = from_git.or_else(|| env_get("PADDOCK_WORKTREE_ROOT"));
-    dev_targets_of(None, root.as_deref())
-}
-
 fn main() {
     let code = real_main();
     // The full 32 bits on Windows (NTSTATUS), the low byte (never a false success) elsewhere.
     std::process::exit(process_exit(code, cfg!(windows)));
 }
 
+/// Called by the name of a heavy tool (a link written by `throttle shims install`): the shim, not the lock program.
+fn shim_main(tool: &'static str, argv: &[std::ffi::OsString]) -> i32 {
+    let (int, term, hup) = stop_flags();
+    let stop = move || exit::stop_code(int.load(Ordering::SeqCst), term.load(Ordering::SeqCst), hup.load(Ordering::SeqCst));
+    paddock_shim::run(tool, &argv[0], &argv[1..], &stop)
+}
+
+/// `throttle shims install <dir>`: one line per tool, and a non-zero exit when one was refused.
+fn shims_install(dir: &str) -> i32 {
+    use paddock_shim::install::{Installed, install};
+    let exe = std::env::current_exe()
+        .map(|e| paddock_env::winpath::real_or_given(&e))
+        .unwrap_or_default();
+    let mut refused = false;
+    for (name, r) in install(std::path::Path::new(dir), &exe, paddock_shim::SHIMMED) {
+        match r {
+            Installed::Made(p) => println!("{name}: linked {}", p.display()),
+            Installed::Present(p) => println!("{name}: already {}", p.display()),
+            Installed::Refused(why) => {
+                refused = true;
+                eprintln!("throttle: {name}: {why}");
+            }
+        }
+    }
+    if refused { exit::REFUSED } else { 0 }
+}
+
 fn real_main() -> i32 {
+    let argv: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    if let Some(tool) = paddock_shim::called_as(argv.first().map(|a| a.as_os_str())) {
+        return shim_main(tool, &argv);
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let pid = std::process::id();
     // One correlation id per run; an id handed in by a caller (a dev tool, CI) is reused and passed on to the command.
-    let run_id = env_get("DEVKIT_RUN_ID").unwrap_or_else(|| format!("{:x}-{:x}", clock.now_micros(), pid));
+    let run_id = boot::run_id(clock.as_ref(), pid);
     let parsed = match cli::parse(&args) {
         Ok(c) => c,
         Err(e) => {
@@ -92,12 +92,11 @@ fn real_main() -> i32 {
             println!("throttle {}", env!("CARGO_PKG_VERSION"));
             return 0;
         }
+        Cli::ShimsInstall { dir } => return shims_install(dir),
         _ => {}
     }
     // The dev-targets folder is derived once: the run logs go under it, and `<dev-targets>/throttle` is an old lock folder.
-    let dev_targets = if matches!(parsed, Cli::Dir) { None } else { dev_targets() };
-    let host = throttle::places::Host::real(dev_targets.clone());
-    let (mut cfg, warnings) = Config::from_env(&env_get, &host);
+    let (mut cfg, warnings, dev_targets) = boot::config(!matches!(parsed, Cli::Dir));
     if let Cli::Run(r) = &parsed {
         if let Some(g) = r.gate_load {
             cfg.gate_load = g;
@@ -121,19 +120,7 @@ fn real_main() -> i32 {
     if matches!(parsed, Cli::Run(_)) && cfg.runs.is_none() {
         cfg.runs = dev_targets.map(|d| d.join("runs"));
     }
-    let log = Arc::new(Logger::new(
-        run_id.clone(),
-        pid,
-        Arc::clone(&clock),
-        Some(cfg.log_path(&throttle::timefmt::day_text(clock.now_secs()))),
-        cfg.verbose,
-    ));
-    let say: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(|m: &str| eprintln!("throttle: {m}"));
-    for w in &warnings {
-        say(w);
-        log.warn("throttle.config", w, &[]);
-    }
-    let h = Throttle::new(cfg, clock, Arc::new(OsProcs), Arc::new(SysLoad::default()), log, pid, say);
+    let h: Throttle = boot::throttle(cfg, &warnings, &run_id, "throttle");
     match parsed {
         Cli::Status => {
             print!("{}", h.status());
@@ -164,7 +151,7 @@ fn real_main() -> i32 {
             let cwd = std::env::current_dir().unwrap_or_default();
             let home = env_get("HOME").or_else(|| env_get("USERPROFILE")).map(PathBuf::from);
             if !h.cfg.allow_home_target {
-                let mut dirs = throttle::guard::build_dirs(
+                let mut dirs = paddock_throttle::guard::build_dirs(
                     env_get("CARGO_TARGET_DIR").as_deref(),
                     env_get("CARGO_BUILD_TARGET_DIR").as_deref(),
                     &r.command,
@@ -172,8 +159,8 @@ fn real_main() -> i32 {
                 let cargo_home = env_get("CARGO_HOME")
                     .map(PathBuf::from)
                     .or_else(|| home.as_ref().map(|p| p.join(".cargo")));
-                dirs.extend(throttle::guard::config_target_dirs(&cwd, cargo_home.as_deref()));
-                if let Some(v) = throttle::guard::violation(&dirs, home.as_deref(), &cwd) {
+                dirs.extend(paddock_throttle::guard::config_target_dirs(&cwd, cargo_home.as_deref()));
+                if let Some(v) = paddock_throttle::guard::violation(&dirs, home.as_deref(), &cwd) {
                     let hint =
                         env_get("THROTTLE_BUILD_ROOT_HINT").unwrap_or_else(|| "a folder outside your home, e.g. on a work disk".into());
                     eprintln!("ER-14: build dir inside ~ ({v}); use {hint} (THROTTLE_ALLOW_HOME_TARGET=1 overrides)");
@@ -194,14 +181,16 @@ fn real_main() -> i32 {
             }
             let cwd_text = cwd.to_string_lossy().into_owned();
             let row = env_get("THROTTLE_ROW")
-                .map(|k| throttle::history::clean_key(&k))
+                .map(|k| paddock_throttle::history::clean_key(&k))
                 .filter(|k| !k.is_empty());
             let req = Request {
-                name: throttle::timefmt::oneline(&r.name),
-                cwd: throttle::timefmt::oneline(&cwd_text),
-                cmdline: throttle::mask::mask_cmd(&r.command),
+                name: paddock_throttle::timefmt::oneline(&r.name),
+                cwd: paddock_throttle::timefmt::oneline(&cwd_text),
+                cmdline: paddock_throttle::mask::mask_cmd(&r.command),
                 high: r.high,
-                expected_secs: row.as_deref().and_then(|k| throttle::history::History::of(&h.cfg).expected_secs(k)),
+                expected_secs: row
+                    .as_deref()
+                    .and_then(|k| paddock_throttle::history::History::of(&h.cfg).expected_secs(k)),
                 row,
             };
             let (int, term, hup) = stop_flags();
@@ -215,8 +204,8 @@ fn real_main() -> i32 {
                 stall: r.stall.map(std::time::Duration::from_secs_f64).or(h.cfg.stall),
             };
             // Inside a run that holds a slot (THROTTLE_HELD from a live holder): run in that slot, never queue for it (ER-43).
-            if let Some(outer) = throttle::runner::held_by(&h, env_get(throttle::runner::HELD_VAR).as_deref()) {
-                return throttle::runner::run_nested(&h, &req.name, &r.command, opts, &stop, &outer);
+            if let Some(outer) = paddock_throttle::runner::held_by(&h, env_get(paddock_throttle::runner::HELD_VAR).as_deref()) {
+                return paddock_throttle::runner::run_nested(&h, &req.name, &r.command, opts, &stop, &outer);
             }
             run(&h, req, &r.command, opts, &stop)
         }

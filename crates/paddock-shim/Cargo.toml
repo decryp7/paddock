@@ -1,0 +1,23 @@
+[package]
+name = "paddock-shim"
+version = "0.1.0"
+description = "Interception and monitoring of heavy tools (cargo, npm, npx, node, playwright, ng) by the name a program is called as, the rustup way: find the real tool further along PATH, take a throttle slot, run it with the same arguments, streams and exit code, and report each run to sinks (the run log, the stall report)."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
+[dependencies]
+# The slot, the queue, the load rules, the run log and the stall detector: the shim takes them, it does not copy them (ER-22).
+paddock-throttle = { workspace = true }
+paddock-proc = { workspace = true }
+paddock-env = { workspace = true }
+serde_json = "1"
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+[dev-dependencies]
+tempfile = "3"
+paddock-testkit = { workspace = true }
