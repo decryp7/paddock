@@ -1228,3 +1228,10 @@ owner = "ER-21 class: tests assert the live content of a tool-written register (
 since = 2026-11-27
 review_by = 2026-12-11
 approved = "user"
+
+[[report_only]]
+id = "C179"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c179.rs, then flip the mode to Gate. A member crate of a Cargo workspace whose Rust sources hold a read the reads extractor cannot resolve (a manifest folder in a variable, .ancestors(), current_dir, git ls-files, a join with a non-literal: repo_model::code::blind_of, the model's own definition) and that has no [package.metadata.paddock] test-reads makes the test cache refuse it and every crate that depends on it (ADR 0116 section 2, user decision 122); a declared glob that matches no tracked file is a finding too. First count 2026-11-27 on feat/test-cache-declared-reads: see the branch's report for the crates listed. No baseline file (ER-46): the report is the list. Positive control in the check and tests/it/check_c179.rs: a blind crate and a stale glob go red, a declared crate, an empty declaration, a crate with no blind site and a non-member stay green"
+owner = "ER-21 class: one blind crate (paddock-testkit, a dev-dependency of nearly every crate) kept 121 of 137 test crates Never; ADR 0116 amendment 2026-11-27"
+since = 2026-11-27
+review_by = 2026-12-11

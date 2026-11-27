@@ -67,6 +67,7 @@ fn world() -> World {
         smoke: ["app:x".to_string()].into(),
         decls,
         errors: Vec::new(),
+        test_reads: BTreeMap::new(),
     }
 }
 

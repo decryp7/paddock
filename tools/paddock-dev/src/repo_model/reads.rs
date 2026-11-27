@@ -13,7 +13,8 @@
 //! - Anything else that reads the crate folder or walks the tree is a [`How::Blind`] read, never silence: `CARGO_MANIFEST_DIR` or
 //!   `CARGO_MANIFEST_PATH` outside a fully resolved literal chain (in a variable, a helper, behind `.parent()`, a non-literal
 //!   `join`, `env::var`), `.ancestors()`, `current_dir`, a `"ls-files"` argument, and a chain that normalises to the repository
-//!   root or out of it. The crate is then blind: the test cache never reuses it (ADR 0116 §2).
+//!   root or out of it. The crate is then blind: the test cache never reuses it (ADR 0116 §2), unless the crate declares what its tests
+//!   read (`[package.metadata.paddock] test-reads`, [`super::test_reads`]).
 //!
 //! Macro bodies (`assert!`, `vec!`, a test macro) are parsed as expressions where they can be, so a read inside them counts. A
 //! source that `syn` cannot parse falls back to the caller's text scan ([`Parsed::Fallback`]), measured beside this one.

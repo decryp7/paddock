@@ -120,6 +120,60 @@ fn blind_reads(
     out
 }
 
+/// `blind`: every blind read of the workspace's crates, each with the `test-reads` declaration that covers it, or why the crate stays
+/// `Never` (ADR 0116 §2, user decision 122). Report-only: nothing is skipped or stored.
+fn blind_sites(root: &Path, workspace: &str) -> Result<Report, CliError> {
+    let w = world(root)?;
+    let in_workspace = |dir: &str| w.graph.cargo.get(dir).is_some_and(|n| n.workspace == workspace);
+    let mut own = blind_reads(&w.graph.cargo, w.world.model.blind());
+    own.retain(|dir, _| in_workspace(dir));
+    let all = own.clone();
+    let cov = super::cover_blind(own, &w.world.test_reads);
+    let sites: usize = all.values().map(Vec::len).sum();
+    let mut text: Vec<String> = Vec::new();
+    for (dir, list) in &all {
+        let problems = w.world.test_reads.get(dir).map(|d| d.problems()).unwrap_or_default();
+        let head = match (cov.covered.contains_key(dir), w.world.test_reads.get(dir)) {
+            (true, Some(d)) => format!(
+                "{dir}: {} blind site(s) covered by `test-reads` {:?} ({} tracked file(s) in its key)",
+                list.len(),
+                d.globs,
+                d.matched.len()
+            ),
+            (_, Some(_)) => format!(
+                "{dir}: {} blind site(s), NOT covered: its declaration does not hold ({}); it stays Never",
+                list.len(),
+                problems.join("; ")
+            ),
+            (_, None) => format!(
+                "{dir}: {} blind site(s), NOT covered: no `[package.metadata.paddock] test-reads`; it stays Never",
+                list.len()
+            ),
+        };
+        text.push(head);
+        text.extend(list.iter().map(|s| format!("    {s}")));
+    }
+    // A declaration with a problem and no blind site of its own is a finding as well.
+    for (dir, d) in &w.world.test_reads {
+        if in_workspace(dir) && !all.contains_key(dir) && !d.problems().is_empty() {
+            text.push(format!(
+                "{dir}: its `test-reads` declaration does not hold ({}); it stays Never",
+                d.problems().join("; ")
+            ));
+        }
+    }
+    text.push(format!(
+        "test-cache: {sites} blind site(s) in {} crate(s) of `{workspace}`: {} covered by a declaration, {} not covered",
+        all.len(),
+        cov.covered.len(),
+        cov.open.len()
+    ));
+    Ok(Report::new(
+        serde_json::json!({"sites": sites, "crates": all.len(), "covered": cov.covered.len(), "open": cov.open.len()}),
+        text.join("\n"),
+    ))
+}
+
 /// The graph and the model of the tree, read once: a plan asks for several workspaces and runner classes.
 pub struct World {
     graph: crate::plan::RepoGraph,
@@ -162,7 +216,8 @@ pub fn candidates_in(root: &Path, w: &World, workspace: &str, os: &str) -> Resul
     };
     let nodes: Vec<String> = ts.iter().map(|t| t.node.clone()).collect();
     let hashes = crate::repo_model::hash::node_hashes(&crate::input_hash::Real, &ctx, root, world, &tree, &nodes)?;
-    let blind = super::spread_blind(&world.model, &blind_reads(&w.graph.cargo, world.model.blind()));
+    let covered = super::cover_blind(blind_reads(&w.graph.cargo, world.model.blind()), &world.test_reads);
+    let blind = super::spread_blind(&world.model, &covered.open);
     ts.into_iter()
         .map(|t| {
             let h = hashes.get(&t.node).ok_or_else(|| {
@@ -231,6 +286,7 @@ pub fn command(a: &TestCacheArgs) -> Result<Report, CliError> {
             None => audit(&local),
         }),
         "selfcheck" => selfcheck(shared.as_ref()),
+        "blind" => blind_sites(&root, &a.workspace),
         "plan" => plan(a, &root, store),
         "shadow-run" => shadow_run(a, &root),
         "lookup" | "run" | "forget" | "record" => {

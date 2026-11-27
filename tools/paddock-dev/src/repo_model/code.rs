@@ -188,13 +188,26 @@ pub const READ_PATTERN: &str =
     r"include(_str|_bytes)?!|CARGO_MANIFEST_DIR|CARGO_MANIFEST_PATH|#\[path|rerun-if-changed|ancestors\(|current_dir|ls-files";
 
 /// Text that makes an unparseable source a blind one.
-const BLIND_TRIGGERS: &[&str] = &[
+pub const BLIND_TRIGGERS: &[&str] = &[
     "CARGO_MANIFEST_DIR",
     "CARGO_MANIFEST_PATH",
     ".ancestors(",
     "current_dir",
     "ls-files",
 ];
+
+/// What a source's reads cannot resolve, one line each (the reference text of a blind read): the [`How::Blind`] reads of a parse, or, for
+/// a source `syn` could not parse, one line when its text names a trigger ([`BLIND_TRIGGERS`]). The one definition for the model
+/// ([`CodeExtractor::reads_of`]) and for the declared-reads check (C179).
+pub fn blind_of(parsed: &Parsed, text: &str) -> Vec<String> {
+    match parsed {
+        Parsed::Reads(r) => r.iter().filter(|r| r.how == How::Blind).map(|r| r.path.clone()).collect(),
+        Parsed::Fallback(e) if BLIND_TRIGGERS.iter().any(|t| text.contains(t)) => {
+            vec![format!("source that does not parse ({e}) and reads the crate folder or the tree")]
+        }
+        Parsed::Fallback(_) => Vec::new(),
+    }
+}
 
 impl CodeExtractor {
     /// The `.rs` files that may read a path: one `git grep -l` over the tracked tree at `rev` (`None`: the working tree, files
@@ -275,21 +288,23 @@ impl CodeExtractor {
         for ((f, text, reader), rr) in sources.iter().zip(parsed) {
             let (f, reader) = (*f, *reader);
             stats.rust_sources += 1;
+            // The source reads something the extractor cannot follow: its crate is blind (ADR 0116 §2).
+            if unresolved {
+                for reference in blind_of(&rr, text) {
+                    x.blind.push(Unresolved {
+                        referrer: f.clone(),
+                        node: None,
+                        reference,
+                        why: "a read the extractor cannot resolve (the test cache never reuses this crate unless it declares test-reads)"
+                            .into(),
+                    });
+                }
+            }
             let paths: BTreeSet<String> = match rr {
                 Parsed::Reads(r) => {
                     let mut found = BTreeSet::new();
-                    for r in r {
-                        if r.how == How::Blind {
-                            // The source reads something the extractor cannot follow: its crate is unresolved (ADR 0116 §2).
-                            if unresolved {
-                                x.blind.push(Unresolved {
-                                    referrer: f.clone(),
-                                    node: None,
-                                    reference: r.path,
-                                    why: "a read the extractor cannot resolve (the test cache never reuses this crate)".into(),
-                                });
-                            }
-                        } else if exists(&r.path) {
+                    for r in r.into_iter().filter(|r| r.how != How::Blind) {
+                        if exists(&r.path) {
                             found.insert(r.path);
                         } else if unresolved && r.how.required() {
                             x.unresolved.push(Unresolved {
@@ -302,17 +317,8 @@ impl CodeExtractor {
                     }
                     found
                 }
-                Parsed::Fallback(e) => {
+                Parsed::Fallback(_) => {
                     stats.syn_fallbacks += 1;
-                    // A source `syn` cannot parse cannot be followed: with a trigger in its text it is unresolved too.
-                    if unresolved && BLIND_TRIGGERS.iter().any(|t| text.contains(t)) {
-                        x.blind.push(Unresolved {
-                            referrer: f.clone(),
-                            node: None,
-                            reference: format!("source that does not parse ({e}) and reads the crate folder or the tree"),
-                            why: "a read the extractor cannot resolve (the test cache never reuses this crate)".into(),
-                        });
-                    }
                     read_paths(f, text, reader, tracked)
                 }
             };

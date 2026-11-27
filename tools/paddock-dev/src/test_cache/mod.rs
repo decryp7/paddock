@@ -15,6 +15,8 @@
 
 pub mod cmd;
 pub mod config;
+#[cfg(test)]
+mod declared_tests;
 pub mod key;
 pub mod plan;
 pub mod result;
@@ -161,6 +163,39 @@ pub fn decide(
         })
         .collect();
     (out, None)
+}
+
+/// The blind reads of each crate, split by what covers them (ADR 0116 §2, user decision 122).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Coverage {
+    /// The crates that stay blind (their sites, and the problems of a declaration that does not hold), by folder: the input of
+    /// [`spread_blind`].
+    pub open: std::collections::BTreeMap<String, Vec<String>>,
+    /// The sites a crate's `test-reads` declaration covers, by folder: the crate is cacheable again, its key holds the declared files.
+    pub covered: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+/// A blind site counts as covered when its crate declares its test reads (`[package.metadata.paddock] test-reads`) and the declaration
+/// holds: a glob that matches no tracked file, or an empty list, makes the declaration a finding and the crate stays blind with that
+/// reason first, even when it has no blind site of its own (a stale declaration cannot be trusted either). A crate with sites and no
+/// declaration stays blind (never silently cacheable).
+pub fn cover_blind(
+    own: std::collections::BTreeMap<String, Vec<String>>,
+    declared: &std::collections::BTreeMap<String, crate::repo_model::test_reads::Declared>,
+) -> Coverage {
+    let mut out = Coverage::default();
+    let mut own = own;
+    for (dir, d) in declared {
+        let problems = d.problems();
+        let sites = own.remove(dir).unwrap_or_default();
+        if !problems.is_empty() {
+            out.open.insert(dir.clone(), problems.into_iter().chain(sites).collect());
+        } else if !sites.is_empty() {
+            out.covered.insert(dir.clone(), sites);
+        }
+    }
+    out.open.extend(own);
+    out
 }
 
 /// The blind reads of every crate, spread to its dependents (ADR 0116 §2): a crate's tests run its dependencies' code, whose unhashed reads
