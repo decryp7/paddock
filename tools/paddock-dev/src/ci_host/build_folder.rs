@@ -137,11 +137,10 @@ pub fn run_with(
         );
     }
     let ci_toml = ws.join(".cargo").join("ci.toml");
-    let dir: String;
-    let text: String;
-    if os == "Linux" {
-        dir = format!("{ws_text}/target");
-        text = ci_toml_text(None, &dir);
+    let (dir, text) = if os == "Linux" {
+        let dir = format!("{ws_text}/target");
+        let text = ci_toml_text(None, &dir);
+        (dir, text)
     } else {
         let kept = match step.isolation(&["path", "target", &args.name]) {
             Ok(p) => p,
@@ -151,9 +150,10 @@ pub fn run_with(
             }
         };
         // Cargo on Windows wants a native path; forward slashes work in cargo, Node and Git bash alike.
-        dir = if windows { kept.replace('\\', "/") } else { kept };
-        text = ci_toml_text(Some(&dir), &dir);
-    }
+        let dir = if windows { kept.replace('\\', "/") } else { kept };
+        let text = ci_toml_text(Some(&dir), &dir);
+        (dir, text)
+    };
     if dir.contains('\'') {
         return step.fail(
             format!("the build folder {dir} has a quote in its path"),
