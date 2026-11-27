@@ -297,19 +297,16 @@ const API: &str = "https://gitea.invalid/api/v1/repos/decryp7/paddock/actions";
 struct Api {
     json: HashMap<String, Value>,
     zips: HashMap<String, Vec<u8>>,
-    asked: Vec<String>,
 }
 
 impl Http for Api {
     fn get_json(&mut self, url: &str, _token: &str) -> Result<Value, String> {
-        self.asked.push(url.to_string());
         self.json
             .get(url)
             .cloned()
             .ok_or_else(|| "curl exited with 22: error: 404".to_string())
     }
     fn get_bytes(&mut self, url: &str, _token: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
-        self.asked.push(url.to_string());
         let z = self.zips.get(url).ok_or_else(|| "curl exited with 22: error: 404".to_string())?;
         if z.len() as u64 > max_bytes {
             return Err("curl exited with 63: maximum file size exceeded".into());
@@ -524,7 +521,7 @@ fn repository_writes(doc: &Node) -> Vec<String> {
     }
     for (who, p) in perms {
         match p.text() {
-            Some(t) if t == "write-all" => out.push(format!("{who} has write-all")),
+            Some("write-all") => out.push(format!("{who} has write-all")),
             Some(_) => {}
             None => {
                 if p.get_text("contents") == Some("write") {

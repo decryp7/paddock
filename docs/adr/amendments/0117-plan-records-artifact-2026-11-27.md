@@ -27,5 +27,5 @@
 5. **Common practice (ER-37).** An artifact of the run is how GitHub Actions and Gitea pass a run's result to a later reader; refs written
    by CI need a write token, which a read-only workflow must not hold. Cost: about 0.5 agent-day, less than the token route.
 6. **Evidence.** The trial run of `fix/plan-records-artifact` (`ci dispatch --trial`) must show its plan job's artifact `plan-record`
-   through the API; the run id is recorded in the commit that records it. Until the first nightly after landing reads a record, the
+   through the API; the run id is in the hand-back report of the branch. Until the first nightly after landing reads a record, the
    monitor stays report-only (ER-41).
