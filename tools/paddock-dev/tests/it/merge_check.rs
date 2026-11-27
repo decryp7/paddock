@@ -3271,3 +3271,257 @@ fn a_fast_generator_still_runs_in_every_merge_check() {
     );
     assert!(!text.contains("deferred"), "nothing heavy was due: {text}");
 }
+
+/// `./dev merge member` (user decision 100, 2026-11-27): the train merge is made by the tool, with a fixed subject and trailers, and
+/// every reader reads the trailers first and the subject only as the fallback for a merge made by hand.
+mod merge_member {
+    use super::*;
+
+    /// `(exit code, output)` of `dev merge member <args>` in `r`.
+    fn member(r: &Repo, args: &[&str]) -> (i32, String) {
+        let out = r
+            .dev_cmd()
+            .args(["merge", "member", "--root"])
+            .arg(r.path())
+            .args(args)
+            .output()
+            .unwrap();
+        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        (out.status.code().unwrap(), text)
+    }
+
+    /// git's own parse of the trailers of `rev`.
+    fn trailers(r: &Repo, rev: &str) -> String {
+        r.git(&["show", "-s", "--format=%(trailers:only,unfold)", rev])
+    }
+
+    /// `main` is the train; `feat/x` is a member that adds `x.txt`.
+    fn train_and_member() -> Repo {
+        let r = Repo::new();
+        r.write("base.txt", "base\n");
+        r.commit("base");
+        r.git(&["checkout", "-q", "-b", "feat/x"]);
+        r.write("x.txt", "x\n");
+        r.commit("feat: x");
+        r.git(&["checkout", "-q", "main"]);
+        r.write("train.txt", "train\n");
+        r.commit("train: moves on");
+        r
+    }
+
+    #[test]
+    fn a_member_is_merged_with_a_fixed_subject_and_the_trailers_and_the_check_passes() {
+        let r = train_and_member();
+        let sha = r.git(&["rev-parse", "feat/x"]);
+        let (code, text) = member(&r, &["feat/x"]);
+        assert_eq!(code, 0, "{text}");
+        assert_eq!(r.git(&["show", "-s", "--format=%s", "HEAD"]), "Merge feat/x into main");
+        let t = trailers(&r, "HEAD");
+        assert!(
+            t.contains("Paddock-Member: feat/x") && t.contains(&format!("Paddock-Sync-Sha: {sha}")),
+            "{t}"
+        );
+        assert!(!t.contains("Paddock-Sync-Ref"), "a branch is no sync ref: {t}");
+        assert_eq!(
+            r.git(&["rev-list", "--parents", "-n", "1", "HEAD"]).split_whitespace().count(),
+            3,
+            "a real merge"
+        );
+        assert!(text.contains("merge check"), "the check ran on the new commit: {text}");
+    }
+
+    #[test]
+    fn a_sync_ref_is_merged_under_its_member_and_names_itself() {
+        let r = train_and_member();
+        let sha = r.git(&["rev-parse", "feat/x"]);
+        let synced = format!("sync/feat/x/{}", &sha[..9]);
+        r.git(&["branch", &synced, "feat/x"]);
+        let (code, text) = member(&r, &[&synced]);
+        assert_eq!(code, 0, "{text}");
+        assert_eq!(r.git(&["show", "-s", "--format=%s", "HEAD"]), "Merge feat/x into main");
+        let t = trailers(&r, "HEAD");
+        assert!(
+            t.contains("Paddock-Member: feat/x")
+                && t.contains(&format!("Paddock-Sync-Ref: {synced}"))
+                && t.contains(&format!("Paddock-Sync-Sha: {sha}")),
+            "{t}"
+        );
+    }
+
+    /// The control: it is the trailer that names the member, so a subject that names nothing still finds it.
+    #[test]
+    fn sync_member_reads_the_member_from_the_trailer_not_the_subject() {
+        let make = |trailer: &str| {
+            let r = Repo::new();
+            r.write("base.txt", "base\n");
+            r.commit("base");
+            r.git(&["checkout", "-q", "-b", "feat/x"]);
+            r.write("x.txt", "x\n");
+            r.commit("feat: x");
+            r.git(&["checkout", "-q", "main"]);
+            r.git(&[
+                "merge",
+                "-q",
+                "--no-ff",
+                "-m",
+                &format!("chore: take the member{trailer}"),
+                "feat/x",
+            ]);
+            let m = r.git(&["rev-parse", "HEAD"]);
+            revert_merge(&r, &m);
+            r.write("other.txt", "other\n");
+            r.commit("feat: other");
+            r.git(&["checkout", "-q", "feat/x"]);
+            r
+        };
+        let (code, text) = sync_member(&make("\n\nPaddock-Member: feat/x\n"), "main", &[]);
+        assert_eq!(code, 0, "{text}");
+        assert!(
+            text.contains("1 revert(s) of this member's own merges") && text.contains("0 of other branches"),
+            "{text}"
+        );
+        let (code, text) = sync_member(&make(""), "main", &[]);
+        assert_eq!(code, 0, "{text}");
+        assert!(
+            text.contains("0 revert(s) of this member's own merges"),
+            "control: no trailer, no own merge: {text}"
+        );
+    }
+
+    /// The trial reader: the trailer names the member and its sync ref where the subject names neither.
+    #[test]
+    fn the_trial_reader_reads_the_member_and_sync_ref_from_the_trailers() {
+        let make = |trailers: &dyn Fn(&str) -> String| {
+            let repo = Repo::new();
+            repo.write("base.txt", "base\n");
+            repo.commit("base");
+            repo.git(&["checkout", "-q", "-b", "feat/a", "main"]);
+            repo.write("a.txt", "a\n");
+            let head = repo.commit("feat: a");
+            repo.git(&["checkout", "-q", "main"]);
+            repo.git(&[
+                "merge",
+                "-q",
+                "--no-ff",
+                "-m",
+                &format!("chore: take the member{}", trailers(&head)),
+                "feat/a",
+            ]);
+            let dir = tempfile::tempdir().unwrap();
+            let ev = r#"{{"check":"pre-push","subject":{{"kind":"commit","sha":"{run:git|rev-parse|HEAD}","tree":"{run:git|rev-parse|HEAD:}"}},"tool":"fake","at":1}}"#;
+            StandIn::new(dir.path(), "gates")
+                .answers(Actions::new().stdout_with(&format!(r#"{{{{"outcome":{{{{"status":"clean","evidence":{ev}}}}}}}}}"#)))
+                .install()
+                .unwrap();
+            StandIn::new(dir.path(), "trial")
+                .answers(
+                    Actions::new()
+                        .appends_with("{env:GATES_LOG}", "{args}\n")
+                        .stdout_with(r#"{{"ok":true,"state":"green","run":77}}"#),
+                )
+                .install()
+                .unwrap();
+            let log = dir.path().join("log");
+            let out = repo
+                .dev_cmd()
+                .env("PADDOCK_MERGE_CHECK_GATES", dir.path().join("gates"))
+                .env("PADDOCK_MERGE_CHECK_TRIAL", dir.path().join("trial"))
+                .env("PADDOCK_MERGE_CHECK_CARGO", "/nonexistent/cargo")
+                .env("GATES_LOG", &log)
+                .args(["merge", "check", "--gates", "--root"])
+                .arg(repo.path())
+                .arg("HEAD")
+                .output()
+                .unwrap();
+            let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+            (head, text, fs::read_to_string(&log).unwrap_or_default())
+        };
+        // Paddock-Member alone: the ref is built from the member's head.
+        let (head, text, log) = make(&|_| "\n\nPaddock-Member: feat/a\n".to_string());
+        assert!(!text.contains("names no member branch"), "{text}");
+        assert!(log.contains(&format!("--branch sync/feat/a/{} ", &head[..9])), "{log}\n{text}");
+        // Paddock-Sync-Ref: used as it is.
+        let (head, text, log) = make(&|h| {
+            format!(
+                "\n\nPaddock-Member: feat/a\nPaddock-Sync-Ref: sync/feat/a/{}\nPaddock-Sync-Sha: {h}\n",
+                &h[..9]
+            )
+        });
+        assert!(log.contains(&format!("--branch sync/feat/a/{} ", &head[..9])), "{log}\n{text}");
+        // The control: no trailer and a subject that names nothing is NOT read, and says so.
+        let (_, text, log) = make(&|_| String::new());
+        assert!(text.contains("names no member branch") && log.is_empty(), "{text}\n{log}");
+    }
+
+    /// A conflict stops the command with the merge in progress, the message prepared, and the next step printed; nothing is resolved.
+    #[test]
+    fn a_conflict_leaves_the_merge_in_progress_with_the_message_prepared() {
+        let r = Repo::new();
+        r.write("f.txt", "base\n");
+        r.commit("base");
+        r.git(&["checkout", "-q", "-b", "feat/x"]);
+        r.write("f.txt", "member\n");
+        r.commit("feat: x");
+        r.git(&["checkout", "-q", "main"]);
+        r.write("f.txt", "train\n");
+        let before = r.commit("train: f");
+        let (code, text) = member(&r, &["feat/x"]);
+        assert_ne!(code, 0, "{text}");
+        assert_eq!(r.git(&["rev-parse", "HEAD"]), before, "no commit was made");
+        let merge_head = r.git(&["rev-parse", "--git-path", "MERGE_HEAD"]);
+        assert!(r.path().join(&merge_head).exists(), "the merge is in progress: {text}");
+        let msg = fs::read_to_string(r.path().join(r.git(&["rev-parse", "--git-path", "MERGE_MSG"]))).unwrap();
+        assert!(
+            msg.starts_with("Merge feat/x into main") && msg.contains("Paddock-Member: feat/x"),
+            "{msg}"
+        );
+        assert!(
+            text.contains("::error::") && text.contains("git commit") && text.contains("merge check"),
+            "{text}"
+        );
+        assert!(
+            fs::read_to_string(r.path().join("f.txt")).unwrap().contains("<<<<<<<"),
+            "left for a person"
+        );
+    }
+
+    /// `--reland <revert>`: the revert is named in a trailer and its files get the `Reverted:` lines the merge check wants.
+    #[test]
+    fn a_reland_is_named_in_a_trailer_with_its_reverted_lines() {
+        let r = Repo::new();
+        r.write("base.txt", "base\n");
+        r.commit("base");
+        r.git(&["checkout", "-q", "-b", "feat/r"]);
+        r.write("r.txt", "r\n");
+        r.commit("feat: r");
+        r.git(&["checkout", "-q", "main"]);
+        r.write("old.txt", "old\n");
+        let old = r.commit("feat: old");
+        r.git(&["revert", "--no-edit", &old]);
+        let revert = r.git(&["rev-parse", "HEAD"]);
+        let (code, text) = member(&r, &["feat/r", "--reland", &revert]);
+        assert_eq!(code, 0, "{text}");
+        let t = trailers(&r, "HEAD");
+        assert!(
+            t.contains(&format!("Paddock-Reland: {revert}")) && t.contains("Reverted: old.txt: "),
+            "{t}"
+        );
+        assert!(t.contains("Paddock-Member: feat/r"), "one trailer block: {t}");
+        let (code, text) = member(&r, &["feat/r", "--reland", "not-a-commit"]);
+        assert_eq!(code, 2, "{text}");
+    }
+
+    #[test]
+    fn a_dirty_tree_or_an_unknown_member_is_refused_before_anything_is_merged() {
+        let r = train_and_member();
+        let head = r.git(&["rev-parse", "HEAD"]);
+        let (code, text) = member(&r, &["feat/none"]);
+        assert_ne!(code, 0, "{text}");
+        assert!(text.contains("::error::") && text.contains("feat/none"), "{text}");
+        r.write("base.txt", "dirty\n");
+        let (code, text) = member(&r, &["feat/x"]);
+        assert_ne!(code, 0, "{text}");
+        assert!(text.contains("::error::") && text.contains("uncommitted"), "{text}");
+        assert_eq!(r.git(&["rev-parse", "HEAD"]), head);
+    }
+}

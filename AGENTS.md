@@ -88,6 +88,13 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   fast static rows (conformance, gates-register, clippy, clippy-windows) on the sync tip first and fails on a bad row (`--no-static "<reason>"` skips them, logged);
   once they pass it dispatches the member's own CI trial (the affected jobs on the train, `ci dispatch --trial` on `sync/<member>/<short sha>`, a new ref per synced commit that sync-member pushes with a plain push: integrator role only) and prints the run id, which
   `./dev merge check --gates` reads later (red blocks, running is not a pass; `--no-trial "<reason>"` skips it, logged).
+- **Train merges are made by `./dev merge member` (user decision 100, 2026-11-27).** In the train's worktree: `./dev merge member <member-branch-or-sync-ref> [--reland <revert>]...`
+  does the `git merge --no-ff` itself with the fixed subject `Merge <member> into <train>` and the trailers `Paddock-Member`, `Paddock-Sync-Ref` (a
+  `sync/<member>/<sha>` ref was given), `Paddock-Sync-Sha`, the `Reverted:` lines `merge check --write-reverted` would write and `Paddock-Reland`
+  per `--reland`, then runs `./dev merge check` on the new commit. A conflict stops it with the merge in progress and the message prepared; it never
+  resolves. Every reader of a train merge (sync-member's own-revert logic, the trial reader, stale-base, `--write-reverted`) reads the trailers
+  through the one function `trailers::merge_member` (git's own trailer parser, `%(trailers:only,unfold)`); the old reading of the subject is only its
+  fallback for merges made by hand (ER-22, ER-42). Do not write a train merge by hand.
 - **Old-base block (user, 2026-11-25).** `./dev merge check` refuses a train member that lacks the train's base (the newest commit of
   main, or of the earlier train, the train has merged) with one `::error::`: merge origin/main into the member and rerun its gate;
   `--old-base-anyway "<reason>"` is the logged emergency override (`tools/paddock-dev/src/merge_check/stale_base.rs`).

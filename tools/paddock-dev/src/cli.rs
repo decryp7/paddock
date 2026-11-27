@@ -225,6 +225,12 @@ enum MergeCommand {
     /// they pass it dispatches the member's own CI trial: it pushes the sync tip as the new ref `sync/<member>/<short sha>` (integrator role only) and runs `ci dispatch ci.yml
     /// --trial sync/<member>/<short sha> --onto <train>` (the affected jobs of the member on the train), printing the run id, unless `--no-trial` says why not.
     SyncMember(SyncMemberArgs),
+    /// Merge a member into the train in this worktree (run it in the train's worktree): `git merge --no-ff` with the fixed subject
+    /// `Merge <member> into <train>` and the trailers every reader reads first (`Paddock-Member`, `Paddock-Sync-Ref`, `Paddock-Sync-Sha`,
+    /// the `Reverted:` lines `merge check --write-reverted` would write, and `Paddock-Reland` for each `--reland`). A conflict stops it with
+    /// the merge in progress and the message prepared; it resolves nothing. After the merge it runs `merge check` on the new commit.
+    /// Take a train merge by this command, never by hand (user decision 100, 2026-11-27).
+    Member(MemberArgs),
     /// Git's merge driver of docs/lessons.md (`merge=lessons`, set by `./dev hooks install`): `./dev merge lessons-driver %O %A %B`.
     /// Git's union merge of two appended sections, then the blank line it drops before a `## ` heading put back. The result is
     /// written to the second file (ours).
@@ -236,6 +242,22 @@ enum MergeCommand {
         /// Their version (%B).
         theirs: PathBuf,
     },
+}
+
+#[derive(Args)]
+struct MemberArgs {
+    /// The member's branch, or its sync ref (`sync/<member>/<sha>`); the remote's `origin/` copy is used when there is no local one.
+    member: String,
+    /// The train's worktree (default: the folder containing .git, found from the current folder).
+    #[arg(long)]
+    root: Option<PathBuf>,
+    /// A revert on the train of the member's own earlier merge that the member re-applies (repeatable): named in a `Paddock-Reland`
+    /// trailer, and its files get `Reverted:` lines so the merge check accepts the re-add.
+    #[arg(long, value_name = "REVERT")]
+    reland: Vec<String>,
+    /// Emergency override of the old-base block, handed to the merge check (see `merge check --old-base-anyway`).
+    #[arg(long, value_name = "REASON")]
+    old_base_anyway: Option<String>,
 }
 
 #[derive(Args)]
@@ -943,6 +965,16 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
                 no_static: a.no_static.as_deref(),
                 no_trial: a.no_trial.as_deref(),
                 trial_max: &a.trial_max,
+            },
+        ),
+        Command::Merge {
+            command: MergeCommand::Member(a),
+        } => merge_check::member::command(
+            a.root.as_deref(),
+            &a.member,
+            &merge_check::member::Options {
+                relands: &a.reland,
+                old_base_anyway: a.old_base_anyway.as_deref(),
             },
         ),
         Command::Merge {

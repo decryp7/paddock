@@ -44,6 +44,7 @@ pub(crate) mod git;
 mod hakari;
 mod hunks;
 mod lost_tests;
+pub mod member;
 mod member_trial;
 mod reland;
 pub(crate) mod reverted_base;
@@ -120,6 +121,8 @@ pub struct Merge {
     pub tree: String,
     /// The merge commit's message (empty when checking a branch before merging).
     pub message: String,
+    /// The trailer block git read from the message ([`trailers::TRAILERS_FORMAT`]): empty for a branch checked before merging.
+    pub trailers: String,
     /// A name for output.
     pub label: String,
     /// The merge commit, when it exists (a branch checked before it is merged has none).
@@ -141,6 +144,7 @@ impl Merge {
             parents,
             tree: tree.into(),
             message: String::new(),
+            trailers: String::new(),
             label: label.into(),
             commit: None,
             target_name,
@@ -151,6 +155,12 @@ impl Merge {
     /// The merge commit's message.
     pub fn with_message(mut self, message: impl Into<String>) -> Self {
         self.message = message.into();
+        self
+    }
+
+    /// The merge commit's trailer block (git's reading of the message, [`trailers::TRAILERS_FORMAT`]).
+    pub fn with_trailers(mut self, trailers: impl Into<String>) -> Self {
+        self.trailers = trailers.into();
         self
     }
 
@@ -377,7 +387,10 @@ fn write_reverted_step(git: &Git, merge: &Merge, found: &[Finding], file: &std::
     } else {
         format!("Merge branch '{}' into {}", merge.member_name, merge.target_name)
     };
-    let text = format!("{head}\n\n{}\n", lines.join("\n"));
+    // The lines join the message's trailer block when it has one (a message from `merge member` ends in its `Paddock-*` trailers):
+    // a blank line between would end that block, and git would no longer read them as trailers.
+    let gap = if merge.trailers.trim().is_empty() { "\n\n" } else { "\n" };
+    let text = format!("{head}{gap}{}\n", lines.join("\n"));
     if let Err(e) = std::fs::write(file, &text) {
         return step(
             vec![format!(
@@ -420,13 +433,19 @@ fn resolve(git: &Git, req: &Request) -> Result<Merge, CliError> {
                     .with_hint("Give a merge commit, or --branch <b> --target <t> before merging."));
             }
             let tree = git.text(&["rev-parse", &format!("{c}^{{tree}}")]).map_err(gap)?.trim().to_string();
-            let message = git.text(&["show", "-s", "--format=%B", c]).map_err(gap)?;
+            // The message and git's reading of its trailers, in one call.
+            let shown = git
+                .text(&["show", "-s", &format!("--format=%B%x00{}", trailers::TRAILERS_FORMAT), c])
+                .map_err(gap)?;
+            let (message, trailer_block) = shown.split_once('\0').unwrap_or((shown.as_str(), ""));
+            let (message, trailer_block) = (message.to_string(), trailer_block.to_string());
             let commit = git
                 .text(&["rev-parse", &format!("{c}^{{commit}}")])
                 .ok()
                 .map(|t| t.trim().to_string());
             Ok(Merge::new(ids, tree, format!("merge {}", short(c)))
                 .with_message(message)
+                .with_trailers(trailer_block)
                 .with_commit(commit))
         }
         (None, Some(b), Some(t)) => {
@@ -692,17 +711,26 @@ fn trial_step(root: &std::path::Path, merge: &Merge, no_trial: Option<&str>, rea
     let [_, member] = merge.parents.as_slice() else {
         return member_trial::not_run("the merge does not have two parents");
     };
-    // The member's name: the one the merge was given, else the branch its subject names (`Merge branch 'x'`); a short hash or a
-    // subject that names none is no branch.
+    // The member's name: the one the merge was given, else the one its trailers name (`Paddock-Member`), else (a merge made by hand)
+    // the branch its subject names (`Merge branch 'x'`); a short hash or a subject that names none is no branch.
     let subject = merge.message.lines().next().unwrap_or("");
-    let named = [merge.member_name.clone(), reverted_base::branch_of(subject)]
+    let said = trailers::merge_member(subject, &merge.trailers);
+    // The trial of this head is of the ref sync-member pushed for it, named by the commit; a merge that names that ref in its
+    // `Paddock-Sync-Ref` trailer says it.
+    if let Some(r) = said
+        .sync_ref
+        .as_deref()
+        .filter(|r| r.starts_with("sync/") && r.ends_with(&format!("/{}", short(member))))
+    {
+        return member_trial::interpret(reader.read(root, r, member), r);
+    }
+    let named = [merge.member_name.clone(), said.branch]
         .into_iter()
         .find(|n| !n.is_empty() && n != short(member) && !n.contains(char::is_whitespace));
     let Some(named) = named else {
         return member_trial::not_run("the merge message names no member branch, so there is no trial ref to read");
     };
     let branch = named.strip_prefix("origin/").unwrap_or(&named);
-    // The trial of this head is of the ref sync-member pushed for it, named by the commit.
     // (a member merged as its sync ref, `sync/<member>/<short sha>`, already is that name).
     let synced = if branch.starts_with("sync/") && branch.ends_with(&format!("/{}", short(member))) {
         branch.to_string()
