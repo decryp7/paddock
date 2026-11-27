@@ -242,6 +242,34 @@ fn a_job_asks_rerun_jobs_when_its_condition_runs_it_for_its_own_name_and_not_for
     );
 }
 
+/// A job that runs on trains and manual runs only (`mutants`) still asks `rerun_jobs` for itself: the model reads the run as a train's
+/// dispatch. A positive control: a condition for a push to main only does not.
+#[test]
+fn a_job_that_runs_on_trains_and_manual_runs_asks_rerun_jobs_and_a_push_only_job_does_not() {
+    let rerun = "contains(fromJSON(needs.plan.outputs.rerun_jobs || '[\"gitleaks\"]'), 'gitleaks')";
+    let with = |event: &str| {
+        WF.replace(
+            &format!("    if: ${{{{ {rerun} }}}}\n"),
+            &format!(
+                "    if: ${{{{ needs.plan.outputs.ui == 'true' && ({event}) && {rerun} }}}}\n"
+            ),
+        )
+    };
+    let asks = |wf: String| {
+        model(&wf, &declared())
+            .unwrap()
+            .job("gitleaks")
+            .unwrap()
+            .asks_rerun_jobs
+    };
+    assert!(asks(with(
+        "github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/heads/train/')"
+    )));
+    assert!(!asks(with(
+        "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+    )));
+}
+
 #[test]
 fn the_tool_cache_must_come_before_the_first_dev_call() {
     let m = built();

@@ -151,7 +151,8 @@ impl Lookup for Reads {
     }
 }
 
-/// `rerun_jobs` is `list`; every other plan output reads as set.
+/// `rerun_jobs` is `list`; every other plan output reads as set; the run is a train's dispatch (a manual run of a `train/*` ref), the one
+/// event a job that runs on trains and manual runs only (`mutants`) asks for.
 struct RerunAs<'a>(&'a str);
 
 impl Lookup for RerunAs<'_> {
@@ -159,7 +160,11 @@ impl Lookup for RerunAs<'_> {
         match name.strip_prefix(PLAN_OUTPUT) {
             Some("rerun_jobs") => Val::Str(self.0.to_string()),
             Some(output) => Val::Planned(output.to_string()),
-            None => Val::Unknown,
+            None => match name {
+                "github.event_name" => Val::Str("workflow_dispatch".to_string()),
+                "github.ref" => Val::Str("refs/heads/train/model".to_string()),
+                _ => Val::Unknown,
+            },
         }
     }
 }
@@ -390,7 +395,8 @@ pub fn model(workflow_text: &str, declared: &Declared) -> Result<JobModel, Vec<P
             problems.push(problem(
                 Some(id),
                 body.line,
-                "the job runs for no project: its conditions read no project output and [ci.jobs] declares none (a job is never `always`)".to_string(),
+                "the job runs for no project: its conditions read no project output and [ci.jobs] declares none (a job is never `always`)"
+                    .to_string(),
             ));
         }
         let legs = legs_of(id, body).unwrap_or_else(|p| {
