@@ -1,9 +1,10 @@
 //! The push gate with a plan, a list of files and a fake machine: no process starts (ER-14).
 
 use super::budget::Timing;
-use super::exec::{Done, Exec, Kind, Limits, QUEUE_STALL, Row, RunOpts, run_all_timed, run_all_with, test_subject};
+use super::exec::{Done, Exec, Kind, Limits, Row, RunOpts, run_all_timed, run_all_with, test_subject};
 use super::gates::{AUDIT_PROFILE, Change, Facts, Gate, Need, Planned, plan_gates, windows_skip_reason};
 use super::{accept_not_measured, parse_refs, render, render_timed};
+use crate::throttle::QUEUE_STALL;
 use paddock_cli::Exit;
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -342,12 +343,34 @@ fn what_the_change_does_not_reach_is_skipped_with_a_reason() {
         ..Change::default()
     };
     let planned = plan_gates(&docs, &c, &facts());
-    // Conformance and its tests run on every push, whatever the plan says (ER-41); everything else a docs change does not reach.
-    assert_eq!(
-        ids(&planned),
-        ["conformance", "conformance-tests", "member-audits", "gates-register"],
-        "{:?}",
-        ids(&planned)
+    // Conformance, its tests and the gate register run on every push, whatever the plan says (ER-41); the rest of the fixed rows
+    // either run too (a row that runs whatever changed, like the member audits) or are skipped with a reason. The list is read
+    // from ROW_SET and the planner's own answer, never typed here (ER-42): a new row cannot break this test.
+    let run = ids(&planned);
+    for always in ["conformance", "conformance-tests", "gates-register"] {
+        assert!(run.contains(&always.to_string()), "{always} runs on every push: {run:?}");
+    }
+    let skipped_ids: Vec<String> = planned
+        .iter()
+        .filter_map(|p| {
+            if let Planned::Skip { id, .. } = p {
+                Some(id.as_str())
+            } else {
+                None
+            }
+        })
+        .flat_map(|id| id.split(", "))
+        .map(String::from)
+        .collect();
+    for row in super::gates::ROW_SET {
+        assert!(
+            run.iter().any(|r| r == row) || skipped_ids.iter().any(|s| s == row),
+            "{row} is neither run nor skipped with a reason for a docs change: run {run:?}, skipped {skipped_ids:?}"
+        );
+    }
+    assert!(
+        run.iter().all(|r| super::gates::ROW_SET.contains(&r.as_str())),
+        "a docs change plans only fixed rows: {run:?}"
     );
     let skipped: Vec<&String> = planned
         .iter()
@@ -662,6 +685,42 @@ fn a_developers_push_skips_the_member_audits_with_a_reason_and_the_member_gate_r
     assert!(ids(&plan_gates(&plan(), &change(&["crates/a.rs"]), &on)).contains(&"member-audits".to_string()));
 }
 
+/// ADR 0123 §7: the job-model check is a member-gate row (a layout change fails before a train, ER-9, ER-53), runs `./dev ci job-model check`
+/// whatever changed (ER-41: ci.yml's layout can be broken from the planner or an action), and a developer's push skips it with the
+/// reason. Removing the row fails this test (ER-33).
+#[test]
+fn the_job_model_row_runs_in_the_member_gate_whatever_changed_and_a_developers_push_skips_it() {
+    let on = plan_gates(
+        &plan(),
+        &change(&["crates/a.rs"]),
+        &Facts {
+            member_gate: true,
+            ..facts()
+        },
+    );
+    let row = on
+        .iter()
+        .find_map(|p| match p {
+            Planned::Run(g) if g.id == "job-model" => Some(g),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("the member gate has a job-model row: {:?}", ids(&on)));
+    assert_eq!(row.args, ["ci", "job-model", "check"]);
+    let off = plan_gates(
+        &plan(),
+        &change(&["crates/a.rs"]),
+        &Facts {
+            member_gate: false,
+            ..facts()
+        },
+    );
+    assert!(
+        off.iter()
+            .any(|p| matches!(p, Planned::Skip { id, reason } if id == "job-model" && reason.contains("--member-gate"))),
+        "{off:?}"
+    );
+}
+
 /// A failing audit fails the gate (exit 1, one `::error::` line with the rerun command), and a runner without nextest or one that
 /// cannot start it is never a pass.
 #[test]
@@ -796,7 +855,7 @@ impl Exec for Fake {
             success: !fail,
             how: if fail { "exit 1".into() } else { "exit 0".into() },
             tail: if fail { "error: boom".into() } else { String::new() },
-            log: None,
+            log: fail.then(|| format!("/logs/{}.log", g.id)),
             timing: self.timing,
             ending: crate::pre_push::exec::Ending::Exited,
         })
@@ -832,6 +891,31 @@ fn a_missing_xwin_is_not_measured_with_the_install_line() {
         2,
     );
     assert!(matches!(nm(&verdicts(&rows)["clippy-windows crates"]), Some((_, next)) if next.contains("cargo install cargo-xwin")));
+}
+
+/// The JSON a reader gets names a failed row's cause and its step log, not the verdict alone (ER-27): `merge sync-member` read only
+/// the verdict, so train z's failed `gates-register` printed no reason and no log. A pass carries neither.
+#[test]
+fn a_failed_row_names_its_cause_and_its_log_in_the_json() {
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
+    let rows = run_all(
+        &planned,
+        &Fake {
+            fail: vec!["fmt crates".into()],
+            ..Fake::default()
+        },
+        2,
+    );
+    let report = render("h", &rows);
+    let gates = report.data["gates"].as_array().expect("gates");
+    let row = |id: &str| gates.iter().find(|g| g["id"] == id).unwrap_or_else(|| panic!("{id}: {gates:?}"));
+    let failed = row("fmt crates");
+    assert_eq!(failed["verdict"], "failed");
+    assert!(failed["reason"].as_str().is_some_and(|r| r.contains("exit 1")), "{failed}");
+    assert_eq!(failed["log"], "/logs/fmt crates.log", "{failed}");
+    assert!(failed["next"].as_str().is_some_and(|n| n.contains("Re-run alone")), "{failed}");
+    let passed = row("lockfile crates");
+    assert!(passed.get("reason").is_none() && passed.get("log").is_none(), "{passed}");
 }
 
 #[test]
@@ -3206,7 +3290,7 @@ mod deny_row {
             priority: false,
             wrapper: crate::local_sccache::Lazy::off(),
             watchdog: Arc::new(crate::pre_push::watchdog::Never),
-            row_cap: crate::pre_push::exec::ROW_CAP,
+            row_cap: crate::throttle::ROW_CAP,
             state: d.join("state"),
         }
     }

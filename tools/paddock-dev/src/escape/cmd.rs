@@ -2,7 +2,8 @@
 //! The edges of the escape monitor: the record a CI plan run saves and the nightly's `dev plan --escapes` (ADR 0117 WP-9). The
 //! judgement itself is [`super::judge`]; this file reads the tree, the run and the arguments.
 
-use super::{Failure, GitRefs, Record, Sel, WHOLE_JOB, register};
+use super::artifact::{ArtifactStore, FileSink};
+use super::{Failure, Record, Sel, WHOLE_JOB, register};
 use crate::plan::{RepoGraph, Request};
 use crate::plan_ci::LINUX;
 use serde_json::Value;
@@ -78,14 +79,22 @@ fn commit_time(root: &Path, rev: &str) -> Result<i64, String> {
 /// The model's reach of a commit with every project id and folder (what [`save_ci`] records beside the selection).
 pub type ReachOf<'a> = dyn FnMut(&str) -> Result<(paddock_repo_graph::model::Reached, Vec<(String, String)>), String> + 'a;
 
-/// What `dev plan --ci` does after planning in a workflow run: saves the selection record (`selected`, what this run's plan runs) with
-/// the model's reach and pushes it. Never fails the plan: a record that is not saved makes the nightly `not measured` for that commit,
-/// which says so (ER-27); the cause is a `::warning::`. `reach` gives the model's reach (the graph planner has it already).
+/// The env variable that names the file the plan job writes its record to; the job's upload step publishes that folder as the run's
+/// artifact `plan-record` (ci.yml stays read-only: nothing pushes a ref, ADR 0117 D13).
+pub const RECORD_FILE_ENV: &str = "PLAN_RECORD_FILE";
+
+/// What `dev plan --ci` does after planning in a workflow run: writes the selection record (`selected`, what this run's plan runs) with
+/// the model's reach to `PLAN_RECORD_FILE`. Never fails the plan: a record that is not saved makes the nightly `not measured` for that
+/// commit, which says so (ER-27); the cause is a `::warning::`. `reach` gives the model's reach (the graph planner has it already).
 pub fn save_ci(root: &Path, req: &Request, selected: BTreeMap<String, Sel>, reach: &mut ReachOf, log: &mut dyn FnMut(&str)) {
-    // Only a workflow run saves a record: a local `dev plan --ci` (and the golden harness, which removes GITHUB_*) writes no ref.
+    // Only a workflow run saves a record: a local `dev plan --ci` (and the golden harness, which removes GITHUB_*) writes no file, and a
+    // workflow that names no file (every one but ci.yml) keeps none.
     if !std::env::var("GITHUB_ACTIONS").is_ok_and(|v| v == "true") {
         return;
     }
+    let Some(file) = std::env::var_os(RECORD_FILE_ENV).filter(|f| !f.is_empty()) else {
+        return;
+    };
     let mut run = || -> Result<String, String> {
         let mut head = crate::git_env::git();
         head.arg("-C")
@@ -111,9 +120,7 @@ pub fn save_ci(root: &Path, req: &Request, selected: BTreeMap<String, Sel>, reac
             &reached,
             &projects,
         );
-        let refs = GitRefs { root };
-        super::save(&refs, &rec)?;
-        refs.push()?;
+        super::save(&FileSink { path: file.clone().into() }, &rec)?;
         Ok(commit)
     };
     match run() {
@@ -259,8 +266,11 @@ pub fn command(root: &Path, args: &[String], env: &dyn Fn(&str) -> Option<String
         (None, Some(id)) => failures_of(&crate::plan_cmd::read_run(root, env, id, true)?),
         _ => return Err("exactly one of --results <file> and --run <id> is needed".into()),
     };
-    let refs = GitRefs { root };
-    let fetched = refs.fetch();
+    let server = env("GITHUB_SERVER_URL").unwrap_or_else(|| "https://dev.decryptology.net".into());
+    let repo = env("GITHUB_REPOSITORY").unwrap_or_else(|| "decryp7/paddock".into());
+    let token = env("PLAN_TOKEN").unwrap_or_default();
+    let mut http = crate::wait::CurlHttp;
+    let store = ArtifactStore::new(crate::ci_runs::client::Client::new(&mut http, &server, &repo, &token));
     let reached = |c: &str| {
         c == since || {
             let mut cmd = crate::git_env::git();
@@ -268,17 +278,12 @@ pub fn command(root: &Path, args: &[String], env: &dyn Fn(&str) -> Option<String
             cmd.status().is_ok_and(|s| s.success())
         }
     };
-    let commits = super::chain(&refs, &head, &reached);
+    let commits = super::chain(&store, &head, &reached);
     let mut runner: Box<dyn super::Runner> = match &bisect {
         Some(p) => Box::new(super::CommandRunner { program: p, root }),
         None => Box::new(super::NoRunner),
     };
-    let mut judged = super::judge(&commits, &refs, &failures, runner.as_mut());
-    if let Err(e) = &fetched {
-        judged
-            .unreadable
-            .push((head.clone(), format!("the records could not be fetched: {e}")));
-    }
+    let mut judged = super::judge(&commits, &store, &failures, runner.as_mut());
     for u in &unmapped {
         judged.outcomes.push(super::Outcome::NotMeasured(
             Failure {
@@ -289,17 +294,15 @@ pub fn command(root: &Path, args: &[String], env: &dyn Fn(&str) -> Option<String
             u.clone(),
         ));
     }
-    let pruned = super::prune(&refs, commit_time(root, &head)?).unwrap_or_default();
     let mut lines = judged.lines();
     lines.push(format!(
-        "escape monitor: {} commits judged, {} failures, {} escapes, {} not measured, {} records unreadable, {} bisect runs, {} expired records removed; {}",
+        "escape monitor: {} commits judged, {} failures, {} escapes, {} not measured, {} records unreadable, {} bisect runs; {}",
         commits.len(),
         failures.len(),
         judged.escapes().len(),
         judged.not_measured(),
         judged.unreadable.len(),
         judged.runs_used,
-        pruned.len(),
         if judged.clean() { "clean" } else { "NOT clean" }
     ));
     let row = register::Row {

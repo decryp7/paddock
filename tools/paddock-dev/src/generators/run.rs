@@ -248,7 +248,7 @@ pub(super) fn ran_from(o: &paddock_proc::Output, heavy: bool) -> Ran {
                 text,
             }
         }
-        paddock_proc::Outcome::TimedOut => match crate::pre_push::exec::slot_wait(&text).filter(|_| heavy) {
+        paddock_proc::Outcome::TimedOut => match crate::throttle::slot_wait(&text).filter(|_| heavy) {
             Some(w) => Ran::SlotWait(w),
             None => Ran::TimedOut,
         },
@@ -270,14 +270,14 @@ impl Runner for Real {
                 env.entry("PADDOCK_DEV_TARGET_DIR".into())
                     .or_insert_with(|| root.display().to_string());
             }
-            match crate::pre_push::exec::throttle_command_for(
+            match crate::heavy_tool::throttle_command_for(
                 &self.root,
                 &env,
-                &|p| crate::pre_push::exec::on_path(&self.env, p),
+                &|p| crate::throttle::on_path(&self.env, p),
                 &self.built_throttle,
                 limit,
             ) {
-                Ok(prefix) => full.extend(crate::pre_push::budget::with_priority(&prefix, self.priority.is_train())),
+                Ok(prefix) => full.extend(crate::throttle::with_priority(&prefix, self.priority.is_train())),
                 Err(why) => return Ran::Unavailable(format!("no machine-wide heavy slot: {why}")),
             }
         }

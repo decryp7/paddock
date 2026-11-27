@@ -29,6 +29,7 @@ pub mod procs;
 pub mod record;
 pub mod runner;
 pub mod slotfile;
+pub mod store;
 pub mod timefmt;
 pub mod userdb;
 pub mod waitfor;
