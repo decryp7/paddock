@@ -120,3 +120,14 @@ impl Tally {
         }
     }
 }
+
+/// The plan's line for one class, workspace and filter: the counts first (a host leg's filterset is hundreds of characters, run 9341), the
+/// filter after them, cut to a short head with its length.
+pub fn plan_line(class: &str, workspace: &str, filter: &str, tally: &Tally) -> String {
+    let scope = match filter.chars().count() {
+        0 => "whole package".to_string(),
+        n if n <= 60 => format!("filter `{filter}`"),
+        n => format!("filter `{}...` ({n} characters)", filter.chars().take(40).collect::<String>()),
+    };
+    format!("test-cache plan: {class} {workspace}: {} ({scope})", tally.lookup_line())
+}

@@ -482,6 +482,32 @@ fn the_reasons_of_a_lookup_are_counted_per_reason_and_a_full_reuse_says_no_reaso
     );
 }
 
+/// A plan line starts with its counts, so a long host-leg filterset (run 9341: over 2000 characters) never pushes them out of sight.
+#[test]
+fn the_plan_line_puts_the_counts_before_a_long_filter_and_cuts_the_filter() {
+    use super::reasons::{Tally, plan_line};
+    let t = Tally {
+        reused: 50,
+        no_record: 11,
+        ..Tally::default()
+    };
+    assert_eq!(
+        plan_line("Linux-X64", "crates", "", &t),
+        "test-cache plan: Linux-X64 crates: reused 50 of 61; ran because: no record 11 (whole package)"
+    );
+    assert!(plan_line("Linux-X64", "crates", "package(=a)", &t).ends_with("(filter `package(=a)`)"));
+    let long = format!("test(/^(?:{}/)", "audit::|".repeat(300));
+    let line = plan_line("macOS-ARM64", "tools/paddock-dev", &long, &t);
+    assert!(line.len() < 200, "{line}");
+    assert!(
+        line.starts_with(
+            "test-cache plan: macOS-ARM64 tools/paddock-dev: reused 50 of 61; ran because: no record 11 (filter `test(/^(?:audit::|"
+        ),
+        "{line}"
+    );
+    assert!(line.ends_with(&format!("...` ({} characters))", long.chars().count())), "{line}");
+}
+
 /// A store whose lookups fail and whose writes succeed, counting the records it was given.
 #[derive(Default)]
 struct BlindStore {

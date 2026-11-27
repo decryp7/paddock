@@ -886,15 +886,11 @@ fn plan(a: &TestCacheArgs, root: &Path, store: &dyn Store) -> Result<Report, Cli
                     }
                     // The shadow report says why the rest ran: a store that timed out reads `reuse off 61 (curl: (28) ...)`, never a bare 0
                     // (run 9335: Linux-X64 went from 56 reused to 0 with the cause only in a notice).
-                    let scope = if filter.is_empty() {
-                        "whole package".to_string()
-                    } else {
-                        format!("filter `{filter}`")
-                    };
-                    text.push(format!(
-                        "test-cache plan: {} {ws} ({scope}): {}",
-                        class.0,
-                        super::reasons::Tally::of(&decisions).lookup_line()
+                    text.push(super::reasons::plan_line(
+                        &class.0,
+                        ws,
+                        &filter,
+                        &super::reasons::Tally::of(&decisions),
                     ));
                     for (c, d) in cands.iter().zip(decisions) {
                         if let Decision::Reuse(r) = d {
