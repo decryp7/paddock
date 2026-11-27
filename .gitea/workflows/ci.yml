@@ -495,6 +495,15 @@ jobs:
           if [ "$(cargo mutants --version 2>/dev/null | cut -d' ' -f2)" != "$pin" ]; then
             cargo install cargo-mutants --version "$pin" --locked
           fi
+      # The inputs and generator tests read the cargo metadata of tools/throttle offline: its packages must be in the job's cargo home
+      # (as the paddock-dev job fetches them); without them the unmutated tree's tests fail ("no matching package named `utf_types`", trial 9334).
+      - name: Fetch the other tools' dependencies
+        if: ${{ env.MUTANTS_RUN == 'true' }}
+        working-directory: tools
+        run: |
+          for t in throttle; do
+            (cd "$t" && cargo fetch --locked) || { echo "::error::cargo fetch --locked failed in tools/$t, so the offline metadata tests cannot read it. Next step: run it on the runner to see why"; exit 1; }
+          done
       - name: Mutants in the changed functions (report-only)
         if: ${{ env.MUTANTS_RUN == 'true' }}
         env:
