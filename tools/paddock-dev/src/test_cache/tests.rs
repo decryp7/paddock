@@ -71,6 +71,7 @@ fn cand(dir: &str, hash: &str) -> Candidate {
         target: Target::rust(dir, dir, "crates"),
         node_hash: hash.into(),
         dirty: false,
+        blind: Vec::new(),
     }
 }
 
@@ -393,6 +394,7 @@ fn a_never_cached_paddock_dev_is_not_offered_for_reuse_but_other_targets_still_a
         target: Target::rust("tools/paddock-dev", "paddock-dev", "tools/paddock-dev"),
         node_hash: "h".into(),
         dirty: false,
+        blind: Vec::new(),
     };
     let other = cand("crates/a", "h");
     s.put_many(&[rec(&dev, &class, NOW - 3600), rec(&other, &class, NOW - 3600)])
@@ -1218,6 +1220,49 @@ fn a_redirect_is_never_followed_and_is_named_with_its_target() {
 }
 
 #[test]
+fn a_target_with_a_read_the_graph_cannot_resolve_is_never_reused_and_says_why() {
+    let (_d, s) = scratch();
+    let class = RunnerClass::here();
+    let mut a = cand("crates/a", "h");
+    // A valid, trusted record exists under the key: only the blind read stands between it and a reuse (ER-33).
+    s.put_many(&[rec(&a, &class, NOW - 3600)]).unwrap();
+    assert!(matches!(
+        decide(std::slice::from_ref(&a), &cfg(), &class, "", &s, NOW, OK).0[0],
+        Decision::Reuse(_)
+    ));
+    a.blind = vec!["crates/a/tests/it.rs: `.ancestors()` walks up from a path".into()];
+    let d = decide(std::slice::from_ref(&a), &cfg(), &class, "", &s, NOW, OK).0.remove(0);
+    let Decision::Run(Why::Blind(w)) = &d else { panic!("{d:?}") };
+    assert!(
+        w.contains("crates/a/tests/it.rs") && w.contains("ancestors"),
+        "the reason names the site: {w}"
+    );
+    assert!(d_text(&d).contains("cannot be resolved"), "{}", d_text(&d));
+    // The log still records its pass: recording continues, only reading is refused.
+    let meta = RunMeta {
+        run: "1".into(),
+        job: String::new(),
+        attempt: 0,
+        git_ref: String::new(),
+        commit: String::new(),
+        at: NOW,
+        os_build: String::new(),
+    };
+    a.target.package = "nxflaky".into();
+    assert_eq!(
+        records_from_log(&clean_log(), std::slice::from_ref(&a), &cfg(), &class, "", &meta).len(),
+        1
+    );
+}
+
+fn d_text(d: &Decision) -> String {
+    match d {
+        Decision::Run(w) => w.text(),
+        Decision::Reuse(_) => String::new(),
+    }
+}
+
+#[test]
 fn a_filtered_host_leg_records_under_its_filter_and_an_identical_one_reuses_but_another_filter_does_not() {
     let (_d, s) = scratch();
     let class = RunnerClass::of("macos", "aarch64");
@@ -1416,4 +1461,38 @@ mod run_wiring {
         assert!(text.contains("stored 1 pass(es); 1 held back"), "{text}");
         let _ = a;
     }
+}
+
+#[test]
+fn a_crate_that_depends_on_a_blind_crate_is_blind_through_it_and_an_independent_one_is_not() {
+    use paddock_repo_graph::model::nodes::{Edge, EdgeKind, Model, ModelNode, NodeKind};
+    // a -> b -> c, and d alone: only c reads something the graph cannot resolve.
+    let mut m = Model::new();
+    for d in ["a", "b", "c", "d"] {
+        m.add_node(ModelNode::new(
+            format!("crate:crates/{d}"),
+            NodeKind::Project,
+            &[&format!("crates/{d}/")],
+        ));
+    }
+    m.add_edge(Edge::new("crate:crates/a", "crate:crates/b", EdgeKind::Depends));
+    m.add_edge(Edge::new("crate:crates/b", "crate:crates/c", EdgeKind::Depends));
+    let own = std::collections::BTreeMap::from([("crates/c".to_string(), vec!["crates/c/src/x.rs: `.ancestors()`".to_string()])]);
+    let got = super::spread_blind(&m, &own);
+    assert_eq!(got["crates/c"], own["crates/c"], "its own reasons stay as they were");
+    for dependent in ["crates/a", "crates/b"] {
+        assert_eq!(got[dependent], vec!["blind through crates/c".to_string()], "{dependent}");
+    }
+    assert!(
+        !got.contains_key("crates/d"),
+        "control: a crate that depends on nothing blind stays cacheable"
+    );
+    // And the reason a run prints for the dependent names the dependency.
+    let (_d, s) = scratch();
+    let class = RunnerClass::here();
+    let mut a = cand("crates/a", "h");
+    s.put_many(&[rec(&a, &class, NOW - 3600)]).unwrap();
+    a.blind = got["crates/a"].clone();
+    let d = decide(std::slice::from_ref(&a), &cfg(), &class, "", &s, NOW, OK).0.remove(0);
+    assert!(d_text(&d).contains("blind through crates/c"), "{}", d_text(&d));
 }
