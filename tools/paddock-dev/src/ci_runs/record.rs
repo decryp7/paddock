@@ -192,6 +192,41 @@ pub fn record(
                 format!("{:#}\n", serde_json::json!({"sha": sha, "parents": parents})),
             ));
         }
+        // The run's artifacts (the escape monitor's `plan-record`): the list as the API answers it, each download's redirect and its zip
+        // as hex. A run with none, or a server that cannot say, records none: this is no failure of the recording.
+        match http.get_json(&format!("{api}/runs/{id}/artifacts"), token) {
+            Ok(mut list) => {
+                let ids: Vec<(u64, bool)> = list["artifacts"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|x| Some((x["id"].as_u64()?, x["expired"].as_bool().unwrap_or(false))))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                scrub(&mut list, host, owner, &mut runners);
+                if !ids.is_empty() {
+                    files.push((format!("artifacts-{id}.json"), format!("{list:#}\n")));
+                }
+                // per-item: the server has no bulk artifact call; a run has a few artifacts, and a recording is made once per shape.
+                for (aid, _) in ids.into_iter().filter(|(_, expired)| !expired) {
+                    let zip_url = format!("{api}/artifacts/{aid}/zip");
+                    match http.get_redirect(&zip_url, token) {
+                        Ok(Some(l)) => files.push((
+                            format!("artifact-{aid}.redirect.txt"),
+                            format!("{}\n", redirect_shape(&l, host, owner)),
+                        )),
+                        Ok(None) => files.push((format!("artifact-{aid}.redirect.txt"), "none\n".to_string())),
+                        Err(e) => log(&format!("::warning::artifact {aid}: its redirect was not recorded ({e})")),
+                    }
+                    match http.get_bytes(&zip_url, token, 4 << 20) {
+                        Ok(b) => files.push((format!("artifact-{aid}.zip.hex"), format!("{}\n", hex(&b)))),
+                        Err(e) => log(&format!("::warning::artifact {aid}: its zip was not recorded ({e})")),
+                    }
+                }
+            }
+            Err(e) => log(&format!("::warning::run {id}: its artifacts were not recorded ({e})")),
+        }
         scrub(&mut run, host, owner, &mut runners);
         scrub(&mut jobs, host, owner, &mut runners);
         log(&format!("run {id}: recorded"));
@@ -203,6 +238,25 @@ pub fn record(
     let list = serde_json::json!({"total_count": run_objects.len(), "workflow_runs": run_objects});
     files.push(("runs-1.json".into(), format!("{list:#}\n")));
     Ok(files)
+}
+
+/// The path of a download's `Location`, with the host and owner renamed and the signature and expiry (a secret that lapses) dropped:
+/// what the replay pins is where the server sends the download, not who signed it.
+pub fn redirect_shape(location: &str, real_host: &str, real_owner: &str) -> String {
+    rename(location.split_once('?').map_or(location, |(path, _)| path), real_host, real_owner)
+}
+
+/// Bytes as lower-case hex (a recording is text: a zip is kept as hex and read back by [`unhex`]).
+pub fn hex(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+/// The bytes of [`hex`]; `None` for anything else.
+pub fn unhex(s: &str) -> Option<Vec<u8>> {
+    let s = s.trim();
+    (s.len().is_multiple_of(2) && s.is_ascii())
+        .then(|| (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok()).collect())
+        .flatten()
 }
 
 /// The folder of the replay suite's shapes, below the repository root.
@@ -449,6 +503,72 @@ mod tests {
         assert_eq!(name, "commit-aaaa.json");
         let v: Value = serde_json::from_str(text).unwrap();
         assert_eq!(v, json!({"sha": "aaaa", "parents": [{"sha": "bbbb"}, {"sha": "cccc"}]}));
+    }
+
+    /// A server with one run that has one artifact: the list, the redirect of its download (with a signature) and its zip.
+    struct WithArtifact;
+    impl Http for WithArtifact {
+        fn get_json(&mut self, url: &str, _token: &str) -> Result<Value, String> {
+            let api = "https://real.example.net/api/v1/repos/jdoe/paddock/actions";
+            if url == format!("{api}/runs/5") {
+                Ok(json!({"id": 5, "run_attempt": 1, "head_branch": "main", "head_sha": "aaaa"}))
+            } else if url == format!("{api}/runs/5/jobs?limit=50&page=1") {
+                Ok(json!({"total_count": 0, "jobs": []}))
+            } else if url == format!("{api}/runs/5/artifacts") {
+                Ok(json!({"total_count": 2, "artifacts": [
+                    {"id": 41, "name": "plan-record", "expired": false, "archive_download_url": format!("{api}/artifacts/41/zip")},
+                    {"id": 42, "name": "gone", "expired": true}]}))
+            } else {
+                Err("curl exited with 22: error: 404".into())
+            }
+        }
+        fn get_redirect(&mut self, url: &str, _token: &str) -> Result<Option<String>, String> {
+            assert!(url.ends_with("/artifacts/41/zip"), "an expired artifact is never downloaded: {url}");
+            Ok(Some(format!("{}/raw?sig=SECRET&expires=1", url)))
+        }
+        fn get_bytes(&mut self, url: &str, _token: &str, _max: u64) -> Result<Vec<u8>, String> {
+            assert!(url.ends_with("/artifacts/41/zip"), "{url}");
+            Ok(vec![0x50, 0x4b, 0x00, 0xff])
+        }
+    }
+
+    #[test]
+    fn a_runs_artifacts_are_recorded_as_list_redirect_and_hex_without_secrets() {
+        let files = record(
+            &mut WithArtifact,
+            "https://real.example.net",
+            "jdoe/paddock",
+            "t",
+            &[5],
+            &mut |_| {},
+        )
+        .unwrap();
+        let names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "artifacts-5.json",
+                "artifact-41.redirect.txt",
+                "artifact-41.zip.hex",
+                "jobs-5.json",
+                "run-5.json",
+                "runs-1.json"
+            ]
+        );
+        let get = |n: &str| files.iter().find(|(x, _)| x == n).unwrap().1.clone();
+        assert_eq!(
+            get("artifact-41.redirect.txt").trim(),
+            "https://gitea.invalid/api/v1/repos/example/paddock/actions/artifacts/41/zip/raw"
+        );
+        assert_eq!(unhex(&get("artifact-41.zip.hex")), Some(vec![0x50, 0x4b, 0x00, 0xff]));
+        for (n, text) in &files {
+            for secret in ["SECRET", "jdoe", "real.example.net"] {
+                assert!(!text.contains(secret), "{n} holds {secret}");
+            }
+        }
+        // The hex reader refuses what is no hex.
+        assert_eq!(unhex("abc"), None);
+        assert_eq!(unhex("zz"), None);
     }
 
     #[test]

@@ -219,3 +219,48 @@ fn cover_blind_splits_sites_by_a_declaration_that_holds() {
         "a stale declaration without a site is a finding too"
     );
 }
+
+#[test]
+fn graph_a_loader_taking_a_path_is_not_blind_and_its_caller_with_an_unresolved_root_is() {
+    // y: `pub fn load(p: &Path) { fs::read(p) }` defers to its caller; x depends on y and calls it with a path built from an
+    // environment variable: x is blind by its own root, y is not (a dependency is not blind because it reads a parameter).
+    let d = repo("");
+    write(
+        d.path(),
+        "crates/y/Cargo.toml",
+        "[package]\nname = \"y\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    );
+    write(
+        d.path(),
+        "crates/y/src/lib.rs",
+        "pub fn load(p: &std::path::Path) -> Vec<u8> { std::fs::read(p).unwrap_or_default() }\n",
+    );
+    write(
+        d.path(),
+        "crates/x/Cargo.toml",
+        "[package]\nname = \"x\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[dependencies]\ny = { path = \"../y\" }\n",
+    );
+    write(d.path(), "crates/x/src/lib.rs", "pub fn f() {}\n");
+    write(
+        d.path(),
+        "crates/x/tests/it.rs",
+        "#[test]\nfn t() {\n    let root = std::path::PathBuf::from(std::env::var(\"ROOT\").unwrap());\n    let _ = y::load(&root);\n}\n",
+    );
+    write(
+        d.path(),
+        "crates/Cargo.toml",
+        "[workspace]\nmembers = [\"a\", \"b\", \"c\", \"x\", \"y\"]\nresolver = \"2\"\n",
+    );
+    commit(d.path(), "x and y");
+    let c = cands(d.path());
+    assert!(
+        !of(&c, "crates/x").blind.is_empty(),
+        "x builds its root from an env var: {:?}",
+        of(&c, "crates/x").blind
+    );
+    assert!(
+        of(&c, "crates/y").blind.is_empty(),
+        "y reads a parameter: {:?}",
+        of(&c, "crates/y").blind
+    );
+}

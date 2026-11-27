@@ -5,7 +5,9 @@
 
 use super::budget::with_throttle_flags;
 use super::exec::{Done, Ending, Row};
-use super::exec::{QUEUE_STALL, docker_answers, on_path, throttle_command_for};
+use super::exec::docker_answers;
+use crate::heavy_tool::throttle_command_for;
+use crate::throttle::{QUEUE_STALL, on_path};
 use super::gates::{self, Gate, LinuxTarget};
 use super::linux_inputs::{ImageProbe, PROBE_NEXT, WsCrates, ci_version, image_probe, left_out};
 use super::outcome::subject_of;

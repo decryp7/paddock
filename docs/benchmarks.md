@@ -100,6 +100,56 @@ uses it, results in
 - **Reach of the real-folder seeds:** the in-memory sweep reaches 20 kinds of operation on the folder (take, probe, read, write, rename, remove, each on the slot lock, the slot record, tickets, high and drain markers and the temporary files). With 1 seed per maximum 4 are missed (the high marker's write, read, rename and the log removal); with 2 per maximum none; the test uses 4 and fails naming what a smaller number would miss.
 - **Notes:** 7 ms per seed on the Mac and about 110 ms to 150 ms per seed on Windows (132 s to 180 s for 1200): file-system work, as the old waiver said. The cost moved from 1200 real runs to 12.
 
+### 2026-11-27, the tool's own build through sccache (ci/dev-selfbuild-sccache)
+
+- **Commit:** origin/main 7da64dedb plus this branch (the `dev` launcher's `selfbuild_cached`). Evidence: CI run 9248 (the plan job's cold `./dev` build took 90 s on Linux, 183 s on the Windows paddock-dev leg, 47 s on macOS; the Mac and Windows sccache "0%" is a kept build folder, not a fault: 3 requests executed, 96 to 101 non-cacheable).
+- **Machine (local numbers):** Mac mini, 14 cores, macOS 27.2, `CARGO_BUILD_JOBS=6`, rustc 1.100.0, sccache 0.20.1 with its own empty `SCCACHE_DIR` and port, `RUSTC_WRAPPER=` empty for the plain variants (the worktree's shim would otherwise answer from the shared cache), each build in a fresh target folder, through `./dev throttle`. Load 9 to 15 (the first 2 plain builds ran at 18 to 35); wall time is an indication, CPU time (user + sys of `time -p`, the compile server's included for the cached builds) is the measure.
+- **Command:** `PADDOCK_DEV_HASH=bench cargo build [--release] --locked --quiet --config build.target-dir=<fresh>` in `tools/paddock-dev`. Variants: **a** as today (release, no wrapper); **b** `RUSTC_WRAPPER=sccache CARGO_INCREMENTAL=0`, the dependencies in the cache and the tool's own inputs changed (a new `PADDOCK_DEV_HASH`: the tool's own crate misses, 1 miss of 313 requests); **c1** release with `opt-level = 1`; **c3** `opt-level = 0`; **c2** the dev profile; **d** b with `opt-level = 1`. Follow-on: `paddock-dev plan origin/main --explain` and `gates check` on the built binary, CPU time.
+- **Runs:** 2 builds each (a, c1, c2, c3), interleaved with the others; b and d twice (rep 1 cold cache, rep 2 changed inputs).
+- **Numbers (macOS):**
+
+  | Variant | Build wall | Build CPU | `plan` CPU | `gates check` CPU |
+  |---|---|---|---|---|
+  | a today (release) | 89 s, 67 s | 384 s, 347 s | 1.1 s | 5.5 s |
+  | b sccache, deps cached, tool inputs changed | 44 s | 179 s (client 21 + server 158) | 1.1 s | not run (same binary as a) |
+  | b sccache, cold cache (empty) | 57 s | not measured (the server's CPU was not timed) | | |
+  | c1 opt-level 1 | 56 s, 56 s | 287 s, 291 s | 1.1 s | 6.2 s (+13%; user time +19%) |
+  | c3 opt-level 0 | 26 s, 26 s | 102 s, 104 s | 4.8 s (x4) | 17.3 s (x3) |
+  | c2 dev profile | 40 s, 36 s | 179 s, 170 s | 5.6 s (x5) | 19.9 s (x3.6) |
+  | d opt 1 + sccache, deps cached, inputs changed | 35 s | 142 s | not run | not run |
+
+- **Reading:** the cheaper profiles lose: opt-level 0 and the dev profile cut the build by 70% but make every later `./dev` command 3 to 5 times dearer, and the binary serves every job of the run (about 100 commands), so they cost more than they save; opt-level 1 saves 16 to 37% of the build wall (25% of its CPU) and costs 6 to 13% more CPU on every command. The compile cache keeps the follow-on cost at zero and halves the build CPU, since the dependencies come from the cache and the tool's own crate is the only miss (about 35 s of the 44 s). The key is stable only for one build folder path (the same crate built in another folder missed 83 of 313 requests: OUT_DIR is in the keys of build-script crates), which is why the launcher builds in the one folder `<tool folder>/target/rustc-<compiler>` and sets `SCCACHE_BASEDIRS`. Chosen: b (ER-44, ER-20).
+- **Linux runner (CI trial of ci/dev-selfbuild-bench, a measurement job beside the plan job, never landed):** a trial of `ci/dev-selfbuild-bench` (run 9274, the tools job; a measurement step on the real runner d-gtr9: 30 cores, `CARGO_BUILD_JOBS=5`, other jobs running beside it, the S3 two-level store from setup-rust for the sccache variants; the same variants as above; wall time and the client's CPU time, so the cached builds' CPU is the client's only). Rep 1 is the one that shows the cache (rep 2 reuses rep 1's entries: all hits):
+
+  | Variant (rep 1; rep 2 in brackets for the plain ones) | Build wall | Build CPU (user + sys) | `plan` CPU |
+  |---|---|---|---|
+  | a today | 148.7 s (132.7 s) | 557 s (530 s) | 0.94 s to 1.0 s |
+  | b sccache, first build (cache holds some dependencies from other jobs) | 122.2 s | 15.6 s (client) | |
+  | b sccache, dependencies cached, tool inputs changed | 36.2 s | 12.8 s (client) | 0.81 s to 0.86 s |
+  | c1 opt-level 1 | 78.6 s (109.7 s) | 344 s (470 s) | 1.0 s to 1.45 s (+6% to +50%) |
+  | c3 opt-level 0 | 35.7 s (48.7 s) | 117 s (170 s) | 5.5 s to 9.0 s (x6 to x9) |
+  | d opt-level 1 and sccache, inputs changed | 36.6 s | 15.1 s (client) | not run |
+
+  On the runner the cached build with changed inputs is 3.7 to 4.1 times faster than today (36 s against 133 to 149 s), a cheaper profile reaches 79 to 110 s (opt-level 1) or 36 to 49 s (opt-level 0, with a `plan` that costs 6 to 9 times more CPU), and opt-level 1 adds nothing once the cache is there (d 36.6 s against b 36.2 s).
+- **Plan job's "built ... in N s" line (trial of this branch):** run 9278 (cache folder empty): `dev: compile cache of the self-build (/sccache/paddock-dev-build-cache): 0 hits, 319 misses.` and `built paddock-dev ... in 129 s` (the bench's plain build on the same runner under load: 133 to 149 s; run 9248 on a quieter day: 90 s); run 9282 (the next tool hash, the folder filled by run 9278): `318 hits, 1 misses` and `built paddock-dev ... in 55 s`. The tool's cache key (the hash) is the same with the cache on or off (`the_compile_cache_does_not_change_the_hash`). The macOS leg of run 9278 printed the new label: `sccache-stats: warm build folder: 1 executed, all changed first-party crates; the rest fresh in the kept folder (97 non-cacheable calls are not compiles). A hit rate of 0%25 here is not a fault.` (the `%25` is GitHub's annotation escape of the percent sign in the raw log; the UI shows `%`).
+- **Not measured:** the Windows and macOS legs through the cache (they keep their build folders warm and are not changed); the cache's growth over many runs (limit 5 GB, sccache evicts); a hit rate with two jobs of different hashes at once (one build at a time under the lock).
+
+### 2026-11-27, trials yield to train runs; planned legs count as Mac and Windows (fix/trials-yield-to-trains)
+
+- **Commit:** origin/main 7da64dedb plus this branch's change. Not a new run: the saving is read from the recorded timeline of train run 9248 against trial run 9247 (CI replay of the two runs), so it is an expected figure.
+- **Machine:** the CI runners: d-gtr9 (6 Linux slots, `conformance/ci/runner-slots.json`) and the Windows runner (3 slots).
+- **Method:** trial 9247 (a member trial of `ci.yml`) was dispatched while train run 9248 of the same workflow was queued. The run lists and job timestamps of both runs were read. `classes_of` found no Mac or Windows class in `ci.yml` (a planned matrix is not a literal value), so neither `ci dispatch` nor `runner-wait` guarded those slots.
+- **Numbers:**
+
+  | Measure | Before | Expected after |
+  |---|---|---|
+  | 9248 `plan` job queued | 87 s (behind 9247's Linux jobs) | 0 s of trial load: the trial waits for the train run to finish |
+  | 9248 `crate (windows-latest)` queued | 315 s (9247 held 2 of 3 Windows slots) | the Windows slots are free of the trial |
+  | Critical-path cost of the trial | about 117 s or more | 0 s |
+  | `ci.yml` runner classes seen by `classes_of` | none | macOS and Windows |
+
+- **Reading:** a trial now waits (at most its `--max`) while a `train/*` run of the same workflow is queued or running, so the train's `plan` and Windows legs start at once. The cost moves to the trial, which is not on a train's critical path. A trial that waits for the whole `--max` ends with an `::error::` naming the train run. Tests: `ci_runs::dispatch::tests::a_trial_waits_while_a_train_run_of_its_workflow_is_queued` and the two beside it. Not measured: the real saving. The next train run with a trial dispatched beside it gives it; record it here.
+
 ### 2026-11-27, train priority in throttle (feat/throttle-train-priority)
 
 - **Commit:** origin/main 696f472f4 plus this branch's change (a debug build of tools/throttle, the binary the tests ran).
@@ -348,7 +398,7 @@ failing mode.
 - **Queue length:** the most steps waiting at once in the same log: 13 (`position N of 13`). Rows of the three refused pushes of 2026-11-21 (watch-rescan push4, push5, push6): 45 rows decided per push (32 passed + 13 not measured, 31 + 14, 30 + 15) and 20 skipped; the longest of those gate runs was 76 minutes (the log files' times, 15:32 to 16:48), and the push of this change itself, with the new gate, ran 95 minutes (5,705 s, 27 rows passed, none not measured: clippy crates queued 1,225 s and ran 312 s, clippy-windows crates queued 758 s and ran 339 s, doctest crates queued 593 s and ran 334 s).
 - **Derived limits (ER-12):** `WAIT_BACKSTOP` = 2 x 13 x 1,122 s (the slowest healthy row, "Doctest row of the push gate") = 29,172 s (8 h 6 min); the member gate's outer `TIMEOUT` is 24 h, 15 times the longest push gate run seen (95 min). Both are backstops for a hung client or gate: the judgement is the row cap and the queue's progress.
 - **Holders count while they live:** a holder whose record is inside the cap its own row lives under (the waiter's `--run-max`, `ROW_CAP` + grace, 3,675 s) is progress by itself, so a waiter behind a healthy 31 to 60 minute step is not stalled; past the cap it is not live, and the same picture ends the wait a stall limit later.
-- **Notes:** the basis of `QUEUE_STALL` (30 min, 1,800 s) in `tools/paddock-dev/src/pre_push/exec.rs`: over the longest gap seen, so a queue that moves is never ended. A holder that runs longer is ended by its own row cap. The per-push totals it replaces (15 min of run, 30 min of queue) were exceeded by three pushes on 2026-11-21 with no row running too long: 13, 14 and 15 rows, and 5 rows, were not measured. Not measured: the gaps of a quiet machine.
+- **Notes:** the basis of `QUEUE_STALL` (30 min, 1,800 s) in `tools/paddock-dev/src/throttle.rs`: over the longest gap seen, so a queue that moves is never ended. A holder that runs longer is ended by its own row cap. The per-push totals it replaces (15 min of run, 30 min of queue) were exceeded by three pushes on 2026-11-21 with no row running too long: 13, 14 and 15 rows, and 5 rows, were not measured. Not measured: the gaps of a quiet machine.
 
 ### 2026-11-24, scope grace: from the stop request to the exit (feat/adr-0119-wp1-scope)
 
@@ -2911,7 +2961,7 @@ The lower bound ADR 0117 §10 compares a parser with. Dev Mac under load (about 
 
 | Files | Count | Bytes | Scan | real |
 |---|---|---|---|---|
-| `*.ts`, `*.mjs` | 3,780 + 633 | 24.1 MB + 4.8 MB | `grep -oE` for relative `from`/`import`/`require(` specifiers (15,743 hits) | 0.82 s |
+| `*.ts`, `*.mjs` | 3,780 + 633 | 24.1 MB + 4.8 MB | `grep -oE` for relative `from`/`import`/`require(` specifiers (15,743 hits) | 0.81 s to 0.86 s |
 | `*.rs` | 3,732 | 46.3 MB | `grep -oE` for `use crate::`, `mod x;`, OS `cfg` (8,115 hits) | 0.91 s |
 
 Not measured: `oxc_parser` and `syn` on the same files (WP-3, WP-6), and the Linux runner.

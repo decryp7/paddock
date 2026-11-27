@@ -1,6 +1,6 @@
 //! The one way a `./dev` command says its heavy steps are train or integrator work (user decision 91, 2026-11-26): `--priority train`.
 //!
-//! A train step runs through `throttle run --high` ([`crate::pre_push::budget::with_priority`]): while it waits for a slot it takes the next
+//! A train step runs through `throttle run --high` ([`crate::throttle::with_priority`]): while it waits for a slot it takes the next
 //! free one before every normal waiter, and a normal step that arrives meanwhile queues behind it. Normal is the default, so a person's own
 //! push and an agent's gate wait in order. The callers that mean it say it: `./dev merge check --gates` passes it to its gate and generator
 //! steps, and an integrator adds it to `./dev check --pre-push --member-gate`, `--set slow` and `./dev gen check` (the train flow in
