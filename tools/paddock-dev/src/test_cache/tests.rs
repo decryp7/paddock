@@ -712,10 +712,13 @@ fn a_filtered_local_run_reports_matched_targets_it_never_ran_as_not_seen_never_a
     assert_eq!((out.shadow.matched, out.shadow.passed), (1, 1));
     assert_eq!(out.not_seen, 2, "b and c are not seen");
     assert_eq!(out.not_stored.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), vec!["rust:d"]);
+    // The nightly invalidates only what ran and failed: d, never b or c (not seen) or a (passed).
+    assert!(out.ran_and_failed("rust:d"));
+    assert!(!out.ran_and_failed("rust:a") && !out.ran_and_failed("rust:b") && !out.ran_and_failed("rust:c"));
     // A matched target that ran and failed is still the finding.
     let red = super::run_outcome(&[&a, &d], &[&a, &d], &judged);
     assert_eq!(red.shadow.findings, vec!["rust:d".to_string()]);
-    assert!(red.not_stored.is_empty() && red.not_seen == 0);
+    assert!(red.not_stored.is_empty() && red.not_seen == 0 && red.ran_and_failed("rust:d"));
 }
 
 #[test]

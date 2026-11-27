@@ -353,8 +353,9 @@ fn run(
                     });
                 }
             } else {
-                // The nightly is the net (§6): a target that fails loses the cached pass under its current key, and the run names it.
-                if nightly {
+                // The nightly is the net (§6): a target that ran and failed loses the cached pass under its current key, and the run names
+                // it. One the run never saw (outside its filter, or a log not read whole) keeps its record.
+                if nightly && outcome.ran_and_failed(&c.target.id) {
                     let ask = Lookup {
                         target: c.target.id.clone(),
                         class: class.clone(),

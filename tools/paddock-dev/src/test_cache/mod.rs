@@ -313,6 +313,14 @@ pub struct RunOutcome {
     pub not_seen: usize,
 }
 
+impl RunOutcome {
+    /// Whether `target` ran in this run and failed (a finding or not stored): the only targets the nightly may invalidate (§6). A target
+    /// the run never saw proves nothing about its record.
+    pub fn ran_and_failed(&self, target: &str) -> bool {
+        self.shadow.findings.iter().any(|t| t == target) || self.not_stored.iter().any(|(t, _)| t == target)
+    }
+}
+
 /// The [`RunOutcome`] of `ran` (every target the run was asked for) given `matched` (those a valid record covered before it).
 pub fn run_outcome(ran: &[&Candidate], matched: &[&Candidate], judged: &result::Judged) -> RunOutcome {
     let mut out = RunOutcome {
