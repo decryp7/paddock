@@ -414,6 +414,9 @@ mod tests {
         assert!(!store.join(H1).exists(), "a refused entry leaves nothing");
     }
 
+    // Unix only: the test ages a folder through a read-only handle (`File::open(dir)` then `set_modified`), which Windows refuses
+    // with Access denied (trial run 9230); the store itself runs on the Linux runners only (the module docs).
+    #[cfg(unix)]
     #[test]
     fn the_least_recently_used_entry_beyond_the_limit_is_evicted_and_the_new_one_never() {
         let t = tempfile::tempdir().unwrap();
@@ -436,6 +439,9 @@ mod tests {
         assert!(store.join(H1).exists() && store.join(H2).exists() && store.join(H3).exists());
     }
 
+    // Unix only: the test ages a folder through a read-only handle (`File::open(dir)` then `set_modified`), which Windows refuses
+    // with Access denied (trial run 9230); the store itself runs on the Linux runners only (the module docs).
+    #[cfg(unix)]
     #[test]
     fn the_byte_limit_evicts_too_but_keeps_the_new_entry_even_when_it_alone_is_over() {
         let t = tempfile::tempdir().unwrap();
@@ -458,6 +464,9 @@ mod tests {
         assert!(store.join(H2).exists());
     }
 
+    // Unix only: the test ages a folder through a read-only handle (`File::open(dir)` then `set_modified`), which Windows refuses
+    // with Access denied (trial run 9230); the store itself runs on the Linux runners only (the module docs).
+    #[cfg(unix)]
     #[test]
     fn only_hash_named_folders_and_the_commands_own_temp_names_are_ever_removed() {
         let t = tempfile::tempdir().unwrap();
