@@ -539,7 +539,10 @@ fn guard_owner_process() {
         cmd.arg("60").stdout(Stdio::null()).stderr(Stdio::null());
         let first = folders.split(':').next().unwrap_or_default();
         let s = Supervised::spawn_owning_folder(cmd, None, Path::new(first)).unwrap();
-        println!("child {}", s.id().unwrap());
+        // Its identity, read while it is alive and this owner still holds it: the guardian ends the child as soon as the owner is
+        // dead, so a reader that looks the pid up afterwards finds nothing (CI runs 9225 and 9238, macOS).
+        let id = ProcessId::of(s.id().unwrap()).unwrap();
+        println!("child {} {}", id.pid(), id.started().as_micros());
         // SAFETY: raise takes a signal number; SIGKILL ends this process at once, so none of its clean-up runs.
         unsafe { libc::raise(libc::SIGKILL) };
     }
@@ -746,28 +749,34 @@ fn an_owner_killed_the_moment_its_guarded_spawn_returns_leaves_no_child() {
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
+    let status = owner.wait().unwrap();
+    let folders = [folder];
+    // The owner's report is read only after the guardian has done its work (the folder is its last step): the worst order of the two
+    // is the only order, so the report has to carry the child's identity, which no look-up of the pid can give any more.
+    let guarded =
+        paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+            folders.iter().all(|f| !f.exists())
+        });
     let mut ids = Vec::new();
     for line in BufReader::new(owner.stdout.take().unwrap()).lines() {
         let line = line.unwrap();
-        if let ["child", c] = line.split_whitespace().collect::<Vec<_>>()[..] {
-            // conformance: recorded-pid — the guardian or this test ends it; paddock-proc's tests cannot use paddock-testkit-start (a cycle)
-            ids.extend(ProcessId::of(c.parse().unwrap()));
+        if let ["child", pid, started] = line.split_whitespace().collect::<Vec<_>>()[..] {
+            ids.push(ProcessId::new(
+                pid.parse().unwrap(),
+                crate::StartTime::from_micros(started.parse().unwrap()),
+            ));
         }
     }
-    let status = owner.wait().unwrap();
-    let folders = [folder];
     fail_unless(
         ids.len() == 1
             && std::os::unix::process::ExitStatusExt::signal(&status) == Some(libc::SIGKILL),
         &ids,
         &format!("the owner did not start its child and kill itself ({status}, children {ids:?})"),
     );
-    let gone = ids
-        .iter()
-        .all(|id| crate::statewait::wait_exited(*id, paddock_testkit::wait::HANG_GUARD))
-        && paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
-            folders.iter().all(|f| !f.exists())
-        });
+    let gone = guarded
+        && ids
+            .iter()
+            .all(|id| crate::statewait::wait_exited(*id, paddock_testkit::wait::HANG_GUARD));
     if !gone {
         fail(
             &ids,
