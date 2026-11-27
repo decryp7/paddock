@@ -693,8 +693,9 @@ impl Http for CurlOnce {
     }
 }
 
-/// Answers this process has had from the server (a body, or a 4xx other than 401): once there is one, a read that meets a 401 or a
-/// 5xx is held and retried by [`CurlHttp`] ([`Retrying`]); before it, a 401 is a wrong token and ends the call at once.
+/// Answers this process has had from the server (a body, or a 4xx other than 401): once there is one, a read that meets a 401 is
+/// held and retried by [`CurlHttp`] ([`Retrying`]); before it, a 401 is a wrong token and ends the call at once. A 5xx or a network
+/// failure is retried on the first call too.
 static GOOD_ANSWERS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// The most a read waits in total for a refusing server (backoff 2, 4, 8, 16, then 30 s). Cause: 2026-11-27/28, Gitea (it shares a
@@ -709,9 +710,17 @@ fn http_status(error: &str) -> Option<u16> {
     digits.parse().ok().filter(|s| (100..600).contains(s))
 }
 
-/// A refusal that a server under load gives to a valid request: 401 or any 5xx.
-fn is_transient(error: &str) -> bool {
-    is_refused(error) || http_status(error).is_some_and(|s| s >= 500)
+/// The exit status of a failed curl call, from the text [`CurlOnce`] makes (`curl exited with exit status: 7: ...`).
+fn curl_exit(error: &str) -> Option<u32> {
+    let rest = error.split("exit status: ").nth(1)?;
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok()
+}
+
+/// A failure that says nothing about the token and is worth another try at once: any 5xx, or curl failing at the network
+/// (6 resolve, 7 connect, 28 timeout, 52 empty reply, 56 receive; the 2026-11-27 18:00 outage was connect timeouts).
+fn is_blip(error: &str) -> bool {
+    http_status(error).is_some_and(|s| s >= 500) || curl_exit(error).is_some_and(|c| matches!(c, 6 | 7 | 28 | 52 | 56))
 }
 
 /// The pause before retry `attempt` (0-based): 2, 4, 8, 16, then 30 s.
@@ -719,7 +728,7 @@ fn backoff(attempt: u32) -> Duration {
     Duration::from_secs([2, 4, 8, 16].get(attempt as usize).copied().unwrap_or(30))
 }
 
-/// Wraps an [`Http`]: READS (`get_json`, `get_text`) that meet a 401 or 5xx after the process has had a good answer are held and
+/// Wraps an [`Http`]: READS (`get_json`, `get_text`) that meet a 5xx or a network failure, or a 401 after the process has had a good answer, are held and
 /// retried with backoff for at most [`READ_HOLD`], with one `::warning::`, one recovery line, and at the end one error naming the
 /// causes. Writes (`send_json`, `post_json`: a dispatch, a PUT, a DELETE) are passed on once, never retried: a retried dispatch could
 /// start two runs. A 401 before any good answer is a wrong token and is returned at once.
@@ -756,12 +765,13 @@ impl<'g, H: Http> Retrying<'g, H> {
                     self.good.fetch_add(1, Relaxed);
                     return Ok(v);
                 }
-                Err(e) if is_transient(&e) && self.good.load(Relaxed) > 0 => {
+                // A 401 is held only after a good answer (before one it is a wrong token); a blip is held on the first call too.
+                Err(e) if is_blip(&e) || (is_refused(&e) && self.good.load(Relaxed) > 0) => {
                     let pause = backoff(attempt);
                     if waited + pause > READ_HOLD {
                         return Err(format!(
-                            "{e}: the server answered this process before, so the token is probably not wrong; it kept refusing for {} \
-                             ({attempt} retries): Gitea or its proxy is overloaded or down, or the token was revoked. Check with \
+                            "{e}: the read kept failing for {} \
+                             ({attempt} retries): Gitea or its proxy is overloaded or down, the network is down, or (for a 401 after earlier good answers) the token was revoked. Check with \
                              `curl -H \"Authorization: token $GITEA_TOKEN\" <server>/api/v1/user` (never print the token), then run again",
                             fmt_duration(waited)
                         ));
@@ -1558,6 +1568,24 @@ mod tests {
         assert_eq!(sleeps, [2, 4, 8].map(Duration::from_secs));
         assert_eq!(lines.iter().filter(|l| l.starts_with("::warning::")).count(), 1, "{lines:?}");
         assert!(lines.last().unwrap().contains("answers again after 3 retries"), "{lines:?}");
+    }
+
+    #[test]
+    fn a_first_call_5xx_or_connect_failure_is_retried_but_a_first_call_401_is_not() {
+        const CONNECT: &str = "curl exited with exit status: 7: curl: (7) Failed to connect to host port 443";
+        for blip in [UNAVAILABLE, CONNECT] {
+            let mut http = RetryScript::new(vec![Err(blip.into()), Err(blip.into()), Ok(json!({"a": 1}))]);
+            let (r, sleeps, lines) = through(&mut http, 0, |h| h.get_json("u", "t"));
+            assert_eq!(r.unwrap(), json!({"a": 1}), "{blip}");
+            assert_eq!(sleeps, [2, 4].map(Duration::from_secs), "{blip}");
+            assert_eq!(lines.iter().filter(|l| l.starts_with("::warning::")).count(), 1, "{lines:?}");
+        }
+        let mut http = RetryScript::new(vec![Err(REFUSED.into())]);
+        let (r, sleeps, _) = through(&mut http, 0, |h| h.get_json("u", "t"));
+        assert!(
+            r.is_err() && sleeps.is_empty() && http.get_calls == 1,
+            "a first-call 401 is a wrong token"
+        );
     }
 
     #[test]
