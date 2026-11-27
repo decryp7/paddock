@@ -1549,8 +1549,15 @@ mod partition_tests {
             ["true", "false", "false"],
             "the once-only steps (lockfile, format, clippy, deny) stay on partition 1"
         );
-        assert!(linux.iter().all(|l| l["test_packages"] == ""), "no package list: the partition is nextest's");
-        assert_eq!(legs.iter().filter(|l| l["os"] != "ubuntu-latest").count(), 2, "Windows and macOS stay one leg each");
+        assert!(
+            linux.iter().all(|l| l["test_packages"] == ""),
+            "no package list: the partition is nextest's"
+        );
+        assert_eq!(
+            legs.iter().filter(|l| l["os"] != "ubuntu-latest").count(),
+            2,
+            "Windows and macOS stay one leg each"
+        );
         assert_eq!(
             legs.iter().find(|l| l["os"] == "windows-latest").unwrap(),
             &leg("windows-latest"),

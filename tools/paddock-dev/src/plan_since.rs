@@ -1760,7 +1760,10 @@ mod tests {
         let out: BTreeMap<String, String> = plan.ci_outputs(&[], &mut |_| {}).into_iter().collect();
         let legs: Vec<Value> = serde_json::from_str(&out["paddock_dev_legs"]).unwrap();
         assert_eq!(legs.len(), 1, "only the failed partition: {legs:?}");
-        assert_eq!((legs[0]["os"].as_str(), legs[0]["part_label"].as_str()), (Some("ubuntu-latest"), Some(", 2/3")));
+        assert_eq!(
+            (legs[0]["os"].as_str(), legs[0]["part_label"].as_str()),
+            (Some("ubuntu-latest"), Some(", 2/3"))
+        );
         assert_eq!(legs[0]["part_extra"], "false");
         assert_eq!(out["rerun_jobs"], r#"["paddock-dev"]"#);
     }
