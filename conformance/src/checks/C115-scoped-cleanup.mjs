@@ -265,10 +265,10 @@ export default {
       out.push(warn('C115', 2, BASELINE_PATH, 1, `${waived.length} site${waived.length === 1 ? '' : 's'} waived by a scoped-cleanup comment: ${list}${waived.length > 8 ? ', ...' : ''}`, 'Check that each reason still holds when the site changes.'));
     }
     if (baseline.sites.length) {
-      const g = baselineGrowth(ctx, baseline.sites, BASELINE_PATH);
+      const g = baselineGrowth(ctx, baseline.sites, BASELINE_PATH, 'C115');
       if (g.reason) out.push(unmeasuredFinding(ctx, { id: 'C115', rule: 2, file: BASELINE_PATH, g }));
       else for (const m of g.moved) out.push(growthMovedWarning('C115', 2, BASELINE_PATH, m));
-      if (!g.reason && g.added.length) out.push(error('C115', 2, BASELINE_PATH, 1, `the baseline grew: ${g.added.length} entr${g.added.length === 1 ? 'y is' : 'ies are'} not in the baseline at the merge base ${g.base.slice(0, 9)}; it may only shrink`, 'Remove the entries and scope the cleanups (an owned prefix, `"${VAR:?}"`, or `// conformance: scoped-cleanup — <why>`). Growing the baseline needs the user\'s approval.'));
+      if (!g.reason && g.added.length) out.push(error('C115', 2, BASELINE_PATH, 1, `the baseline grew: ${g.added.length} entr${g.added.length === 1 ? 'y is' : 'ies are'} not in the baseline at the merge base ${g.base.slice(0, 9)}; it may only shrink`, 'Remove the entries and scope the cleanups (an owned prefix, `"${VAR:?}"`, or `// conformance: scoped-cleanup — <why>`). Growing the baseline needs the user\'s approval.'+(g.ask ? ` ${g.ask}` : '')));
     }
     return out;
   },

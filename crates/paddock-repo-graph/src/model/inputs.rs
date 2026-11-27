@@ -162,6 +162,12 @@ pub struct HashDecl {
     pub contracts: Vec<String>,
     /// The files that pin the CI image (its version and its Dockerfile).
     pub image_files: Vec<String>,
+    /// The files of a Cargo workspace folder (the first is the lockfile that marks it) that decide how every package in it builds (`Cargo.lock`, `Cargo.toml`): hashed into
+    /// the key of each package of the workspace (ADR 0116 §2).
+    pub workspace_files: Vec<String>,
+    /// The folders of cargo configuration (`.cargo`): every tracked file directly in one, in the workspace folder and each folder
+    /// above it, is hashed the same way.
+    pub cargo_config_folders: Vec<String>,
 }
 
 /// What counts as prose (ADR 0117 §2, review round 3 P1-A): globs over a file's name (no `/`) or path.

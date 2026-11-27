@@ -1,0 +1,33 @@
+[package]
+name = "paddock-throttle"
+version = "0.1.0"
+description = "The throttle core: one heavy step (cargo, npm, playwright, ...) at a time per machine. Slots as kernel file locks, a FIFO queue, load rules, a priority lane, a built-in troubleshooting log and run log, and a stall detector. The `throttle` program is a thin binary over it."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
+[dependencies]
+# Process identity (pid + OS start time, rule 53 / ADR 0033), kill_tree, lower_priority: shared, not copied (ER-22).
+paddock-proc = { workspace = true }
+# winpath: a canonical path without the Windows verbatim prefix (the home guard compares it with plain paths).
+paddock-env = { workspace = true }
+sysinfo = { version = "0.40", default-features = false, features = ["system"] }
+serde_json = "1"
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+[target.'cfg(unix)'.dependencies]
+# probe.rs: the signal-0 existence probe (EPERM counts as alive); fsinfo.rs and userdb.rs: statfs and the user database.
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# probe.rs: the real file index of a directory (GetFileInformationByHandle).
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+
+[dev-dependencies]
+paddock-testkit = { workspace = true }
+tempfile = "3"
+proptest = "1"

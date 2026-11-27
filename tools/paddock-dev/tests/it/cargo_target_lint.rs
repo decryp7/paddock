@@ -108,6 +108,7 @@ fn only_the_listed_files_set_the_build_folder_as_a_variable() {
 #[test]
 fn the_allow_list_does_not_grow_against_the_merge_base() {
     use paddock_dev::check::baseline::{Growth, growth};
+    use paddock_dev::check::growth_approval;
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let base_ref = std::env::var("PADDOCK_BASE_REF")
         .ok()
@@ -121,10 +122,18 @@ fn the_allow_list_does_not_grow_against_the_merge_base() {
             why.reason()
         ),
         Growth::Added { added: 0, .. } => {}
-        Growth::Added { base, added, .. } => panic!(
-            "the allow list grew against {base_ref} (merge base {base}): {added} entr{} not in the list there; it may only shrink. A new call passes the folder as configuration; an entry needs the user's approval",
-            if added == 1 { "y is" } else { "ies are" }
-        ),
+        Growth::Added { base, added, fresh, .. } => {
+            let gates = std::fs::read_to_string(root.join(growth_approval::REGISTER)).ok();
+            if growth_approval::growth_approval(gates.as_deref(), "cargo_target_allow", &fresh) != growth_approval::GrowthApproval::Approved
+            {
+                panic!(
+                    "the allow list grew against {base_ref} (merge base {base}): {added} entr{} not in the list there; it may only shrink. A new call passes the folder as configuration; or the user adds to {}: {}",
+                    if added == 1 { "y is" } else { "ies are" },
+                    growth_approval::REGISTER,
+                    growth_approval::approval_line("cargo_target_allow", &fresh)
+                );
+            }
+        }
     }
 }
 

@@ -1,8 +1,10 @@
 # throttle
 
 One heavy step (cargo, npm, ng, playwright, llvm-cov, xwin) at a time per machine. Replaces the shell `plock`
-(Paddock agents) and engineering-playbook `scripts/heavy.sh` (ER-24). Package `paddock-throttle`, binary `throttle`; its own Cargo
-workspace and lockfile (`tools/throttle/`, ADR 0014's third kind).
+(Paddock agents) and engineering-playbook `scripts/heavy.sh` (ER-24). Package `throttle`, binary `throttle`; its own Cargo
+workspace and lockfile (`tools/throttle/`, ADR 0014's third kind). The binary is thin: command line, signal handlers and the wiring of the
+real ports (user decision 77, 2026-11-26). Everything else is the shared crate `crates/paddock-throttle` (the `src/` files named below
+are there, as are the fake-world tests `tests/it/{ported,slots,priority,share,admission,logging,filelock}.rs`).
 
 ```sh
 throttle run [--high] [--no-gate] [--low] [--gate-load N] [--slots N] [--queue-max S] [--queue-stall S] [--run-max S] [--stall S] [--verbose] [--log-file FILE] <agent> -- <command...>
@@ -276,7 +278,7 @@ the observed OS start time (`Evidence`), every break, put-back and stale removal
 - A slot is held by an open file with a kernel lock: whether a holder lives is the kernel's answer, never a guess from a pid, a start
   time or a record's age. Nothing breaks a lock, so a break cannot break a live one.
 - The pure rules (who may take a slot, who keeps one when too many were taken, the share of the cores) are `core.rs`: time, load and the
-  holders are passed in. The OS adapters are `slotfile.rs` (locks) and `fsinfo.rs` (file system kind). Pitcrew uses the library.
+  holders are passed in. The OS adapters are `slotfile.rs` (locks) and `fsinfo.rs` (file system kind). The shared crate `paddock-throttle` holds them; Pitcrew and the shim (`paddock-shim`) use it as a library.
 - Ticket and marker liveness compares the OS start time (`paddock_proc::ProcessId`: sysctl / `/proc` / `GetProcessTimes`) with the
   record's epoch plus 2 s; the start *text* in a record is informational and never read, so TZ and locale cannot matter.
 - Every read tolerates the file vanishing (no parse of a missing value); records parse totally (proptest).
@@ -324,8 +326,15 @@ CI leg needed (not added here: `.gitea/` and `./dev plan` belong to the integrat
 
 `cargo nextest run` (every test is bounded: the fake clock never sleeps, real processes run under a 40 s deadline and are
 killed on drop). `tests/it/ported.rs` ports the shell plock.test.sh checks onto a fake clock and fake process table;
-`real.rs` runs the binary with real processes; `slots.rs` is the load-aware slot rule; `props.rs` is proptest. Gates: `cargo fmt --check`,
+`real.rs` (here, in `tools/throttle/tests/it`) runs the binary with real processes; `slots.rs` (in the crate) is the load-aware slot rule; `props.rs` is proptest (in the crate). Gates: `cargo fmt --check`,
 `cargo clippy --all-targets -- -D warnings`, `cargo deny check`, and `cargo xwin check --target x86_64-pc-windows-msvc`.
+
+## Shims (user decision 77)
+
+`throttle shims install <dir>` writes links named `cargo`, `npm`, `npx`, `node`, `playwright` and `ng` that point at this program;
+called by one of those names it is that tool's shim (`crates/paddock-shim`, its README section): the real tool further along PATH, run
+in a throttle slot with the same arguments, streams and exit code, each run recorded in `<dev-targets>/runs/shim/<day>.log`. It does not
+change PATH: put `<dir>` first on it to use the shims. `PADDOCK_SHIM=off` or a `.paddock-shim-off` file in a project opts out.
 
 ## Priority lane (ADR 0102)
 

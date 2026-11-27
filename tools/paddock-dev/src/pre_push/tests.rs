@@ -381,11 +381,11 @@ fn the_windows_skip_reason_names_the_real_cause_per_workspace() {
 fn the_windows_lint_runs_for_paddock_dev_and_throttle_when_the_plan_reaches_them() {
     let mut p = plan();
     p["packages"]["tools/paddock-dev"] = json!(["paddock-dev"]);
-    p["packages"]["tools/throttle"] = json!(["paddock-throttle"]);
+    p["packages"]["tools/throttle"] = json!(["throttle"]);
     let f = facts();
     for (tool, files) in [
         ("tools/paddock-dev", &["tools/paddock-dev/src/pre_push/tests.rs"][..]),
-        ("tools/throttle", &["tools/throttle/src/gate.rs"][..]),
+        ("tools/throttle", &["tools/throttle/src/main.rs"][..]),
     ] {
         let planned = plan_gates(&p, &change(files), &f);
         let row = run_gates(&planned)
