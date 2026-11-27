@@ -131,6 +131,9 @@ pub struct Extracted {
     /// The references it found and could not resolve: [`build`] keeps them in the model, and the plan runs each referrer's
     /// projects in full (ADR 0117 §4, §14: resolved, unresolved or error, never silently no edge).
     pub unresolved: Vec<Unresolved>,
+    /// Reads it found and cannot follow (a crate folder held in a variable, `ancestors`, ...): [`build`] keeps them in the model for
+    /// the test cache, which never reuses their crate (ADR 0116 §2). The plan does not run anything in full for them.
+    pub blind: Vec<Unresolved>,
 }
 
 /// An adapter could not read a file: that file's project goes on full (ADR 0117 §2, review round 2 P2-6).
@@ -197,6 +200,7 @@ pub fn build(files: &[String], read: &dyn BulkRead, adapters: &[Box<dyn Extracto
                 x.unresolved
                     .into_iter()
                     .for_each(|u| out.model.add_unresolved(u));
+                x.blind.into_iter().for_each(|u| out.model.add_blind(u));
             }
             Err(e) => out.errors.push(e),
         }
