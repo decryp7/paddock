@@ -84,6 +84,29 @@ uses it, results in
 
 ## Results of shared tooling
 
+### 2026-11-27, the tool's own build through sccache (ci/dev-selfbuild-sccache)
+
+- **Commit:** origin/main 7da64dedb plus this branch (the `dev` launcher's `selfbuild_cached`). Evidence: CI run 9248 (the plan job's cold `./dev` build took 90 s on Linux, 183 s on the Windows paddock-dev leg, 47 s on macOS; the Mac and Windows sccache "0%" is a kept build folder, not a fault: 3 requests executed, 96 to 101 non-cacheable).
+- **Machine (local numbers):** Mac mini, 14 cores, macOS 27.2, `CARGO_BUILD_JOBS=6`, rustc 1.100.0, sccache 0.20.1 with its own empty `SCCACHE_DIR` and port, `RUSTC_WRAPPER=` empty for the plain variants (the worktree's shim would otherwise answer from the shared cache), each build in a fresh target folder, through `./dev throttle`. Load 9 to 15 (the first 2 plain builds ran at 18 to 35); wall time is an indication, CPU time (user + sys of `time -p`, the compile server's included for the cached builds) is the measure.
+- **Command:** `PADDOCK_DEV_HASH=bench cargo build [--release] --locked --quiet --config build.target-dir=<fresh>` in `tools/paddock-dev`. Variants: **a** as today (release, no wrapper); **b** `RUSTC_WRAPPER=sccache CARGO_INCREMENTAL=0`, the dependencies in the cache and the tool's own inputs changed (a new `PADDOCK_DEV_HASH`: the tool's own crate misses, 1 miss of 313 requests); **c1** release with `opt-level = 1`; **c3** `opt-level = 0`; **c2** the dev profile; **d** b with `opt-level = 1`. Follow-on: `paddock-dev plan origin/main --explain` and `gates check` on the built binary, CPU time.
+- **Runs:** 2 builds each (a, c1, c2, c3), interleaved with the others; b and d twice (rep 1 cold cache, rep 2 changed inputs).
+- **Numbers (macOS):**
+
+  | Variant | Build wall | Build CPU | `plan` CPU | `gates check` CPU |
+  |---|---|---|---|---|
+  | a today (release) | 89 s, 67 s | 384 s, 347 s | 1.1 s | 5.5 s |
+  | b sccache, deps cached, tool inputs changed | 44 s | 179 s (client 21 + server 158) | 1.1 s | not run (same binary as a) |
+  | b sccache, cold cache (empty) | 57 s | not measured (the server's CPU was not timed) | | |
+  | c1 opt-level 1 | 56 s, 56 s | 287 s, 291 s | 1.1 s | 6.2 s (+13%; user time +19%) |
+  | c3 opt-level 0 | 26 s, 26 s | 102 s, 104 s | 4.8 s (x4) | 17.3 s (x3) |
+  | c2 dev profile | 40 s, 36 s | 179 s, 170 s | 5.6 s (x5) | 19.9 s (x3.6) |
+  | d opt 1 + sccache, deps cached, inputs changed | 35 s | 142 s | not run | not run |
+
+- **Reading:** the cheaper profiles lose: opt-level 0 and the dev profile cut the build by 70% but make every later `./dev` command 3 to 5 times dearer, and the binary serves every job of the run (about 100 commands), so they cost more than they save; opt-level 1 saves 16 to 37% of the build wall (25% of its CPU) and costs 6 to 13% more CPU on every command. The compile cache keeps the follow-on cost at zero and halves the build CPU, since the dependencies come from the cache and the tool's own crate is the only miss (about 35 s of the 44 s). The key is stable only for one build folder path (the same crate built in another folder missed 83 of 313 requests: OUT_DIR is in the keys of build-script crates), which is why the launcher builds in the one folder `<tool folder>/target/rustc-<compiler>` and sets `SCCACHE_BASEDIRS`. Chosen: b (ER-44, ER-20).
+- **Linux runner (CI trial of ci/dev-selfbuild-bench, a measurement job beside the plan job, never landed):** LINUX_RESULTS
+- **Plan job's "built ... in N s" line (trial of this branch):** LINUX_PLAN
+- **Not measured:** the Windows and macOS legs through the cache (they keep their build folders warm and are not changed); the cache's growth over many runs (limit 5 GB, sccache evicts); a hit rate with two jobs of different hashes at once (one build at a time under the lock).
+
 ### 2026-11-27, train priority in throttle (feat/throttle-train-priority)
 
 - **Commit:** origin/main 696f472f4 plus this branch's change (a debug build of tools/throttle, the binary the tests ran).

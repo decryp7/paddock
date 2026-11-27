@@ -483,7 +483,12 @@ fn run_wrapper_with_cargo(
         .env_remove("CARGO_TARGET_DIR")
         .env_remove("CARGO_BUILD_TARGET_DIR")
         // `dev` changes its messages and defaults on a CI runner; a test opts in through `extra_env`.
-        .env_remove("GITHUB_ACTIONS");
+        .env_remove("GITHUB_ACTIONS")
+        // What decides whether a cold build goes through the compile cache (a developer's shim, a tag run's ref).
+        .env_remove("RUSTC_WRAPPER")
+        .env_remove("GITHUB_REF")
+        .env_remove("PADDOCK_TAG_REHEARSAL")
+        .env_remove("PADDOCK_DEV_SELFBUILD_CACHE");
     cmd.envs(extra_env.iter().map(|(k, v)| (*k, v.as_str())));
     let out = cmd.output().unwrap();
     (
@@ -2072,4 +2077,143 @@ fn empty_cache_folders_are_a_group_of_their_own_and_never_take_the_cache_with_th
     assert!(home.join("bin").join(&hash).is_dir(), "the tool just built is still cached: {err}");
     let empty_left = (0..7).filter(|i| home.join(format!("bin/empty-{i}")).exists()).count();
     assert_eq!(empty_left, 5, "the empty folders keep five, like any tool");
+}
+
+/// What a stand-in `sccache` answers to `--show-stats` in the self-build tests: the counters the wrapper reports, without cache paths.
+#[cfg(unix)]
+const SELF_BUILD_STATS: &str = "Compile requests                    385
+Compile requests executed           316
+Cache hits                          312
+Cache misses                          1
+Cache hits rate                  99.68 %
+";
+
+/// One run of the wrapper in a cold CI job (`GITHUB_ACTIONS`, a kept volume, a stand-in `sccache`) with a stand-in `cargo` that logs the
+/// compile-cache variables it was started with and its arguments. Returns (exit code, wrapper output, cargo's log, sccache's calls).
+#[cfg(unix)]
+fn self_build(extra_env: &[(&str, String)], sccache_start_fails: bool) -> (i32, String, String, String) {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    let mount = scratch.path().join("mount");
+    std::fs::create_dir_all(&mount).unwrap();
+    let (cargo_log, sccache_log) = (scratch.path().join("cargo-log"), scratch.path().join("sccache-log"));
+    let call = |a: Actions| a.appends_with(&sccache_log.display().to_string(), "{args}\n");
+    let mut sccache = stand_in_at(&f.cargo_home.path().join("shims").join("sccache"))
+        .answers(call(Actions::new()))
+        .when_args(&["--show-stats"], call(Actions::new()).stdout(SELF_BUILD_STATS));
+    if sccache_start_fails {
+        sccache = sccache.when_args(&["--start-server"], call(Actions::new()).stderr("cannot bind").exit(1));
+    }
+    sccache.install().unwrap();
+    // The lock itself is the kernel's (util-linux `flock`, on the Linux CI image): macOS has none, and a stand-in that succeeds lets
+    // the test see what the wrapper runs under it.
+    stand_in_at(&f.cargo_home.path().join("shims").join("flock")).install().unwrap();
+    let mut env = vec![
+        ("RUSTC", rustc),
+        ("GITHUB_ACTIONS", "true".to_string()),
+        ("PADDOCK_SCCACHE_MOUNT", mount.display().to_string()),
+        // A download that cannot connect (nothing listens on port 1): the wrapper then builds, and no test reaches the network.
+        ("PADDOCK_DEV_DOWNLOAD", "1".to_string()),
+        ("PADDOCK_DEV_PACKAGES", "http://127.0.0.1:1".to_string()),
+        ("CARGO_BUILD_JOBS", "3".to_string()),
+    ];
+    env.extend(extra_env.iter().map(|(k, v)| (*k, v.clone())));
+    let log = cargo_log.display().to_string();
+    let (code, out, err) = run_wrapper_with_cargo(&f, &scratch.path().join("home"), &env, |c| {
+        building(
+            c,
+            cargo_builds(
+                BUILD_FOLDER,
+                Actions::new().appends_with(
+                    &log,
+                    "wrapper={env:RUSTC_WRAPPER|unset} dir={env:SCCACHE_DIR|unset} jobs={env:CARGO_BUILD_JOBS|unset} incr={env:CARGO_INCREMENTAL|unset} args={args}\n",
+                ),
+                &built_tool("built-by-shim", "{env:PADDOCK_DEV_HASH}"),
+            ),
+        )
+    });
+    let read = |p: &Path| std::fs::read_to_string(p).unwrap_or_default();
+    assert_eq!(code, 0, "{out}{err}");
+    (code, format!("{out}{err}"), read(&cargo_log), read(&sccache_log))
+}
+
+/// The cold self-build of a CI job on a runner with the kept volume compiles through a local-disk sccache in a folder of that volume:
+/// the dependencies come from it, so only the tool's own crate compiles (docs/benchmarks.md, 2026-11-27, "the tool's own build").
+/// The server runs for this build alone (started, then stopped), and the counters are printed for the job log (ER-27).
+#[cfg(unix)]
+#[test]
+fn a_cold_self_build_in_a_ci_job_compiles_through_the_kept_local_sccache() {
+    let (_, said, cargo, sccache) = self_build(&[], false);
+    assert!(
+        cargo.contains("wrapper=sccache") && cargo.contains("/mount/paddock-dev-build-cache ") && cargo.contains("incr=0"),
+        "{cargo}"
+    );
+    // The job count goes by flag: sccache hashes CARGO_BUILD_JOBS into its keys, which then differ from runner to runner.
+    assert!(cargo.contains("jobs=unset") && cargo.contains("-j 3"), "{cargo}");
+    let calls: Vec<&str> = sccache.lines().collect();
+    assert_eq!(
+        calls,
+        ["--stop-server", "--start-server", "--show-stats", "--stop-server"],
+        "a stale server is stopped, ours runs for this build, and ends with it"
+    );
+    assert!(said.contains("compile cache") && said.contains("312 hits") && said.contains("1 misses"), "{said}");
+}
+
+/// The wrapper's hash does not know about the compile cache: the same inputs name the same tool with or without it (the dev-tool
+/// store and the Actions cache are keyed by it).
+#[cfg(unix)]
+#[test]
+fn the_compile_cache_does_not_change_the_hash() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    let plain = f.both(&[("RUSTC", rustc.clone())]);
+    let cached = f.both(&[
+        ("RUSTC", rustc),
+        ("GITHUB_ACTIONS", "true".to_string()),
+        ("RUSTC_WRAPPER", "sccache".to_string()),
+        ("SCCACHE_DIR", "/sccache/x".to_string()),
+        ("CARGO_INCREMENTAL", "0".to_string()),
+        ("PADDOCK_SCCACHE_MOUNT", scratch.path().display().to_string()),
+    ]);
+    assert_eq!(plain, cached);
+}
+
+/// An explicit `RUSTC_WRAPPER` wins (the job's own setup-rust, a developer's shim), and so do the cases where the cache must not be
+/// read: not a CI job, no kept volume, a release, rule 54 or tag run (a tag build reads nothing kept, ADR 0085), the switch off.
+#[cfg(unix)]
+#[test]
+fn an_explicit_wrapper_and_every_release_or_missing_volume_case_leave_the_build_as_it_was() {
+    let none = |s: &str| ("PADDOCK_SCCACHE_MOUNT", s.to_string());
+    let cases: Vec<(&str, Vec<(&str, String)>)> = vec![
+        ("explicit wrapper", vec![("RUSTC_WRAPPER", "/opt/my-wrapper".to_string())]),
+        ("not a CI job", vec![("GITHUB_ACTIONS", "false".to_string())]),
+        ("no kept volume", vec![none("/nonexistent/volume")]),
+        ("a release or rule 54 run", vec![("PADDOCK_DEV_DOWNLOAD", "0".to_string())]),
+        ("a tag run", vec![("GITHUB_REF", "refs/tags/v1.2.3".to_string())]),
+        ("a tag rehearsal", vec![("PADDOCK_TAG_REHEARSAL", "1".to_string())]),
+        ("switched off", vec![("PADDOCK_DEV_SELFBUILD_CACHE", "off".to_string())]),
+    ];
+    for (what, env) in cases {
+        let (_, said, cargo, sccache) = self_build(&env, false);
+        let want = env
+            .iter()
+            .find(|(k, _)| *k == "RUSTC_WRAPPER")
+            .map_or("unset".to_string(), |(_, v)| v.clone());
+        assert!(cargo.contains(&format!("wrapper={want} ")), "{what}: {cargo}");
+        assert!(cargo.contains("jobs=3") && !cargo.contains("-j 3"), "{what}: the job count stays in the environment: {cargo}");
+        assert_eq!(sccache, "", "{what}: sccache was not started");
+        assert!(!said.contains("compile cache"), "{what}: {said}");
+    }
+}
+
+/// The cache slows a build down, never fails it: a server that does not start leaves the build as it was, with one notice.
+#[cfg(unix)]
+#[test]
+fn a_server_that_does_not_start_leaves_the_build_without_the_compile_cache() {
+    let (_, said, cargo, sccache) = self_build(&[], true);
+    assert!(cargo.contains("wrapper=unset ") && cargo.contains("jobs=3"), "{cargo}");
+    assert!(said.contains("::notice::") && said.contains("did not start"), "{said}");
+    assert!(sccache.contains("--start-server") && !sccache.contains("--show-stats"), "{sccache}");
 }
