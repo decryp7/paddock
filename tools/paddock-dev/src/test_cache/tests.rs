@@ -1386,6 +1386,88 @@ fn the_record_steps_carry_their_jobs_name_and_the_leg_filter_as_the_workflow_nam
     }
 }
 
+/// ER-33, run 9265: the store check before the record step. Without a store, or with one that does not answer, it ends not measured and
+/// says so on an `::error::` line with the cause (never a pass, never silent).
+#[test]
+fn the_selfcheck_says_not_measured_when_the_store_does_not_answer() {
+    use paddock_cli::Exit;
+    let none = super::cmd::selfcheck(None).unwrap();
+    assert_eq!(none.exit, Exit::NotMeasured);
+    assert!(
+        none.text.contains("::error::") && none.text.contains("not measured"),
+        "{}",
+        none.text
+    );
+
+    let d = tempfile::tempdir().unwrap();
+    let env: HashMap<String, String> = [
+        ("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE"),
+        ("AWS_SECRET_ACCESS_KEY", "s3cr3t-value"),
+        ("PADDOCK_SCCACHE_ENV_FILE", d.path().join("absent.env").to_str().unwrap()),
+        // A black-hole port on the loopback: nothing listens (ER-14, no real service is touched).
+        ("PADDOCK_SCCACHE_S3_ENDPOINT", "127.0.0.1:9"),
+    ]
+    .iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect();
+    let s = super::s3::S3Store::from_env(&env, d.path().join("scratch")).unwrap();
+    let down = super::cmd::selfcheck(Some(&s)).unwrap();
+    assert_eq!(down.exit, Exit::NotMeasured);
+    assert!(down.text.contains("not measured") && !down.text.contains("s3cr3t"), "{}", down.text);
+}
+
+/// The workflow carries the store check on every leg of the crate job, right before the record step, with the record step's secrets and no
+/// ref or OS condition of its own: the Windows leg's round trip is what run 9265 lacked. The job model (`paddock_ci_config::jobs`) says the
+/// crate job's legs are the planner's, so every leg of every OS runs this one list of steps.
+#[test]
+fn the_crate_job_checks_the_store_on_every_os_before_it_records() {
+    let text = include_str!("../../../../.gitea/workflows/ci.yml");
+    let docs = yaml_rust2::YamlLoader::load_from_str(text).unwrap();
+    let j = &docs[0]["jobs"]["crate"];
+    let steps = j["steps"].as_vec().unwrap();
+    let at = |name: &str| {
+        steps
+            .iter()
+            .position(|s| s["name"].as_str() == Some(name))
+            .unwrap_or_else(|| panic!("no step {name}"))
+    };
+    let (check, record) = (at("Test cache store check"), at("Record test results (test cache)"));
+    assert_eq!(check + 1, record, "the check is the step right before the record step");
+    let c = &steps[check];
+    assert_eq!(
+        c["continue-on-error"].as_bool(),
+        Some(true),
+        "a store that does not answer never fails the job"
+    );
+    assert!(c["run"].as_str().unwrap_or("").contains("ci test-cache selfcheck --shared"));
+    let cond = c["if"].as_str().unwrap_or("");
+    assert!(
+        !cond.contains("github.ref ==") && !cond.contains("refs/heads/train"),
+        "every ref: {cond}"
+    );
+    assert!(
+        !cond.contains("== 'Windows'") && !cond.contains("== 'macOS'"),
+        "no OS is left out: {cond}"
+    );
+    for k in [
+        "PADDOCK_TEST_CACHE_KEY_ID",
+        "PADDOCK_TEST_CACHE_SECRET",
+        "PADDOCK_SCCACHE_S3_ENDPOINT",
+    ] {
+        assert_eq!(
+            c["env"][k].as_str(),
+            steps[record]["env"][k].as_str(),
+            "{k}: the same store as the record step"
+        );
+    }
+    let named = paddock_ci_config::jobs::named_jobs(text).unwrap();
+    let crate_job = named.iter().find(|n| n.id == "crate").expect("the job model knows the crate job");
+    assert!(
+        matches!(crate_job.legs, paddock_ci_config::jobs::Legs::Planned(_)),
+        "the crate job's legs come from the planner, one step list for every OS"
+    );
+}
+
 /// `ci test-cache run` end to end with a stand-in nextest, environment and trust check and a scratch store: the wiring of
 /// `cmd::run_with` (the lookup that guards the write rule, the outcome that sorts the targets, the notices), not only the helpers it
 /// calls (review of train x: the helpers were tested, `run` was not).
