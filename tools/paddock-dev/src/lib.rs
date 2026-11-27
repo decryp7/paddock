@@ -56,6 +56,7 @@ pub mod ci_dev_tool_store;
 pub mod ci_dyno_linux_units;
 pub mod ci_host;
 pub mod ci_isolation;
+pub mod ci_job_model;
 pub mod ci_run;
 pub mod ci_runs;
 pub mod ci_rust_pin;

@@ -343,12 +343,34 @@ fn what_the_change_does_not_reach_is_skipped_with_a_reason() {
         ..Change::default()
     };
     let planned = plan_gates(&docs, &c, &facts());
-    // Conformance and its tests run on every push, whatever the plan says (ER-41); everything else a docs change does not reach.
-    assert_eq!(
-        ids(&planned),
-        ["conformance", "conformance-tests", "member-audits", "gates-register"],
-        "{:?}",
-        ids(&planned)
+    // Conformance, its tests and the gate register run on every push, whatever the plan says (ER-41); the rest of the fixed rows
+    // either run too (a row that runs whatever changed, like the member audits) or are skipped with a reason. The list is read
+    // from ROW_SET and the planner's own answer, never typed here (ER-42): a new row cannot break this test.
+    let run = ids(&planned);
+    for always in ["conformance", "conformance-tests", "gates-register"] {
+        assert!(run.contains(&always.to_string()), "{always} runs on every push: {run:?}");
+    }
+    let skipped_ids: Vec<String> = planned
+        .iter()
+        .filter_map(|p| {
+            if let Planned::Skip { id, .. } = p {
+                Some(id.as_str())
+            } else {
+                None
+            }
+        })
+        .flat_map(|id| id.split(", "))
+        .map(String::from)
+        .collect();
+    for row in super::gates::ROW_SET {
+        assert!(
+            run.iter().any(|r| r == row) || skipped_ids.iter().any(|s| s == row),
+            "{row} is neither run nor skipped with a reason for a docs change: run {run:?}, skipped {skipped_ids:?}"
+        );
+    }
+    assert!(
+        run.iter().all(|r| super::gates::ROW_SET.contains(&r.as_str())),
+        "a docs change plans only fixed rows: {run:?}"
     );
     let skipped: Vec<&String> = planned
         .iter()
@@ -661,6 +683,42 @@ fn a_developers_push_skips_the_member_audits_with_a_reason_and_the_member_gate_r
         ..facts()
     };
     assert!(ids(&plan_gates(&plan(), &change(&["crates/a.rs"]), &on)).contains(&"member-audits".to_string()));
+}
+
+/// ADR 0123 §7: the job-model check is a member-gate row (a layout change fails before a train, ER-9, ER-53), runs `./dev ci job-model check`
+/// whatever changed (ER-41: ci.yml's layout can be broken from the planner or an action), and a developer's push skips it with the
+/// reason. Removing the row fails this test (ER-33).
+#[test]
+fn the_job_model_row_runs_in_the_member_gate_whatever_changed_and_a_developers_push_skips_it() {
+    let on = plan_gates(
+        &plan(),
+        &change(&["crates/a.rs"]),
+        &Facts {
+            member_gate: true,
+            ..facts()
+        },
+    );
+    let row = on
+        .iter()
+        .find_map(|p| match p {
+            Planned::Run(g) if g.id == "job-model" => Some(g),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("the member gate has a job-model row: {:?}", ids(&on)));
+    assert_eq!(row.args, ["ci", "job-model", "check"]);
+    let off = plan_gates(
+        &plan(),
+        &change(&["crates/a.rs"]),
+        &Facts {
+            member_gate: false,
+            ..facts()
+        },
+    );
+    assert!(
+        off.iter()
+            .any(|p| matches!(p, Planned::Skip { id, reason } if id == "job-model" && reason.contains("--member-gate"))),
+        "{off:?}"
+    );
 }
 
 /// A failing audit fails the gate (exit 1, one `::error::` line with the rerun command), and a runner without nextest or one that

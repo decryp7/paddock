@@ -1,6 +1,6 @@
 use paddock_ci_config::jobs::{
     APPS_PROJECT, Declared, JobModel, Leg, Legs, MatrixValues, PROJECT_OUTPUTS, Problem, model,
-    named_jobs, render, render_name, runner_jobs, triggers,
+    named_jobs, render, render_name, runner_jobs, tool_cache_actions, triggers,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -547,6 +547,37 @@ fn a_job_whose_condition_reads_the_webkit_output_says_so() {
     // The reference-app jobs run only when the planner wants WebKit (a tag, the nightly, a manual ask).
     assert!(m.job("e2e").unwrap().reads_webkit);
     assert!(!m.job("ui").unwrap().reads_webkit && !m.job("crate").unwrap().reads_webkit);
+}
+
+fn actions(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+    pairs
+        .iter()
+        .map(|(n, t)| (n.to_string(), t.to_string()))
+        .collect()
+}
+
+/// ADR 0123 §7: the actions that restore the dev tool are read from the action files, not declared by hand.
+#[test]
+fn the_tool_cache_actions_are_derived_from_the_action_files() {
+    let found = tool_cache_actions(&actions(&[
+        ("dev-tool-cache", "runs:\n  using: composite\n  steps:\n    - run: echo restore\n"),
+        // restores through the one that restores, before any ./dev
+        ("node-caches", "runs:\n  using: composite\n  steps:\n    - uses: ./.gitea/actions/dev-tool-cache\n    - run: ./dev ci node\n"),
+        // a second level: restores through node-caches
+        ("setup-node", "runs:\n  using: composite\n  steps:\n    - uses: ./.gitea/actions/node-caches\n"),
+        // calls ./dev before any restore
+        ("late", "runs:\n  using: composite\n  steps:\n    - run: ./dev ci x\n    - uses: ./.gitea/actions/dev-tool-cache\n"),
+        // never restores
+        ("plain", "runs:\n  using: composite\n  steps:\n    - run: echo hi\n"),
+    ]))
+    .unwrap();
+    assert_eq!(found, set(&["dev-tool-cache", "node-caches", "setup-node"]));
+}
+
+/// A positive control (ER-33): an action file that is not YAML the reader understands is an error, never an empty set.
+#[test]
+fn an_action_file_that_does_not_parse_is_an_error() {
+    assert!(tool_cache_actions(&actions(&[("x", "runs: [unclosed")])).is_err());
 }
 
 #[test]

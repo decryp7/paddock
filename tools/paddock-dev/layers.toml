@@ -97,6 +97,7 @@ modules = [
 name = "ci"
 uses = ["host", "repo"]
 modules = [
+    "ci_job_model",
     "ci_runs",
     "generators",
     "load",
