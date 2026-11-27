@@ -571,6 +571,11 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
                 .collect();
             legs_of = crate::plan_ci::partition_linux_legs(legs_of, &packages, crate::plan_ci::LINUX_PARTITIONS);
         }
+        // paddock-dev is one package with about 2,700 tests: its Linux tests run as parallel nextest partitions (user decision 107a,
+        // 2026-11-27; it has no coverage run, so every run splits). A narrowed leg stays whole.
+        if key == "paddockDev" {
+            legs_of = crate::plan_ci::partition_nextest_legs(legs_of, crate::plan_ci::LINUX_PARTITIONS);
+        }
         // Packages with a valid pass of the same key are left out of the legs' tests (never the declared filter: the run stays whole).
         let job = if key == "crates" { "crate" } else { "paddock-dev" };
         let applied = crate::test_cache::plan::apply(legs_of, job, &reuse_plan, key != "crates" || !coverage_run(env));
