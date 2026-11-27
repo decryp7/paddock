@@ -132,11 +132,6 @@ const REGISTER: &str = "docs/gates.toml";
 /// `review_by` limit as a check, so the flip to blocking is enforced by the date (ER-41).
 const STEP_PREFIX: &str = "step:";
 
-/// A `[[report_only]]` id that names a push-gate row rather than a check: `row:<id>`, a row of `./dev check --pre-push` that prints
-/// warnings and exits 0 (`pre_push::gates::ROW_SET`, the one list of the fixed rows, ER-42). It has the same `review_by` limit as a
-/// check, so the flip to blocking is enforced by the date (ER-41).
-const ROW_PREFIX: &str = "row:";
-
 /// What is wrong with a `step:<project>/<phase>` entry, with the next step: the step is gone, or it already blocks.
 fn step_entry_problem(id: &str, src: &Sources, model: &ci::CiModel) -> Option<(String, &'static str)> {
     let Some((project, phase)) = id.strip_prefix(STEP_PREFIX).and_then(|r| r.split_once('/')) else {
@@ -655,7 +650,7 @@ pub fn evaluate(input: &Input) -> Outcome {
     ] {
         for e in list
             .iter()
-            .filter(|e| !ids.contains(&e.id) && !(kind == "report_only" && (e.id.starts_with(STEP_PREFIX) || e.id.starts_with(ROW_PREFIX))))
+            .filter(|e| !ids.contains(&e.id) && !(kind == "report_only" && e.id.starts_with(STEP_PREFIX)))
         {
             finding(
                 &mut out,
@@ -682,19 +677,6 @@ pub fn evaluate(input: &Input) -> Outcome {
     for e in reg.report_only.iter().filter(|e| e.id.starts_with(STEP_PREFIX)) {
         if let Some((message, fix)) = step_entry_problem(&e.id, input.sources, &model) {
             finding(&mut out, Some(REGISTER), None, &e.id, message, fix);
-        }
-    }
-    for e in reg.report_only.iter().filter(|e| e.id.starts_with(ROW_PREFIX)) {
-        let row = &e.id[ROW_PREFIX.len()..];
-        if !crate::pre_push::gates::ROW_SET.contains(&row) {
-            finding(
-                &mut out,
-                Some(REGISTER),
-                None,
-                &e.id,
-                format!("[[report_only]] {} names a push-gate row that does not exist", e.id),
-                "Remove the entry, or name a row of pre_push::gates::ROW_SET as row:<id>.",
-            );
         }
     }
     let present: BTreeSet<(String, String)> = out
@@ -982,32 +964,6 @@ mod tests {
         let bad = step_register("2026-12-06").replace("step:tools/hooks", "step:tools");
         let m = messages(&run_step(&bad, STEP_CI, Some(STEP_CONTRACT)));
         assert!(m.iter().any(|x| x.contains("is not `step:<project>/<phase>`")), "{m:?}");
-    }
-
-    /// A `row:<id>` report-only entry names a fixed row of the push gate: a known row is no finding, an unknown one is, and the entry
-    /// has the same review date as a check's.
-    #[test]
-    fn a_report_only_row_entry_must_name_a_push_gate_row() {
-        let row = |id: &str, review_by: &str| {
-            format!(
-                "{REG_HEAD}\n[[report_only]]\nid = \"{id}\"\nreason = \"x\"\nowner = \"o\"\nsince = 2026-11-08\nreview_by = {review_by}\napproved = \"coordinator\"\n"
-            )
-        };
-        let about = |o: &Outcome, id: &str| messages(o).into_iter().filter(|m| m.contains(id)).collect::<Vec<_>>();
-        assert!(
-            about(
-                &run_step(&row("row:mutants", "2026-12-06"), STEP_CI, Some(STEP_CONTRACT)),
-                "row:mutants"
-            )
-            .is_empty()
-        );
-        let m = about(
-            &run_step(&row("row:mutants", "2026-11-09"), STEP_CI, Some(STEP_CONTRACT)),
-            "row:mutants",
-        );
-        assert!(m.iter().any(|x| x.contains("review_by 2026-11-09 has passed")), "{m:?}");
-        let m = about(&run_step(&row("row:gone", "2026-12-06"), STEP_CI, Some(STEP_CONTRACT)), "row:gone");
-        assert!(m.iter().any(|x| x.contains("names a push-gate row that does not exist")), "{m:?}");
     }
 
     /// C100 over the wired `step:tools/hooks` entry with an expiry date, on `today`, against `base` and for `tag`.

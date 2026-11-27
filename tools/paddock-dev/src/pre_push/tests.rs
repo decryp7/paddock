@@ -290,8 +290,7 @@ fn the_row_set_of_a_pass_record_is_every_fixed_row_the_planner_can_plan() {
             "apps/dyno/crates/dyno-core/src/a.rs".into(),
         ],
         ranges: vec!["abc..HEAD".into()],
-        // The `mutants` row is planned to run only with a base (without one it is not measured, which `ids` does not list).
-        base: Some("origin/main".into()),
+        ..Change::default()
     };
     let planned = plan_gates(&plan(), &c, &facts());
     let mut fixed: Vec<String> = ids(&planned)
@@ -3832,53 +3831,4 @@ mod member_tests {
             tool.args
         );
     }
-}
-
-fn mutants_row(planned: &[Planned]) -> &Planned {
-    planned
-        .iter()
-        .find(|p| match p {
-            Planned::Run(g) => g.id == "mutants",
-            Planned::Skip { id, .. } | Planned::NotMeasured { id, .. } | Planned::Broken { id, .. } => id == "mutants",
-        })
-        .unwrap_or_else(|| panic!("no mutants row: {:?}", ids(planned)))
-}
-
-/// The `mutants` row (user decision 127): a heavy member-gate row that runs `./dev mutants gate --base <merge base>` when a Rust source
-/// of tools/paddock-dev or crates/ changed, is skipped with its reason in a developer's push and for other changes, and is not measured
-/// (never a pass, ER-33) when the base is unknown. It is in ROW_SET, so a pass record made without it is refused.
-#[test]
-fn the_mutants_row_runs_for_a_changed_rust_source_in_the_member_gate_and_is_never_a_silent_pass() {
-    let mut c = change(&["crates/paddock-proc/src/lib.rs"]);
-    c.base = Some("abc123".into());
-    match mutants_row(&plan_gates(&plan(), &c, &facts())) {
-        Planned::Run(g) => {
-            assert_eq!(g.args, ["mutants", "gate", "--base", "abc123"]);
-            assert!(g.heavy, "one package test run per mutant: through throttle");
-            assert_eq!(g.need, Need::Tool("cargo-mutants".into()));
-        }
-        other => panic!("{other:?}"),
-    }
-    let mut dev = facts();
-    dev.member_gate = false;
-    assert!(matches!(mutants_row(&plan_gates(&plan(), &c, &dev)), Planned::Skip { reason, .. } if reason.contains("member gate")));
-    for f in [
-        "docs/x.md",
-        "apps/dyno/crates/dyno-core/src/a.rs",
-        "crates/paddock-proc/Cargo.toml",
-        "tools/paddock-dev/tests/it/a.rs.txt",
-    ] {
-        let c = change(&[f]);
-        assert!(
-            matches!(mutants_row(&plan_gates(&plan(), &c, &facts())), Planned::Skip { reason, .. } if reason.contains("no Rust source")),
-            "{f}"
-        );
-    }
-    let mut c = change(&["tools/paddock-dev/src/plan.rs"]);
-    c.base = None;
-    assert!(matches!(mutants_row(&plan_gates(&plan(), &c, &facts())), Planned::NotMeasured { reason, .. } if reason.contains("not known")));
-    assert!(
-        super::gates::ROW_SET.contains(&"mutants"),
-        "a pass record made before the row existed must be refused"
-    );
 }

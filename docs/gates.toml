@@ -1244,10 +1244,3 @@ owner = "ER-21 class: one blind crate (paddock-testkit, a dev-dependency of near
 since = 2026-11-27
 review_by = 2026-12-11
 approved = "user"
-
-[[report_only]]
-id = "row:mutants"
-reason = "ER-41: report-only until its first green member-gate run on the real tree, recorded by run id here and at tools/paddock-dev/src/mutants_gate.rs `MODE`, then flip MODE to Gate and remove the entry. The member gate's `mutants` row runs cargo-mutants `--in-diff` against the merge base over the changed functions of tools/paddock-dev and crates/ (user decision 127, 2026-11-27): a function whose every mutation passes the tests is a MISSED finding naming the function and the mutation, so a test or a guard that never reaches the code it claims to check is seen. Timeouts and unviable mutants are counted apart and never a pass; a missing pinned tool, a red baseline or a cap overflow is `not measured`. Positive control: the row first mutates a one-function crate whose test does not reach a second function and goes `check broken` unless that function shows MISSED. First measured runs: docs/benchmarks.md, \"Mutation testing of the diff in the member gate\"."
-owner = "ER-21 class: a test or guard that never reaches the production code it claims to check (a landing test that rebuilt the planner wiring itself; config::removed, a guard nothing called; a producer test that looked at an action ci.yml does not use; user decision 127)"
-since = 2026-11-27
-review_by = 2026-12-11

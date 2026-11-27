@@ -1,4 +1,4 @@
-//! `mutants gate`: mutation-testing of the diff, the member gate's `mutants` row (user decision 127, 2026-11-27).
+//! `mutants gate`: mutation-testing of the diff, ci.yml's `mutants` job (user decision 127, 2026-11-27; moved from the member gate to CI the same day).
 //!
 //! The class it catches: a test or a guard that never reaches the production code it claims to check (a landing test that rebuilt the
 //! planner's wiring itself; `config::removed`, a guard nothing called; a producer test that looked at an action `ci.yml` does not use).
@@ -6,8 +6,8 @@
 //! replaced, an operator swapped) and runs the package's tests: a mutant no test fails on is MISSED, and the function it names is a
 //! finding. Timeouts and unviable mutants are counted apart and never read as caught (ER-33).
 //!
-//! It starts report-only (ER-41): [`MODE`] makes every finding a `::warning::` and the exit 0; the row is registered in
-//! `docs/gates.toml` as `row:mutants` with a review date. Whatever the mode, a thing that could not be measured (the pinned tool is
+//! It starts report-only (ER-41): [`MODE`] makes every finding a `::warning::` and the exit 0; the review date of that phase is 2026-12-11 (ER-41: flip
+//! [`MODE`] to Gate or delete the job). Whatever the mode, a thing that could not be measured (the pinned tool is
 //! not installed, the unmutated tree fails its tests, the run was cut short) is printed as `not measured` and counted, never as a
 //! clean run; as a gate it exits `NotMeasured`, and a failed positive control exits `CheckBroken`.
 //!
@@ -28,8 +28,9 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// Whether a finding fails the run. Report-only (ER-41) until the first green member-gate run on the real tree is recorded here, by
-/// run id, in the same change that sets this to [`Mode::Gate`] and removes the `row:mutants` entry of docs/gates.toml.
+/// Whether a finding fails the run. Report-only (ER-41) until the first green train run of ci.yml's `mutants` job on the real tree is
+/// recorded here, by run id, in the same change that sets this to [`Mode::Gate`] and removes the job's `continue-on-error`. Review date
+/// 2026-12-11: flip it, or delete the job.
 pub const MODE: Mode = Mode::ReportOnly;
 
 /// The one cargo-mutants version the row runs (ER-26: an upgrade is one deliberate change plus a full run). It is not installed from
@@ -392,7 +393,7 @@ fn control(tool: &dyn Tool, scratch: &Path) -> Result<(), String> {
 /// Runs the control, then mutates the changed functions of every workspace in [`WORKSPACES`] between `base` and the commit `head` of
 /// the repository at `root`, in a checkout of `head` under the scratch folder `scratch` (mutants are applied in place there, never in
 /// `root`). The run's findings and what it could not measure are in the [`Summary`].
-pub fn measure(tool: &dyn Tool, root: &Path, head: &str, base: &str, scratch: &Path, mode: Mode) -> Summary {
+pub fn measure(tool: &dyn Tool, root: &Path, head: &str, base: &str, shard: Option<(u32, u32)>, scratch: &Path, mode: Mode) -> Summary {
     let mut s = Summary::default();
     match tool.mutants(root, &args(&["--version"]), scratch) {
         Ok(r) if version_of(&r.stdout) == Some(PIN) => {}
@@ -445,7 +446,10 @@ pub fn measure(tool: &dyn Tool, root: &Path, head: &str, base: &str, scratch: &P
         }
         let dir = tree.join(ws);
         let diff_arg = diff_file.to_string_lossy().into_owned();
-        let listing = tool.mutants(&dir, &args(&["--in-diff", &diff_arg, "--list", "--json"]), scratch);
+        let shard_arg = shard.map(|(k, n)| format!("{k}/{n}"));
+        let mut list_args = args(&["--in-diff", &diff_arg, "--list", "--json"]);
+        list_args.extend(shard_arg.iter().flat_map(|a| args(&["--shard", a])));
+        let listing = tool.mutants(&dir, &list_args, scratch);
         let n = match listing.as_ref().map_err(Clone::clone).and_then(|r| listed(&r.stdout)) {
             Ok(n) => n,
             Err(e) => {
@@ -457,11 +461,22 @@ pub fn measure(tool: &dyn Tool, root: &Path, head: &str, base: &str, scratch: &P
             s.lines.push(format!("{ws}: the changed lines hold no function to mutate"));
             continue;
         }
-        let take = n.min(budget);
+        // A planned shard is whole or not measured (the plan's shard count is what bounds it); an unsharded run takes the cap's slice.
+        let take = if shard.is_some() {
+            if n > MAX_MUTANTS { 0 } else { n }
+        } else {
+            n.min(budget)
+        };
         if take == 0 {
             s.over_cap += n;
-            s.lines
-                .push(format!("{ws}: {n} mutants not measured (the cap of {MAX_MUTANTS} is used)"));
+            s.lines.push(format!(
+                "{ws}: {n} mutants not measured (the cap of {MAX_MUTANTS} {})",
+                if shard.is_some() {
+                    "per shard: plan more shards"
+                } else {
+                    "is used"
+                }
+            ));
             continue;
         }
         let out = scratch.join(format!("{slug}-out"));
@@ -479,7 +494,9 @@ pub fn measure(tool: &dyn Tool, root: &Path, head: &str, base: &str, scratch: &P
             "--output",
             &out.to_string_lossy(),
         ]);
-        if take < n {
+        if let Some(sh) = &shard_arg {
+            a.extend(args(&["--shard", sh]));
+        } else if take < n {
             // The first `take` in source order: shard 0 of `ceil(n / take)` slices of consecutive mutants (the default method).
             a.extend(args(&["--shard", &format!("0/{}", n.div_ceil(take))]));
         }
@@ -599,8 +616,17 @@ pub fn report(s: &Summary, mode: Mode, started: std::time::Instant) -> Report {
     }
 }
 
-/// `mutants gate --base <rev>`.
-pub fn command_gate(root: Option<PathBuf>, base: &str) -> Result<Report, CliError> {
+/// `k/n` of `--shard` (`k` below `n`, as cargo-mutants reads it).
+pub fn parse_shard(text: &str) -> Result<(u32, u32), String> {
+    let bad = || format!("--shard `{text}` is not k/n with k below n (for example 0/4)");
+    let (k, n) = text.split_once('/').ok_or_else(bad)?;
+    let (k, n): (u32, u32) = (k.trim().parse().map_err(|_| bad())?, n.trim().parse().map_err(|_| bad())?);
+    if n == 0 || k >= n { Err(bad()) } else { Ok((k, n)) }
+}
+
+/// `mutants gate --base <rev> [--shard k/n]`.
+pub fn command_gate(root: Option<PathBuf>, base: &str, shard: Option<&str>) -> Result<Report, CliError> {
+    let shard = shard.map(parse_shard).transpose().map_err(CliError::usage)?;
     let root = crate::gates::command::repo_root(root.as_deref())?;
     let started = std::time::Instant::now();
     let head = crate::plan_repo::git_text(&root, &["rev-parse", "HEAD"])
@@ -617,7 +643,7 @@ pub fn command_gate(root: Option<PathBuf>, base: &str) -> Result<Report, CliErro
         &crate::disk::record::Record::new(crate::disk::record::Kind::Scratch, "dev:mutants-gate"),
     )
     .map_err(|e| CliError::failure(format!("the scratch folder {} has no owner record: {e}", scratch.display())))?;
-    let summary = measure(&Real, &root, &head, base, &scratch, MODE);
+    let summary = measure(&Real, &root, &head, base, shard, &scratch, MODE);
     remove_scratch(&parent, &scratch);
     Ok(report(&summary, MODE, started))
 }
@@ -747,7 +773,7 @@ mod tests {
 
     fn measure_with(f: &Fake) -> Summary {
         let scratch = tempfile::tempdir().unwrap();
-        measure(f, scratch.path(), "headsha", "base", scratch.path(), Mode::ReportOnly)
+        measure(f, scratch.path(), "headsha", "base", None, scratch.path(), Mode::ReportOnly)
     }
 
     #[test]
@@ -941,6 +967,53 @@ mod tests {
             .find(|a| a.iter().any(|x| x == "--test-tool"))
             .expect("the mutants run");
         assert!(run.iter().any(|x| x == "--in-place"), "{run:?}");
+    }
+
+    #[test]
+    fn a_shard_is_k_of_n_with_k_below_n() {
+        assert_eq!(parse_shard("0/4"), Ok((0, 4)));
+        assert_eq!(parse_shard("3/4"), Ok((3, 4)));
+        for bad in ["4/4", "0/0", "a/4", "1", "-1/4", ""] {
+            assert!(parse_shard(bad).is_err(), "{bad}");
+        }
+    }
+
+    /// A planned shard goes to cargo-mutants whole (the listing and the run), is never sliced again, and a shard over the budget is
+    /// not measured, never a partial pass.
+    #[test]
+    fn a_planned_shard_is_passed_on_whole_and_one_over_the_budget_is_not_measured() {
+        let f = Fake::new();
+        let scratch = tempfile::tempdir().unwrap();
+        let s = measure(
+            &f,
+            scratch.path(),
+            "headsha",
+            "base",
+            Some((1, 4)),
+            scratch.path(),
+            Mode::ReportOnly,
+        );
+        let shards: Vec<Vec<String>> = f.calls().into_iter().filter(|a| a.iter().any(|x| x == "--shard")).collect();
+        assert_eq!(shards.len(), 2, "the listing and the run: {shards:?}");
+        assert!(
+            shards.iter().all(|a| a.windows(2).any(|w| w[0] == "--shard" && w[1] == "1/4")),
+            "{shards:?}"
+        );
+        assert_eq!(s.tested, 1);
+        let mut over = Fake::new();
+        over.listed = MAX_MUTANTS + 1;
+        let scratch = tempfile::tempdir().unwrap();
+        let s = measure(
+            &over,
+            scratch.path(),
+            "headsha",
+            "base",
+            Some((0, 2)),
+            scratch.path(),
+            Mode::ReportOnly,
+        );
+        assert_eq!((s.tested, s.over_cap), (0, MAX_MUTANTS + 1), "{:?}", s.lines);
+        assert!(s.lines.iter().any(|l| l.contains("plan more shards")), "{:?}", s.lines);
     }
 
     #[test]

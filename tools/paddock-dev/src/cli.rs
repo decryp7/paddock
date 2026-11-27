@@ -57,7 +57,7 @@ enum Command {
         #[command(subcommand)]
         command: audit::AuditCommand,
     },
-    /// Mutation-testing of the diff (cargo-mutants `--in-diff`), the member gate's `mutants` row: a function whose every mutation passes
+    /// Mutation-testing of the diff (cargo-mutants `--in-diff`), ci.yml's `mutants` job: a function whose every mutation passes
     /// the tests is a finding. Report-only for now (warnings, exit 0).
     Mutants {
         #[command(subcommand)]
@@ -521,6 +521,8 @@ enum SlotCommand {
 enum MutantsCommand {
     /// Run cargo-mutants over the Rust functions changed in `tools/paddock-dev` and `crates` since `--base`, after its positive control.
     Gate(MutantsArgs),
+    /// Print the pinned cargo-mutants version (`mutants_gate::PIN`): the one definition ci.yml installs it from.
+    Pin,
 }
 
 #[derive(Args)]
@@ -531,6 +533,9 @@ struct MutantsArgs {
     /// The commit the change is measured from (the merge base).
     #[arg(long)]
     base: String,
+    /// Test only this slice of the diff's mutants, `k/n` with k below n (cargo-mutants `--shard`): one leg of ci.yml's `mutants` matrix.
+    #[arg(long)]
+    shard: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -909,7 +914,10 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Audit { command } => audit::command(command),
         Command::Mutants {
             command: MutantsCommand::Gate(a),
-        } => mutants_gate::command_gate(a.root, &a.base),
+        } => mutants_gate::command_gate(a.root, &a.base, a.shard.as_deref()),
+        Command::Mutants {
+            command: MutantsCommand::Pin,
+        } => Ok(Report::new(serde_json::json!({"pin": mutants_gate::PIN}), mutants_gate::PIN)),
         Command::Locks {
             command: LocksCommand::Sync(a),
         } => locks::sync(a.root),

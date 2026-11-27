@@ -200,7 +200,6 @@ pub const ROW_SET: &[&str] = &[
     "gates-register",
     "locks-guard",
     "member-audits",
-    "mutants",
     "pitwall-deny",
     "pitwall-scripts",
 ];
@@ -446,7 +445,6 @@ fn plan_rows(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
     out.extend(commit_lint(change));
     out.push(member_audits(facts));
     out.extend(member_tests(plan, change, facts));
-    out.push(mutants(change, facts));
     let reaches_pitwall = plan["apps"].as_array().is_some_and(|a| a.iter().any(|x| x == "pitwall"));
     if reaches_pitwall && app_inactive(facts, "pitwall") {
         out.push(Planned::Skip {
@@ -796,56 +794,6 @@ fn member_tests(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
         out.push(dev_run(facts, g));
     }
     out
-}
-
-/// Mutation-testing of the diff (`./dev mutants gate`, user decision 127, 2026-11-27): `cargo mutants --in-diff` over the Rust functions
-/// changed in `tools/paddock-dev` and `crates/` since the merge base, to find a test or a guard that never reaches the code it claims to
-/// check ([`crate::mutants_gate`]). Only in the member gate (`--member-gate`): a developer's push skips it with the reason. It runs
-/// when a Rust source of those two workspaces changed (the files that can bring in its class, ER-41); an unknown base or a missing
-/// pinned cargo-mutants is not measured, never a pass (ER-33). Report-only (ER-41): `crate::mutants_gate::MODE` prints warnings and
-/// exits 0, and `docs/gates.toml` registers `row:mutants` with its review date. Heavy: one package test run per mutant, through throttle.
-/// Measured in docs/benchmarks.md, "Mutation testing of the diff in the member gate".
-fn mutants(change: &Change, facts: &Facts) -> Planned {
-    if !facts.member_gate {
-        return Planned::Skip {
-            id: "mutants".into(),
-            reason: "it runs in the member gate of `./dev merge check --gates` (`--member-gate`), not in a developer's push (mutation-testing costs a package test run per mutant)".into(),
-        };
-    }
-    let reaches = |f: &str| f.ends_with(".rs") && crate::mutants_gate::WORKSPACES.iter().any(|w| f.starts_with(&format!("{w}/")));
-    if !change.files.iter().any(|f| reaches(f)) {
-        return Planned::Skip {
-            id: "mutants".into(),
-            reason: "no Rust source of tools/paddock-dev or crates/ changed".into(),
-        };
-    }
-    let Some(base) = change.base.as_deref() else {
-        return Planned::NotMeasured {
-            id: "mutants".into(),
-            reason: "the commit the change is measured from is not known, so the diff to mutate cannot be made".into(),
-            next: "run the push gate with a base (`./dev check --pre-push --member-gate --base origin/main`)".into(),
-        };
-    };
-    dev_run(
-        facts,
-        Gate {
-            heavy: true,
-            need: Need::Tool("cargo-mutants".into()),
-            args: strs(&["mutants", "gate", "--base", base]),
-            ..gate(
-                "mutants".into(),
-                "",
-                "",
-                &[],
-                5,
-                format!(
-                    "read the MISSED lines above (the function and the mutation): add a test that fails on it, or delete the code; re-run `./dev mutants gate --base {base}`. Needs cargo-mutants {} (`cargo install cargo-mutants --version {} --locked`)",
-                    crate::mutants_gate::PIN,
-                    crate::mutants_gate::PIN
-                ),
-            )
-        },
-    )
 }
 
 /// The shared-crate dependency guard (`./dev locks guard`): the workspace hack, the resolved features of the watched crates and every
