@@ -366,15 +366,83 @@ fn approval_keys(approved: &BTreeMap<String, BTreeSet<String>>) -> Vec<String> {
         .collect()
 }
 
+/// The register of the user's approvals of growth of a shrink-only list: docs/gates.toml.
+const GROWTH_REGISTER: &str = "docs/gates.toml";
+
+/// The digest an approval of growth names: SHA-256 (hex) of the added approval keys, sorted and joined by a newline, so the approval
+/// covers exactly the additions the user saw (a count alone would approve any other additions of the same number).
+pub fn growth_digest(added: &[String]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut keys: Vec<&str> = added.iter().map(String::as_str).collect();
+    keys.sort_unstable();
+    Sha256::digest(keys.join("\n").as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// What the register of growth approvals says about the additions of the approval register.
+#[derive(Debug, PartialEq, Eq)]
+pub enum GrowthApproval {
+    /// An entry of the user names these additions exactly (count and digest).
+    Approved,
+    /// No entry for C155 (or the file cannot be read: a broken register approves nothing).
+    Missing,
+    /// An entry for C155 exists but does not match; the reason.
+    Mismatch(String),
+}
+
+/// The user's approval of `added` (the approvals new against the merge base), read from `gates` (the text of docs/gates.toml). The line is
+/// `[[register_growth]]` with `check = "C155"`, `by = "user"`, a `date`, the `count` of added approvals and their `digest`
+/// ([`growth_digest`]): it cannot approve additions the user did not see.
+pub fn growth_approval(gates: Option<&str>, added: &[String]) -> GrowthApproval {
+    let Some(table) = gates.and_then(|t| t.parse::<toml::Table>().ok()) else {
+        return GrowthApproval::Missing;
+    };
+    let entries: Vec<&toml::Table> = table
+        .get("register_growth")
+        .and_then(toml::Value::as_array)
+        .map(|a| a.iter().filter_map(toml::Value::as_table))
+        .into_iter()
+        .flatten()
+        .filter(|e| e.get("check").and_then(toml::Value::as_str) == Some("C155"))
+        .collect();
+    if entries.is_empty() {
+        return GrowthApproval::Missing;
+    }
+    let digest = growth_digest(added);
+    let mut why = Vec::new();
+    for e in entries {
+        let s = |k: &str| e.get(k).and_then(toml::Value::as_str).filter(|v| !v.trim().is_empty());
+        if s("by") != Some("user") {
+            why.push("an entry is not `by = \"user\"`".to_string());
+        } else if s("date").is_none() {
+            why.push("an entry has no `date`".to_string());
+        } else if e.get("count").and_then(toml::Value::as_integer) != i64::try_from(added.len()).ok() {
+            why.push(format!("an entry's `count` is not {}", added.len()));
+        } else if s("digest") != Some(digest.as_str()) {
+            why.push(format!("an entry's `digest` is not {digest}"));
+        } else {
+            return GrowthApproval::Approved;
+        }
+    }
+    GrowthApproval::Mismatch(why.join("; "))
+}
+
 /// The register is itself a shrink-only list (ER-46, final review P1-2): an approval the merge base's register lacks is growth, one
-/// unwaivable finding, so no agent can approve a removal by writing `by = "user"`. The user's approval of growth is recorded as for
-/// the other lists (the check's entry in docs/gates.toml names it with its date).
+/// unwaivable finding, so no agent can approve a removal by writing `by = "user"`. The user approves the growth with one line in
+/// docs/gates.toml ([`growth_approval`]) that names the date, the count and the digest of exactly the added approvals.
 fn register_growth(ctx: &Ctx, approved: &BTreeMap<String, BTreeSet<String>>) -> Option<Finding> {
     let current = approval_keys(approved);
     if current.is_empty() || ctx.is_in_memory() || !baseline::is_work_tree(ctx.root()) {
         return None;
     }
-    let entries_of = |text: &str| approvals(text).ok().map(|a| approval_keys(&a));
+    let old: std::cell::RefCell<BTreeSet<String>> = Default::default();
+    let entries_of = |text: &str| {
+        let keys = approvals(text).ok().map(|a| approval_keys(&a))?;
+        *old.borrow_mut() = keys.iter().cloned().collect();
+        Some(keys)
+    };
     let exact = |k: &String| k.clone();
     match baseline::growth(ctx.root(), &ctx.base_ref(), APPROVALS, &current, &entries_of, &exact, None) {
         Growth::Unmeasured(why) => Some(baseline::unmeasured_finding(
@@ -386,21 +454,37 @@ fn register_growth(ctx: &Ctx, approved: &BTreeMap<String, BTreeSet<String>>) -> 
             &why,
         )),
         Growth::Added { added: 0, .. } => None,
-        Growth::Added { base, added, .. } => Some(
-            Finding::error(
-                "C155",
-                RULE,
-                APPROVALS,
-                1,
-                format!(
-                    "[os-removal] the register of approvals grew: {added} approval{} not in {APPROVALS} at the merge base {}; only the user approves a removal",
-                    if added == 1 { " is" } else { "s are" },
-                    &base[..base.len().min(9)]
-                ),
-                "Remove the added approvals, or record the user's approval of them (ER-46; the check's entry in docs/gates.toml).",
+        Growth::Added { base, added, .. } => {
+            let old = old.into_inner();
+            let new: Vec<String> = current.iter().filter(|k| !old.contains(*k)).cloned().collect();
+            let digest = growth_digest(&new);
+            let gates = ctx.read(GROWTH_REGISTER);
+            let detail = match growth_approval(gates.as_deref().map(String::as_str), &new) {
+                GrowthApproval::Approved => return None,
+                GrowthApproval::Missing => String::new(),
+                GrowthApproval::Mismatch(why) => {
+                    format!(" ({GROWTH_REGISTER} has a [[register_growth]] entry for C155 that does not match: {why})")
+                }
+            };
+            Some(
+                Finding::error(
+                    "C155",
+                    RULE,
+                    APPROVALS,
+                    1,
+                    format!(
+                        "[os-removal] the register of approvals grew: {added} approval{} not in {APPROVALS} at the merge base {}; only the user approves a removal{detail}",
+                        if added == 1 { " is" } else { "s are" },
+                        &base[..base.len().min(9)]
+                    ),
+                    format!(
+                        "Remove the added approvals, or the user adds to {GROWTH_REGISTER}: [[register_growth]] check = \"C155\", by = \"user\", date = \"<day>\", count = {}, digest = \"{digest}\" (ER-46).",
+                        new.len()
+                    ),
+                )
+                .unwaivable(),
             )
-            .unwaivable(),
-        ),
+        }
     }
 }
 
@@ -593,5 +677,64 @@ mod tests {
         );
         assert!(!known("other::", &d));
         assert!(known("p", &d) && !known("q", &d));
+    }
+
+    fn gates_with(count: usize, digest: &str, by: &str) -> String {
+        format!(
+            "version = 1\n[[register_growth]]\ncheck = \"C155\"\nby = \"{by}\"\ndate = \"2026-11-27\"\ncount = {count}\ndigest = \"{digest}\"\n"
+        )
+    }
+
+    fn two() -> Vec<String> {
+        vec!["tools/x.json skip b::".to_string(), "tools/x.json skip a::".to_string()]
+    }
+
+    #[test]
+    fn growth_with_the_users_matching_approval_is_approved_whatever_the_order_of_the_additions() {
+        let digest = growth_digest(&two());
+        assert_eq!(
+            growth_approval(Some(&gates_with(2, &digest, "user")), &two()),
+            GrowthApproval::Approved
+        );
+    }
+
+    #[test]
+    fn growth_without_an_approval_is_missing_so_the_finding_stands() {
+        assert_eq!(growth_approval(None, &two()), GrowthApproval::Missing);
+        assert_eq!(growth_approval(Some("version = 1\n"), &two()), GrowthApproval::Missing);
+        assert_eq!(
+            growth_approval(Some("not toml ["), &two()),
+            GrowthApproval::Missing,
+            "a broken register approves nothing"
+        );
+    }
+
+    #[test]
+    fn an_approval_that_does_not_match_the_additions_or_is_not_the_users_approves_nothing() {
+        let digest = growth_digest(&two());
+        // One more addition than the user saw (same count is not enough: the digest differs too).
+        let mut more = two();
+        more.push("tools/x.json skip c::".into());
+        assert!(matches!(
+            growth_approval(Some(&gates_with(2, &digest, "user")), &more),
+            GrowthApproval::Mismatch(_)
+        ));
+        // The same count with another content.
+        let mut other = two();
+        other[0] = "tools/x.json skip z::".into();
+        assert!(matches!(
+            growth_approval(Some(&gates_with(2, &digest, "user")), &other),
+            GrowthApproval::Mismatch(_)
+        ));
+        // A wrong count with the right digest.
+        assert!(matches!(
+            growth_approval(Some(&gates_with(3, &digest, "user")), &two()),
+            GrowthApproval::Mismatch(_)
+        ));
+        // Not the user's.
+        assert!(matches!(
+            growth_approval(Some(&gates_with(2, &digest, "coordinator")), &two()),
+            GrowthApproval::Mismatch(_)
+        ));
     }
 }
