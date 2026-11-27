@@ -66,6 +66,52 @@ pub fn merge_member(subject: &str, trailers: &str) -> MergeMember {
     }
 }
 
+/// The member a ref names: the branch (`origin/` dropped), and for `sync/<member>/<hex>` the member's own branch and the ref.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Named {
+    /// The member's branch name.
+    pub branch: String,
+    /// The sync ref, when one was given.
+    pub sync_ref: Option<String>,
+}
+
+/// What `arg` (a branch, a remote branch or a `sync/<member>/<hex>` ref) names.
+pub fn named(arg: &str) -> Named {
+    let name = arg.strip_prefix("origin/").unwrap_or(arg);
+    if let Some(rest) = name.strip_prefix("sync/")
+        && let Some((member, sha)) = rest.rsplit_once('/')
+        && !member.is_empty()
+        && sha.len() >= 7
+        && sha.chars().all(|c| c.is_ascii_hexdigit())
+    {
+        return Named {
+            branch: member.to_string(),
+            sync_ref: Some(name.to_string()),
+        };
+    }
+    Named {
+        branch: name.to_string(),
+        sync_ref: None,
+    }
+}
+
+/// The trailer lines every tool-made train merge carries (`merge member`, the trial's merge, the queue's): the writer side of
+/// [`merge_member`], so they cannot drift.
+pub fn member_lines(who: &Named, sha: &str, relands: &[String]) -> Vec<String> {
+    let mut lines = vec![format!("{MEMBER}: {}", who.branch)];
+    if let Some(r) = &who.sync_ref {
+        lines.push(format!("{SYNC_REF}: {r}"));
+    }
+    lines.push(format!("{SYNC_SHA}: {sha}"));
+    lines.extend(relands.iter().map(|r| format!("{RELAND}: {r}")));
+    lines
+}
+
+/// `subject`, a blank line, then `lines` as one trailer block, ending in a newline.
+pub fn with_block(subject: &str, lines: &[String]) -> String {
+    format!("{subject}\n\n{}\n", lines.join("\n"))
+}
+
 /// The branch a merge commit's subject names: `Merge branch 'x'`, `... merge x into train N`, `Merge x (hex) into trial of y`;
 /// a trailing `(hex)` is dropped; else the subject itself. The fallback of [`merge_member`], for merges made by hand.
 pub(super) fn branch_of(subject: &str) -> String {
@@ -147,6 +193,45 @@ mod tests {
         assert_eq!(merge_member("x", "paddock-member: feat/y\n").branch, "feat/y");
         // A trailer beats a subject that names another branch.
         assert_eq!(merge_member("Merge branch 'feat/other' into train", t).branch, "feat/x");
+    }
+
+    #[test]
+    fn a_sync_ref_names_its_member_and_a_branch_names_itself() {
+        let w = named("sync/feat/x/abc123456");
+        assert_eq!(
+            (w.branch.as_str(), w.sync_ref.as_deref()),
+            ("feat/x", Some("sync/feat/x/abc123456"))
+        );
+        assert_eq!(
+            named("origin/sync/feat/x/abc123456").sync_ref.as_deref(),
+            Some("sync/feat/x/abc123456")
+        );
+        assert_eq!(
+            named("origin/feat/x"),
+            Named {
+                branch: "feat/x".into(),
+                sync_ref: None
+            }
+        );
+        // Not hex: a branch that happens to start with sync/.
+        assert_eq!(named("sync/feat/x").sync_ref, None);
+    }
+
+    /// The writer and the reader agree: what `member_lines` writes, `merge_member` reads back from one trailer block.
+    #[test]
+    fn what_the_writer_makes_the_one_reader_reads_back() {
+        let who = named("sync/feat/x/abc123456");
+        let mut lines = member_lines(&who, "abc1234567890", &["r1".into()]);
+        lines.push("Reverted: a.txt: why".into());
+        let m = with_block("Merge feat/x into train/t", &lines);
+        assert_eq!(m.lines().next(), Some("Merge feat/x into train/t"));
+        let block = m.split_once("\n\n").unwrap().1;
+        assert!(!block.contains("\n\n"), "one block: {block}");
+        let read = merge_member("Merge feat/x into train/t", block);
+        assert_eq!(read.branch, "feat/x");
+        assert_eq!(read.sync_ref.as_deref(), Some("sync/feat/x/abc123456"));
+        assert_eq!(read.sync_sha.as_deref(), Some("abc1234567890"));
+        assert_eq!(read.relands, ["r1"]);
     }
 
     #[test]

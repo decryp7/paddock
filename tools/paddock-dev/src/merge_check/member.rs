@@ -33,44 +33,6 @@ pub struct Options<'a> {
     pub old_base_anyway: Option<&'a str>,
 }
 
-/// The member a ref names: the branch (`origin/` dropped), and for `sync/<member>/<hex>` the member's own branch and the ref.
-#[derive(Debug, PartialEq, Eq)]
-struct Named {
-    branch: String,
-    sync_ref: Option<String>,
-}
-
-fn named(arg: &str) -> Named {
-    let name = arg.strip_prefix("origin/").unwrap_or(arg);
-    if let Some(rest) = name.strip_prefix("sync/")
-        && let Some((member, sha)) = rest.rsplit_once('/')
-        && !member.is_empty()
-        && sha.len() >= 7
-        && sha.chars().all(|c| c.is_ascii_hexdigit())
-    {
-        return Named {
-            branch: member.to_string(),
-            sync_ref: Some(name.to_string()),
-        };
-    }
-    Named {
-        branch: name.to_string(),
-        sync_ref: None,
-    }
-}
-
-/// The message of the merge: the fixed subject, then one trailer block.
-fn message(train: &str, who: &Named, sha: &str, relands: &[String], reverted: &[String]) -> String {
-    let mut lines = vec![format!("{}: {}", trailers::MEMBER, who.branch)];
-    if let Some(r) = &who.sync_ref {
-        lines.push(format!("{}: {r}", trailers::SYNC_REF));
-    }
-    lines.push(format!("{}: {sha}", trailers::SYNC_SHA));
-    lines.extend(relands.iter().map(|r| format!("{}: {r}", trailers::RELAND)));
-    lines.extend(reverted.iter().cloned());
-    format!("Merge {} into {train}\n\n{}\n", who.branch, lines.join("\n"))
-}
-
 /// Merges the member into the train in HEAD, then checks the merge.
 pub fn command(root: Option<&Path>, member: &str, opts: &Options) -> Result<Report, CliError> {
     if opts.old_base_anyway.is_some_and(|r| r.trim().is_empty()) {
@@ -117,7 +79,7 @@ pub fn command(root: Option<&Path>, member: &str, opts: &Options) -> Result<Repo
             )
         })?,
     };
-    let who = named(member);
+    let who = trailers::named(member);
     let mut relands = Vec::new();
     let mut reland_lines = Vec::new();
     for given in opts.relands {
@@ -179,7 +141,9 @@ pub fn command(root: Option<&Path>, member: &str, opts: &Options) -> Result<Repo
         }
     }
     let before = at("HEAD")?.unwrap_or_default();
-    let text = message(&train, &who, &sha, &relands, &reverted);
+    let mut lines = trailers::member_lines(&who, &sha, &relands);
+    lines.extend(reverted.iter().cloned());
+    let text = trailers::with_block(&format!("Merge {} into {train}", who.branch), &lines);
     let file = message_file(&git, &root).map_err(|e| step(e, "check that the repository's git folder is writable"))?;
     std::fs::write(&file, &text).map_err(|e| {
         step(
@@ -253,47 +217,4 @@ fn message_file(git: &Git, root: &Path) -> Result<PathBuf, String> {
     let p = git.text(&["rev-parse", "--git-path", "paddock-merge-member-msg"])?;
     let p = PathBuf::from(p.trim());
     Ok(if p.is_absolute() { p } else { root.join(p) })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_sync_ref_names_its_member_and_a_branch_names_itself() {
-        assert_eq!(
-            named("sync/feat/x/abc123456"),
-            Named {
-                branch: "feat/x".into(),
-                sync_ref: Some("sync/feat/x/abc123456".into())
-            }
-        );
-        assert_eq!(
-            named("origin/sync/feat/x/abc123456").sync_ref.as_deref(),
-            Some("sync/feat/x/abc123456")
-        );
-        assert_eq!(
-            named("origin/feat/x"),
-            Named {
-                branch: "feat/x".into(),
-                sync_ref: None
-            }
-        );
-        // Not hex: a branch that happens to start with sync/.
-        assert_eq!(named("sync/feat/x").sync_ref, None);
-    }
-
-    #[test]
-    fn the_message_is_one_subject_and_one_trailer_block_that_the_one_reader_reads_back() {
-        let who = named("sync/feat/x/abc123456");
-        let m = message("train/t", &who, "abc1234567890", &["r1".into()], &["Reverted: a.txt: why".into()]);
-        assert_eq!(m.lines().next(), Some("Merge feat/x into train/t"));
-        let block = m.split_once("\n\n").unwrap().1;
-        assert!(!block.contains("\n\n"), "one block: {block}");
-        let read = trailers::merge_member(m.lines().next().unwrap(), block);
-        assert_eq!(read.branch, "feat/x");
-        assert_eq!(read.sync_ref.as_deref(), Some("sync/feat/x/abc123456"));
-        assert_eq!(read.sync_sha.as_deref(), Some("abc1234567890"));
-        assert_eq!(read.relands, ["r1"]);
-    }
 }

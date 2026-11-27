@@ -52,7 +52,7 @@ mod stale_base;
 mod static_rows;
 pub mod sync_member;
 mod testnames;
-mod trailers;
+pub mod trailers;
 pub mod trial_dispatch;
 mod whole_file;
 

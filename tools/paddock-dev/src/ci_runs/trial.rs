@@ -155,9 +155,13 @@ pub fn prepare(
         return Ok(Outcome::Conflict { target, files });
     }
     let tree = out.lines().next().unwrap_or("").trim().to_string();
-    let message = format!(
-        "Merge {branch} ({}) into trial of {target}\n",
-        branch_sha.get(..9).unwrap_or(&branch_sha)
+    // The trial's merge carries the same trailers as a real one (`merge member`), written by the one helper.
+    let message = crate::merge_check::trailers::with_block(
+        &format!(
+            "Merge {branch} ({}) into trial of {target}",
+            branch_sha.get(..9).unwrap_or(&branch_sha)
+        ),
+        &crate::merge_check::trailers::member_lines(&crate::merge_check::trailers::named(branch), &branch_sha, &[]),
     );
     let head = git(
         g,
@@ -497,6 +501,29 @@ mod tests {
 
     /// `--onto` names any pushed branch (a trial of an experiment on another experiment): it is fetched, not only main and
     /// `train/*` (the trial clone never had it, so the merge target did not resolve).
+    /// The trial's merge carries the trailers a real train merge has, so the readers see the member without its subject.
+    #[test]
+    fn the_trial_merge_carries_the_member_trailers() {
+        let w = world();
+        commit(&w, "feat/a", "a.txt", "a", "main");
+        let g = open(&w);
+        let seen = std::cell::RefCell::new(String::new());
+        let record = |root: &Path, head: &str| -> Result<(), String> {
+            *seen.borrow_mut() = git_in(root, &["show", "-s", "--format=%s%x00%(trailers:only,unfold)", head]);
+            Ok(())
+        };
+        let Outcome::Ready { .. } = prepare(&g, "feat/a", None, &record).unwrap() else {
+            panic!()
+        };
+        let shown = seen.borrow().clone();
+        let (subject, block) = shown.split_once('\0').unwrap();
+        let read = crate::merge_check::trailers::merge_member("whatever", block);
+        assert!(
+            read.from_trailer && read.branch == "feat/a" && read.sync_sha.is_some(),
+            "{subject}: {block}"
+        );
+    }
+
     #[test]
     fn onto_a_branch_that_is_neither_main_nor_a_train_fetches_it() {
         let w = world();
