@@ -19,6 +19,7 @@
 //! one layout above. Nothing here fails the job: a store that cannot be written is one `::warning::` and the Actions cache stays
 //! the fallback.
 
+use crate::safe_remove;
 use clap::{Args, Subcommand};
 use std::fs::{self, File};
 use std::io::Write;
@@ -168,6 +169,13 @@ impl Drop for WriterLock {
     }
 }
 
+/// Removes `target` below `store` through the one deleting path of `tools/` (`safe_remove`, tests/it/safe_remove_lint.rs): strictly
+/// under the store, no link on the way. True when it is gone.
+fn rm(store: &Path, target: &Path) -> bool {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    safe_remove::remove_in_mount(store, target, home.as_deref()).is_ok()
+}
+
 fn copy_entry(from: &Path, to: &Path) -> std::io::Result<()> {
     fs::create_dir(to)?;
     for e in fs::read_dir(from)? {
@@ -209,9 +217,9 @@ pub fn publish(store: &Path, hash: &str, from: &Path, replace: bool, limits: Lim
         return Ok(Published::Present);
     }
     let tmp = store.join(format!(".tmp-{hash}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&tmp);
+    rm(store, &tmp);
     copy_entry(from, &tmp).map_err(|e| {
-        let _ = fs::remove_dir_all(&tmp);
+        rm(store, &tmp);
         format!("cannot copy the tool into {}: {e}", tmp.display())
     })?;
     let gone = store.join(format!(".gone-{hash}-{}", std::process::id()));
@@ -220,10 +228,10 @@ pub fn publish(store: &Path, hash: &str, from: &Path, replace: bool, limits: Lim
         fs::rename(&entry, &gone).map_err(|e| format!("cannot move the old entry {} away: {e}", entry.display()))?;
     }
     fs::rename(&tmp, &entry).map_err(|e| {
-        let _ = fs::remove_dir_all(&tmp);
+        rm(store, &tmp);
         format!("cannot put the entry {} in place: {e}", entry.display())
     })?;
-    let _ = fs::remove_dir_all(&gone);
+    rm(store, &gone);
     Ok(Published::Written(evict(store, &entry, limits)))
 }
 
@@ -241,7 +249,7 @@ fn evict(store: &Path, keep: &Path, limits: Limits) -> Vec<String> {
         if name.starts_with(".tmp-") || name.starts_with(".gone-") {
             // A temp folder of a writer that is gone (this command is the only writer, under the lock, so none is live).
             if SystemTime::now().duration_since(when).is_ok_and(|age| age >= STALE_TEMP) {
-                let _ = fs::remove_dir_all(e.path());
+                rm(store, &e.path());
             }
         } else if is_hash(&name) {
             entries.push((when, name, size_of(&e.path()).unwrap_or(0)));
@@ -254,7 +262,7 @@ fn evict(store: &Path, keep: &Path, limits: Limits) -> Vec<String> {
     for (_, name, size) in entries {
         count += 1;
         bytes += size;
-        if name != keep_name && (count > limits.entries || bytes > limits.bytes) && fs::remove_dir_all(store.join(&name)).is_ok() {
+        if name != keep_name && (count > limits.entries || bytes > limits.bytes) && rm(store, &store.join(&name)) {
             count -= 1;
             bytes -= size;
             evicted.push(name);
@@ -327,8 +335,9 @@ mod tests {
     const H3: &str = "3333333333333333333333333333333333333333";
 
     fn tool(dir: &Path, bytes: &[u8]) -> PathBuf {
-        let d = dir.join("home-bin");
-        let _ = fs::remove_dir_all(&d);
+        // A new folder per call (the temp folder of the test goes with it): nothing here deletes.
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let d = dir.join(format!("home-bin-{}", N.fetch_add(1, std::sync::atomic::Ordering::SeqCst)));
         fs::create_dir_all(&d).unwrap();
         fs::write(d.join("paddock-dev-test"), bytes).unwrap();
         d
