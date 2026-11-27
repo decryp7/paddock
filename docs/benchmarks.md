@@ -3197,3 +3197,44 @@ heavy generator is named `deferred` in the merge check (never a pass, ER-33) and
 the union of every merge's; `--heavy-generators` runs them per merge. Fast generators still run per merge. Also seen: the per-merge
 `ci-run-golden` was STALE on a mid-train merge that a later member fixed, so the per-merge run named a member that was not at fault.
 Not measured: the final gen check on a whole train (it runs what the per-merge steps ran before, once).
+
+
+## Push gate hang limits of the long rows (2026-11-27, fix/gate-row-stall)
+
+ER-12, ER-36, a Mac with 14 cores. When the local sccache server hung on 2026-11-27 a gate row sat idle until the 60-minute row cap: the rows had
+`--queue-stall` and `--run-max` and no `throttle --stall`. **Measured** (`step-history.jsonl` of this checkout, passed steps only; `max_gap_secs` is
+the longest time between two progress events, so an upper bound of the time with no output and no CPU that `--stall` counts): longest gap
+clippy 230.1 s (844 steps), clippy-windows 291.0 s (352), conformance-tests 294.8 s (592), member-audits 113.1 s (201), tests 291.5 s (123).
+**Change:** each of these rows runs under `throttle --stall S`, S at least three times the longest gap, in 5-minute steps: 900 s, 900 s, 900 s, 600 s,
+900 s (`HANG_LIMITS` in `pre_push/budget.rs`, which holds the measured gaps beside them). A hung row ends with exit 81 and reads "not measured: hung (no
+output, no CPU for S s)" with the next step, never a pass; a hung row now costs 10 to 15 minutes, not 60. Not measured: a real sccache hang through the
+gate (the stand-in test exercises the reading of exit 81; `throttle`'s own tests end a silent idle command and leave a silent busy one alone).
+
+## paddock-dev host legs: OS-independent areas leave Windows and macOS (expected saving, 2026-11-27, ci/paddock-dev-os-scope)
+
+Expected, not measured: nothing was run on a host. **Source:** the per-area test seconds of run 9212 (jobs 52148 macOS, 52162 Windows) in the
+block "paddock-dev test time by area" of docs/benchmarks.md on branch docs/paddock-dev-test-split (ADR NEW-paddock-dev-test-split). Decision 114
+(user, 2026-11-27): the host legs run only OS-specific tests, so `tools/paddock-dev/paddock.ci.json` skips `merge_check::` (except `merge_check::git::`),
+`ci_runs::` (except `dispatch_guards::`; `reservation::` stays macOS only), `ci_run::`, the planner's model and readers and `repo_model::hash::` and
+`replay::` from both hosts. **Windows:** merge_check 545 s and ci_runs plus ci_run 228 s of 1,191 s summed per-test seconds (65%) leave; the kept
+`merge_check::git::` and `ci_runs::dispatch_guards::` tests are not separated in the source, so the saving is at most 773 s (about 180 s of the
+282 s test step in 9212 if the share holds), plus part of repo_model 53 s and the other skipped areas (not separated in the source).
+**macOS:** merge_check 88 s and ci_runs plus ci_run 86 s of 817 s (21%) at most (the kept git and reservation tests are inside these figures); about
+75 s of the 360 s test step. **Linux** runs everything, unchanged. Limits: per-test seconds sum the threads; the wall share is the sum share. The
+real figure is read from the first run after the change.
+
+## paddock-dev test time by area and churn per train (2026-11-27, docs/paddock-dev-test-split, base e60b56d27)
+
+Read-only, from CI logs (no test was run). **Source:** nextest's per-test `PASS [ Ns]` lines of the paddock-dev jobs of runs 9212 (jobs
+52161 Linux, 52148 macOS, 52162 Windows) and 9180 (51687, 51674, 51688), fetched through the Gitea API; history from `git log
+--first-parent --diff-merges=first-parent origin/main`. **Test step against job:** 9212 Linux 302 s of 11.8 min (the `./dev` tool cache
+missed: 4.7 min), macOS 360 s of 8.1 min, Windows 282 s of 10.5 min; 9180: 295 s of 8.4, 329 s of 5.8, 458 s of 8.9 min. **Sum of per-test
+seconds** (9212): Linux 861 s over 2,702 tests, macOS 817 s over 2,379, Windows 1,191 s over 1,322. **Whole-repository classes** (ADR 0121
+`graph_`, `tree_`, `live_`): Linux 480 s (56%; 9180: 58%), macOS 143 s (17%), Windows 146 s (12%); 450 of Linux's 480 s are in `tests/it`.
+**Largest areas:** Linux it/tree 159 s, it/repo_graph_net 85 s, pre_push (unit and it) 129 s, it/host_steps 68 s, it/wrapper 60 s;
+macOS pre_push 154 s, merge_check 88 s, ci_runs and ci_run 86 s, it/wrapper 82 s; Windows merge_check 545 s (46%), ci_runs and ci_run
+228 s. **Module graph:** 45 of 66 top-level `src/` modules (125,963 of 140,334 lines) form one strongly connected component of `crate::`
+references; about 65 items cross a five-layer sketch upwards. **Churn:** 20 of 20 trains in two weeks changed tools/paddock-dev; the 15
+trains of 2026-11-26/27 touched 16 areas on average, and 11 of 15 changed a layer every area uses. **Replay** (share of today's test seconds
+each option would have run; whole-repository classes keyed on the whole tree): trains 93 to 98% for every option, members 55 to 78% against
+82% today. Limits: the layering is a sketch; per-test seconds sum the threads. Quoted by ADR NEW-paddock-dev-test-split.

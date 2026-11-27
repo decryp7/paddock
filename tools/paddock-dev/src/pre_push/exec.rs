@@ -2,7 +2,7 @@
 //! each bounded by its own cap on its own run time and its wait for the heavy slot by the queue's progress (no total shared by the
 //! rows, 2026-11-21), and stopped when the person stops the push.
 
-use super::budget::{Slot, Timing, parse_throttle_timing, with_agent_name, with_throttle_flags};
+use super::budget::{Slot, Timing, hang_limit, parse_throttle_timing, with_agent_name, with_throttle_flags};
 use super::gates::{Gate, Need, Planned};
 use super::progress::{Counter, Progress, with_cargo_json, without_json};
 use super::stacks;
@@ -25,6 +25,9 @@ pub const ROW_CAP: Duration = Duration::from_secs(60 * 60);
 
 /// The name the summary gives the row cap as the guard that ended a step.
 pub const ROW_CAP_GUARD: &str = "row cap";
+
+/// The name the summary gives `throttle --stall` as the guard that ended a step.
+pub const HANG_GUARD: &str = "hang detector";
 
 /// How long after [`ROW_CAP`] the outer limits of a step (heavy's `--run-max`, the process timeout) still wait: the cap is enforced by
 /// the executor's monitor, which logs the stacks before it ends the tree, so these are only the backstop if the monitor is gone.
@@ -82,6 +85,8 @@ pub enum Ending {
     QueueLimit,
     /// It wrote more output than the cap allows.
     OutputCap,
+    /// `throttle --stall` ended it: no output and no CPU for the row's hang limit ([`super::budget::hang_limit`]).
+    Hung,
 }
 
 impl Ending {
@@ -96,6 +101,7 @@ impl Ending {
         match self {
             Ending::Stuck { guard } => Some(guard.clone()),
             Ending::RowCap => Some(ROW_CAP_GUARD.to_string()),
+            Ending::Hung => Some(HANG_GUARD.to_string()),
             _ => None,
         }
     }
@@ -391,6 +397,12 @@ fn own_run_limit(_gate: &Gate) -> Duration {
     ROW_CAP + CAP_GRACE
 }
 
+/// How a row `throttle --stall` ended reads: `hung (no output, no CPU for S s)`, S the hang limit of the row's kind.
+fn hung_how(id: &str) -> String {
+    let secs = hang_limit(first_word(id)).map_or(0, |d| d.as_secs());
+    format!("hung (no output, no CPU for {secs} s)")
+}
+
 /// For a run `throttle` ended at its run limit (the backstop beyond the row cap), with the run time it had (empty for any other ending).
 fn run_limit_note(done: &Done) -> String {
     match (done.ending == Ending::RowCap, done.timing) {
@@ -463,6 +475,20 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
             ),
             format!(
                 "read the log, then re-run it alone: {} (a step the watchdog stops is hung or deadlocked, not a finding in your change); an agent reports it (ER-33)",
+                gate.rerun()
+            ),
+        )
+        .ended_by_guard(done.ended_by()),
+        // `throttle --stall` ended it: nothing moved and nothing computed for the row's hang limit. Not measured, never a pass.
+        Ok(done) if done.ending == Ending::Hung => Row::not_measured(
+            format!(
+                "{}: {}{}",
+                gate.rerun(),
+                done.how,
+                done.log.as_ref().map_or(String::new(), |l| format!("; output so far in {l}"))
+            ),
+            format!(
+                "read the log, check the local sccache server (`./dev sccache env`; a hung server stalls every compile) and other agents' load, then re-run it alone: {} (it is hung, not a finding in your change); an agent reports it (ER-33)",
                 gate.rerun()
             ),
         )
@@ -1041,7 +1067,7 @@ impl RealExec {
     /// Whether this heavy gate goes through the `throttle` of tools/throttle (the one with `--queue-stall`, `--run-max` and its log lines).
     fn runs_through_our_heavy(&self, limits: Limits) -> bool {
         let prefix = self.heavy_command().unwrap_or_default();
-        with_throttle_flags(&prefix, false, limits.stall, ROW_CAP)
+        with_throttle_flags(&prefix, false, limits.stall, ROW_CAP, None)
             .iter()
             .any(|a| a == "--run-max")
     }
@@ -1053,7 +1079,13 @@ impl RealExec {
         let run_max = own;
         let heavy = if gate.heavy {
             with_agent_name(
-                &with_throttle_flags(&self.heavy_command().unwrap_or_default(), self.priority, limits.stall, run_max),
+                &with_throttle_flags(
+                    &self.heavy_command().unwrap_or_default(),
+                    self.priority,
+                    limits.stall,
+                    run_max,
+                    hang_limit(first_word(&gate.id)),
+                ),
                 name,
             )
         } else {
@@ -1332,6 +1364,11 @@ impl Exec for RealExec {
                 "exit 79" if timing.is_some() => {
                     ran.how = format!("no progress of the queue for {} s", limits.stall.as_secs());
                     ending = Ending::QueueLimit;
+                }
+                // 81: `--stall` found the command silent and idle for its hang limit and ended it with everything it started.
+                "exit 81" if timing.is_some() && hang_limit(first_word(&gate.id)).is_some() => {
+                    ran.how = hung_how(&gate.id);
+                    ending = Ending::Hung;
                 }
                 "exit 80" if timing.is_some() => {
                     ran.how = format!("timed out after {} s of running", timing.map_or(0.0, |t| t.ran).round());
@@ -2495,6 +2532,43 @@ exit $rc
             assert!(calls.contains("run --high --queue-stall 1800 --run-max "), "{calls}");
         }
 
+        /// A long row carries throttle's hang detector with its measured limit; a short row does not.
+        #[test]
+        fn a_long_row_carries_the_hang_detector_and_a_short_one_does_not() {
+            let d = tempfile::tempdir().unwrap();
+            let ex = repo_with_fake_cargo(d.path(), true);
+            for id in ["clippy a", "tests a", "conformance-tests", "member-audits", "clippy-windows a"] {
+                let g = gate(id, "echo ran");
+                assert!(decide(&g, &ex, &test_subject()).kind() == Kind::Passed);
+            }
+            let g = gate("fmt a", "echo ran");
+            assert!(decide(&g, &ex, &test_subject()).kind() == Kind::Passed);
+            let calls = std::fs::read_to_string(d.path().join("heavy-calls")).unwrap();
+            let lines: Vec<&str> = calls.lines().collect();
+            for l in &lines[..5] {
+                assert!(l.contains(" --stall "), "{l}");
+            }
+            assert!(!lines[5].contains("--stall"), "{}", lines[5]);
+        }
+
+        /// A row `throttle` ended as hung (exit 81) is not measured, says how long nothing moved and what to do; never a pass or a finding.
+        #[test]
+        fn a_row_throttle_ended_as_hung_is_not_measured_and_says_so() {
+            let d = tempfile::tempdir().unwrap();
+            let ex = repo_with_fake_cargo(d.path(), true);
+            let g = gate("tests a", "echo 'throttle: pre-push timing queued 0.5 s, ran 910.0 s'; exit 81");
+            let r = decide(&g, &ex, &test_subject());
+            assert_eq!(r.kind(), Kind::NotMeasured, "{r:?}");
+            assert!(r.reason().contains("hung (no output, no CPU for 900 s)"), "{}", r.reason());
+            assert!(r.next.contains("sccache"), "{}", r.next);
+            assert_eq!(r.ended_by.as_deref(), Some("hang detector"));
+            // A row that ran busy to a normal end (or failed with another code) is judged by its own exit, never as hung.
+            let busy = gate("tests a", "echo 'throttle: pre-push timing queued 0.5 s, ran 910.0 s'; exit 0");
+            assert_eq!(decide(&busy, &ex, &test_subject()).kind(), Kind::Passed);
+            let failed = gate("tests a", "echo 'throttle: pre-push timing queued 0.5 s, ran 9.0 s'; exit 1");
+            assert_eq!(decide(&failed, &ex, &test_subject()).kind(), Kind::Failed);
+        }
+
         #[test]
         fn a_heavy_built_from_the_tree_carries_the_gate_and_is_cached_under_its_hash() {
             let d = tempfile::tempdir().unwrap();
@@ -2812,6 +2886,7 @@ exit $rc
                 (Ending::Cancelled, true, None),
                 (Ending::QueueLimit, false, None),
                 (Ending::OutputCap, true, None),
+                (Ending::Hung, true, Some("hang detector")),
             ];
             for (e, cut, guard) in all {
                 assert_eq!(e.cut_short(), cut, "{e:?}");

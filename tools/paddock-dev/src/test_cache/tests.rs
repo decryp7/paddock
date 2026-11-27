@@ -45,6 +45,15 @@ fn the_shipped_file_parses_and_holds_its_invariants() {
         "a paused nightly needs a usable age limit"
     );
     assert!(c.switch.green_runs.iter().all(|r| *r > 0), "a run id is positive");
+    // a never-cached crate entry names a crate of the tree (a typo would silently cache it); which entries there are is not asserted
+    for n in &c.no_test_cache {
+        if let Some(dir) = n.strip_prefix("crate:") {
+            assert!(
+                root.join(dir).join("Cargo.toml").is_file(),
+                "no_test_cache entry {n} names no crate"
+            );
+        }
+    }
     // the text a tool edits stays editable: the line `with_green_run` rewrites is there
     let text = std::fs::read_to_string(root.join(super::config::FILE)).unwrap();
     assert!(
@@ -383,6 +392,36 @@ fn an_unreachable_store_makes_everything_run() {
     let (d, notice) = decide(&[cand("crates/a", "h"), cand("crates/b", "h")], &cfg(), &class, "", &Down, NOW, OK);
     assert!(d.iter().all(|x| matches!(x, Decision::Run(Why::Off(_)))));
     assert!(notice.unwrap().contains("refused"));
+}
+
+/// Decision 113 (user, 2026-11-27): paddock-dev's whole-repository tests (tree_*, graph_*, live_*) read the whole tree, which its node
+/// key does not cover, so `docs/test-cache.toml` lists it in `no_test_cache` and it is never offered for reuse even when a record of
+/// the same key exists. The settings are the tests' copy with that entry: the shipped file's list is not asserted (see [`CFG`]), only
+/// that each of its crate entries names a real crate ([`the_shipped_file_parses_and_holds_its_invariants`]). Nothing runs
+/// `config::removed` against the merge base yet, so taking the entry out of the shipped file is not caught by a gate today.
+#[test]
+fn a_never_cached_paddock_dev_is_not_offered_for_reuse_but_other_targets_still_are() {
+    let (_d, s) = scratch();
+    let class = RunnerClass::here();
+    let dev = Candidate {
+        target: Target::rust("tools/paddock-dev", "paddock-dev", "tools/paddock-dev"),
+        node_hash: "h".into(),
+        dirty: false,
+    };
+    let other = cand("crates/a", "h");
+    s.put_many(&[rec(&dev, &class, NOW - 3600), rec(&other, &class, NOW - 3600)])
+        .unwrap();
+    let never_dev = Config::parse(&CFG.replace("no_test_cache = []", "no_test_cache = [\"crate:tools/paddock-dev\"]")).unwrap();
+    let (d, _) = decide(&[dev.clone(), other], &never_dev, &class, "", &s, NOW, OK);
+    assert_eq!(
+        d[0],
+        Decision::Run(Why::Never),
+        "paddock-dev runs although a record of its key exists"
+    );
+    assert!(
+        matches!(d[1], Decision::Reuse(_)),
+        "the control: another target with a record is still reused"
+    );
 }
 
 #[test]
