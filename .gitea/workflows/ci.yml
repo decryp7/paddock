@@ -455,9 +455,9 @@ jobs:
   # tools/paddock-dev and crates/ since the train's base, to find a test or a guard that never reaches the code it claims to check
   # (`./dev mutants gate`, tools/paddock-dev/src/mutants_gate.rs). Trains and manual runs only (a push to main never runs it), and only
   # when the plan reaches paddock-dev or crates. Report-only (ER-41): a MISSED mutant is a `::warning::` naming the function and the
-  # mutation, the step exits 0 while `MODE` is ReportOnly (review 2026-12-11), so no `continue-on-error` is needed. Four shards of the
-  # diff's mutants (`--shard k/4`, consecutive slices): a shard with none says so after its listing and builds nothing, a shard over its
-  # budget (MAX_MUTANTS) is "not measured" and asks for more shards; measured in docs/benchmarks.md ("Mutation testing of the diff").
+  # mutation, the step exits 0 while `MODE` is ReportOnly (review 2026-12-11), so no `continue-on-error` is needed. Eight shards of the
+  # diff's mutants (`--shard k/8`, consecutive slices): a shard with none says so after its listing and builds nothing, a shard over its
+  # budget (MAX_PER_SHARD) is "not measured" and asks for more shards; measured in docs/benchmarks.md ("Mutation testing of the diff").
   mutants:
     name: mutants (shard ${{ matrix.shard }})
     needs: [plan]
@@ -468,7 +468,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: ["0/4", "1/4", "2/4", "3/4"]
+        shard: ["0/8", "1/8", "2/8", "3/8", "4/8", "5/8", "6/8", "7/8"]
     env:
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}

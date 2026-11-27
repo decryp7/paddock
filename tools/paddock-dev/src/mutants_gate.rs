@@ -56,6 +56,12 @@ pub const MUTANT_TIMEOUT_SECS: u64 = 900;
 /// in `crates` a mutant took 13 s. 12 fits the run limit and the 60-minute row cap of a push step.
 pub const MAX_MUTANTS: usize = 12;
 
+/// The most mutants one planned shard (`--shard k/n`, a leg of ci.yml's `mutants` matrix) tests: a leg has a job of its own, so it is
+/// held by the run limit and not by a push step's row cap. Measured on the trial of 2026-11-27 (docs/benchmarks.md): a shard of the
+/// four-way split saw 25 mutants for the whole paddock-dev diff of this branch, which the cap of 12 refused; eight legs of at most
+/// this many hold such a diff.
+pub const MAX_PER_SHARD: usize = 16;
+
 /// The whole run's hang limit: the baseline, the control and [`MAX_MUTANTS`] mutants.
 pub const RUN_LIMIT: Duration = Duration::from_secs(3300);
 
@@ -467,7 +473,7 @@ pub fn measure(tool: &dyn Tool, root: &Path, head: &str, base: &str, shard: Opti
         }
         // A planned shard is whole or not measured (the plan's shard count is what bounds it); an unsharded run takes the cap's slice.
         let take = if shard.is_some() {
-            if n > MAX_MUTANTS { 0 } else { n }
+            if n > MAX_PER_SHARD { 0 } else { n }
         } else {
             n.min(budget)
         };
@@ -1012,7 +1018,7 @@ mod tests {
         );
         assert_eq!(s.tested, 1);
         let mut over = Fake::new();
-        over.listed = MAX_MUTANTS + 1;
+        over.listed = MAX_PER_SHARD + 1;
         let scratch = tempfile::tempdir().unwrap();
         let s = measure(
             &over,
@@ -1023,7 +1029,7 @@ mod tests {
             scratch.path(),
             Mode::ReportOnly,
         );
-        assert_eq!((s.tested, s.over_cap), (0, MAX_MUTANTS + 1), "{:?}", s.lines);
+        assert_eq!((s.tested, s.over_cap), (0, MAX_PER_SHARD + 1), "{:?}", s.lines);
         assert!(s.lines.iter().any(|l| l.contains("plan more shards")), "{:?}", s.lines);
     }
 
