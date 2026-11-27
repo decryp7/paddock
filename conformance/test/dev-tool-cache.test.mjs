@@ -243,3 +243,19 @@ test('the summary says a hit came from the runner store, and still names the Act
   assert.match(sum({ SOURCE: 'store' }), /exact hit from the runner store \(verified for its hash\)/);
   assert.match(sum({}), /exact hit from the Actions cache/);
 });
+
+// User decision 109: one producer. A consumer job (SAVES=false) restores only: its miss is "not by this job", never a failed save, and its
+// audit line is n/a, so `ci cache-audit` does not read it as a key nobody saved.
+test('a job that only restores says so on a miss, prints saved=n/a and warns of nothing', () => {
+  const root = fixture();
+  const r = run(root, ['summary', 'miss', 'true', 'false', '', ''], { KEY: 'the-key', SAVES: 'false' });
+  assert.match(r.sum, /restored: miss \(built\); saved: not by this job \(only the plan job saves\)/);
+  assert.match(r.text, /cache-report: name=dev-tool outcome=miss saved=n\/a key=the-key/);
+  assert.doesNotMatch(r.text, /::warning::/, 'a consumer that did not save is no failure');
+  // Positive control: the producer (SAVES unset or true) with the same inputs reports the unconfirmed save.
+  for (const env of [{}, { SAVES: 'true' }]) {
+    const w = run(root, ['summary', 'miss', 'true', 'false', '', ''], { KEY: 'the-key', ...env });
+    assert.match(w.sum, /saved: NOT confirmed/);
+    assert.match(w.text, /saved=no key=the-key/);
+  }
+});

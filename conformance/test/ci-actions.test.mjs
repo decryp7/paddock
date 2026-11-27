@@ -2743,6 +2743,17 @@ test('dev-tool-cache reads the runner store before the Actions cache, skips the 
   assert.equal(action.inputs.producer.default, 'false', 'a job is a consumer unless it says otherwise');
 });
 
+test('dev-tool-cache saves and confirms only for the producer: every other job restores only', () => {
+  const steps = stepsOf(loadAction('dev-tool-cache'));
+  for (const id of ['save', 'confirm']) {
+    assert.match(steps.find((s) => s.id === id).if, /inputs\.producer == 'true'/, `${id} runs only in the producer`);
+  }
+  assert.match(JSON.stringify(steps.find((s) => /summary/.test(s.run ?? '') && s.env)?.env), /"SAVES":"\$\{\{ inputs\.producer \}\}"/, 'the summary knows whether this job saves');
+  // Positive control of the reader: the restore steps themselves are not gated on the producer.
+  assert.doesNotMatch(steps.find((s) => s.id === 'restore').if, /producer/);
+  assert.doesNotMatch(steps.find((s) => s.id === 'store').if, /producer/);
+});
+
 test('only the plan action passes producer: true to dev-tool-cache (the one writer)', () => {
   const producers = [];
   for (const n of names) {

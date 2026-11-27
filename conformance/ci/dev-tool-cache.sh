@@ -136,23 +136,27 @@ cmd_summary() {
   local key="${KEY:-}" state="${1:-miss}" saved="${2:-}" verified="${3:-}" hit="${4:-}" matched="${5:-}" line
   # SAVES=false: a job that only restores (the plan job is the one writer, user decision 109); unset keeps the writer's wording.
   # SOURCE: store (the runner-local store) or empty (the Actions cache); DOWN=1: the cache service did not answer the job's probe.
-  # SOURCE: store (the runner-local store, user decision 109) or empty (the Actions cache).
-  local source="${SOURCE:-}" from="the Actions cache"
+  # SAVES=false: a job that only restores (the plan job is the one writer, user decision 109); unset keeps the writer's wording.
+  # SOURCE: store (the runner-local store) or empty (the Actions cache).
+  local saves="${SAVES:-true}" source="${SOURCE:-}" from="the Actions cache"
   [ "$source" != store ] || from="the runner store"
   case "$state" in
     hit) line="restored: exact hit from $from (verified for its hash); saved: not needed" ;;
     rejected) line="restored: exact hit from $from but NOT usable (rebuilt); saved: NO (the key exists)" ;;
     miss)
-      if [ "$saved" = true ] && [ "$verified" = true ]; then line="restored: miss (built); saved: yes (found again by key)"
+      if [ "$saves" = false ]; then line="restored: miss (built); saved: not by this job (only the plan job saves)"
+      elif [ "$saved" = true ] && [ "$verified" = true ]; then line="restored: miss (built); saved: yes (found again by key)"
       elif [ "$saved" = true ]; then line="restored: miss (built); saved: NOT confirmed (the cache lookup after the save found nothing)"
       else line="restored: miss (built); saved: NO"; fi ;;
     *) line="not measured ($state)" ;;
   esac
   echo "- dev-tool cache \`$key\`: $line" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
-  # The audit line (ci cache-audit): saved is yes only when the lookup after the save found the key.
+  # The audit line (ci cache-audit): saved is yes only when the lookup after the save found the key; n/a for a job that never saves.
   if [ -n "$key" ] && { [ "$state" = hit ] || [ "$state" = miss ] || [ "$state" = rejected ]; }; then
     local sv=n/a
-    case "$state" in miss) if [ "$saved" = true ] && [ "$verified" = true ]; then sv=yes; else sv=no; fi ;; rejected) sv=no ;; esac
+    if [ "$saves" != false ]; then
+      case "$state" in miss) if [ "$saved" = true ] && [ "$verified" = true ]; then sv=yes; else sv=no; fi ;; rejected) sv=no ;; esac
+    fi
     local o; o="$(bash "$here/cache-report.sh" outcome "$hit" "$matched")"
     echo "cache-report: name=dev-tool outcome=$o saved=$sv key=$key"
   fi
