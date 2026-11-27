@@ -65,3 +65,13 @@ paddock-ipc = { path = ".", features = ["test-support"] }
 paddock-testkit = { workspace = true }
 proptest = "1"
 tempfile = "3"
+
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# The endings tests load the register and the ratchet through `Applicability::load_from` and `Ratchet::load_from`, which walk up from
+# `CARGO_MANIFEST_DIR` to the first folder that has them.
+[package.metadata.paddock]
+test-reads = [
+    "docs/ipc-endpoints.toml",
+    "docs/ipc-endpoint-ratchet.toml",
+]

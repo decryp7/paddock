@@ -87,3 +87,30 @@ ts-rs = "11.1"
 [[test]]
 name = "start_log"
 required-features = ["mock-runtime"]
+
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `src/tests.rs`: the generated TypeScript of the shell entry point, the `src` folders `assert_async` checks, the workspace manifests
+# `cargo metadata --no-deps` reads; `tests/it/plugin.rs`: the npm package's version.
+[package.metadata.paddock]
+test-reads = [
+    "ui/projects/paddock-ui/shell/generated/*",
+    "ui/projects/paddock-ui/shell/confirm/generated/dialog-contracts.ts",
+    "ui/projects/paddock-ui/package.json",
+    "crates/*/Cargo.toml",
+    "crates/paddock-startup/src/**",
+    "crates/paddock-health/src/**",
+    "crates/paddock-dialogs/src/**",
+    "crates/paddock-diag/src/**",
+    "crates/paddock-files/src/**",
+    "crates/paddock-storage/src/**",
+    "crates/paddock-service/src/**",
+    "crates/paddock-packs/src/**",
+    "crates/paddock-channels/src/**",
+    "crates/paddock-mcp/src/**",
+    "crates/paddock-jobs/src/**",
+    "crates/paddock-settings/src/**",
+    "crates/paddock-updater/src/**",
+    "crates/paddock-window/src/**",
+    "crates/paddock-menu/src/**",
+]

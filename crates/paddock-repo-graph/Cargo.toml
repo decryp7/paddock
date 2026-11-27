@@ -29,3 +29,9 @@ paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 [dev-dependencies]
 tempfile = "3"
 paddock-testkit = { workspace = true }
+
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `src/history.rs` lists the tracked files of the folder a caller names with `git ls-files`; the tests use repositories they make or no git.
+[package.metadata.paddock]
+test-reads = []

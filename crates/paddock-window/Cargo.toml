@@ -58,3 +58,11 @@ ts-rs = "11.1"
 name = "native_menu"
 harness = false
 required-features = ["tray"]
+
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `src/generated.rs` compares the generated TypeScript with the files of the shell entry point; the other reads are this crate's own `src`.
+[package.metadata.paddock]
+test-reads = [
+    "ui/projects/paddock-ui/shell/generated/*",
+]

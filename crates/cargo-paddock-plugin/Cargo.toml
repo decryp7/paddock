@@ -29,3 +29,9 @@ paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 [dev-dependencies]
 # The tampered-package test rewrites an archive with one program changed.
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `src/main.rs` passes the working folder (`current_dir`) to the library; no repository file is read through it.
+[package.metadata.paddock]
+test-reads = []
