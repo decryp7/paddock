@@ -4396,7 +4396,7 @@ spec `data.spec.ts:301` (theme switch redraws the canvases) failed in the same r
 - **Cause.** The helper was written where it was first needed, not checked against the shared kit (ER-22), and nothing told the next
   fixture author that a per-test git repository is the slow shape.
 - **Fix (user decision 74).** The helper moved to `paddock_testkit::git_fixture` (temp folder from the kit, owner, size limit and eviction
-  rule in its doc), and rule NEW-git-fixtures with the report-only check C174 flags a fixture builder with six or more git starts per test.
+  rule in its doc), and rule 102 with the report-only check C174 flags a fixture builder with six or more git starts per test.
 
 ## A link-server test read the server's refusals the moment its client saw the end, and macOS ends the client first (2026-11-26, fix/ipc-link-flakes)
 - **Symptom.** ci.yml run 9150, job 51219 (`crate (macos-latest)`): `paddock-ipc::it edges::a_link_server_with_no_descriptor_left_to_accept_tells_the_waiting_client_why`
