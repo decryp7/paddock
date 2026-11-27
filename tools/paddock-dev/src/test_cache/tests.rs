@@ -8,26 +8,48 @@ use super::store::{FsStore, Lookup, Record, Store, StoreError};
 use super::*;
 use std::collections::HashMap;
 
-const CFG: &str = include_str!("../../../../docs/test-cache.toml");
+/// The settings these tests run on: a copy of the shape `docs/test-cache.toml` has, owned by the tests. The shipped file is a register
+/// the tools write (`shadow-run --write` adds to `[switch] green_runs`), so no test asserts its content; the one test that reads it
+/// checks only its shape, through [`Config::read`] ([`the_shipped_file_parses_and_holds_its_invariants`]).
+const CFG: &str = "# The test-result cache (ADR 0116), a copy for the tests.
+epoch = 1
+nightly_paused = true
+max_age_hours = 48
+profile = \"ci\"
+no_test_cache = []
+
+# The switch (ER-41): reuse is report-only (shadow) until two green train runs are recorded here by run id.
+[switch]
+green_runs = []
+";
 
 fn fixture(name: &str) -> String {
     std::fs::read_to_string(format!("{}/tests/ci-runs/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap()
 }
 
-/// The shipped config with `[switch] green_runs` cleared. The runs in it are a record a train writes (`shadow-run --write`), not part of
-/// the schema these tests check, so the tests start from no green run whatever the shipped file holds.
 fn cfg_text() -> String {
-    let lines: Vec<&str> = CFG
-        .lines()
-        .map(|l| {
-            if l.trim_start().starts_with("green_runs") {
-                "green_runs = []"
-            } else {
-                l
-            }
-        })
-        .collect();
-    lines.join("\n") + "\n"
+    CFG.to_string()
+}
+
+/// The shipped file, through its accessor and by shape only: it parses, the cache epoch and profile exist, the age rule is usable and
+/// the switch lists run ids. Whatever a tool has written into it (`green_runs`) or the user listed in `no_test_cache` is not asserted.
+#[test]
+fn the_shipped_file_parses_and_holds_its_invariants() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let c = Config::read(&root).unwrap();
+    assert!(c.epoch >= 1, "the epoch starts at 1");
+    assert!(!c.profile.is_empty());
+    assert!(
+        !c.nightly_paused || c.max_age_hours > 0,
+        "a paused nightly needs a usable age limit"
+    );
+    assert!(c.switch.green_runs.iter().all(|r| *r > 0), "a run id is positive");
+    // the text a tool edits stays editable: the line `with_green_run` rewrites is there
+    let text = std::fs::read_to_string(root.join(super::config::FILE)).unwrap();
+    assert!(
+        with_green_run(&text, 1).is_ok(),
+        "shadow-run --write can still add a run to the shipped file"
+    );
 }
 
 fn cfg() -> Config {

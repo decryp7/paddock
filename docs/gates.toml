@@ -1212,3 +1212,10 @@ owner = "ER-21 class: one variable named, parsed and defaulted by hand at many s
 since = 2026-11-26
 review_by = 2026-12-10
 approved = "user"
+
+[[report_only]]
+id = "C177"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c177.rs, then flip the mode to Gate. A test that include_str!s or reads, under the repository root, a register or record a tool writes (c177::TOOL_WRITTEN, declared once from the writers' own constants: test-cache.toml, ci-dispatch-guards.toml, ci-scope-first-runs.toml, escape-register.toml, lessons.md, conformance/reserved, conformance/baselines) asserts what the tool last wrote and breaks when it appends; a fixture copy or a shape test through the accessor is the fix. First count 2026-11-27 on origin/main 8599b8638: 1 site (test_cache/tests.rs include_str! of docs/test-cache.toml); 0 after this branch's fix. No baseline file (ER-46): the report is the list. Positive control in the check and tests/it/check_c177.rs: an include_str! and a live read go red, a read of a copy under a temporary folder and the accessor stay green"
+owner = "ER-21 class: tests assert the live content of a tool-written register (a_run_is_added_to_the_green_runs_once_and_the_file_still_parses broke when shadow-run --write added run 9180; commit 0e33f28f0 worked around it)"
+since = 2026-11-27
+review_by = 2026-12-11
