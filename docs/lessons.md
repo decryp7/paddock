@@ -4496,3 +4496,11 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   `#[expect]`). The positive control is `usage::tests::a_raw_listing_is_what_the_clippy_ban_catches`: its `#[expect]` is unfulfilled, and Clippy
   fails, if the ban is removed or stops resolving the path. Callers checked across `crates/`, `apps/` and `tools/`: only `paddock-proc` itself
   (`usage.rs`, `tests/it/orphan.rs`) implements or calls the trait; Debrief's, Dyno's and Pitcrew's `ProcessSource` are their own ports.
+
+## Per-member trials on a moving train cost more than they proved; one trial of the tip does (2026-11-27, docs/batched-member-trials, user decision)
+- **What happened.** On train y each member's own CI trial ran on a train that kept moving: the trials went red on other members' defects, proved
+  little about the member, and took about 30 minutes each. Train z (2026-11-27) merged 8 members in about 40 minutes with the fast static rows per
+  member and one trial of the train tip, against about 90 minutes for one-by-one trials.
+- **Rule 100 amended.** A member has its own trial on the train only when it has no green trial on main (a Linux trial with `--onto origin/main` on its
+  head, or on a head whose only differences are merges of main); with one it joins with `--no-trial "trial <run id> green on main"`. One trial of the tip
+  covers the rest; red means pull the member it points to (ER-8). The final full run and `landing-held` are unchanged (ER-49).

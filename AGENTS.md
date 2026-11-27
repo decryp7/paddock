@@ -86,8 +86,11 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   nothing runs them and CI does not test them; trains are built by hand with the member gate (`./dev merge check --gates`).
   A member merges current main and re-runs its member gate on that tip before it joins a train (rule 100). `./dev merge sync-member <train>`, run after the merge, runs the
   fast static rows (conformance, gates-register, clippy, clippy-windows) on the sync tip first and fails on a bad row (`--no-static "<reason>"` skips them, logged);
-  once they pass it dispatches the member's own CI trial (the affected jobs on the train, `ci dispatch --trial` on `sync/<member>/<short sha>`, a new ref per synced commit that sync-member pushes with a plain push: integrator role only) and prints the run id, which
-  `./dev merge check --gates` reads later (red blocks, running is not a pass; `--no-trial "<reason>"` skips it, logged).
+  the member's own CI trial (the affected jobs on the train, `ci dispatch --trial` on `sync/<member>/<short sha>`, a new ref per synced commit that sync-member pushes with a plain push: integrator role only) is dispatched
+  **only for a member with no green trial of its own on main** (a Linux trial with `--onto origin/main` on its current head, or on a head whose only differences are merges of main; user 2026-11-27).
+  A member that has one runs sync-member and joins with `--no-trial "trial <run id> green on main"` (logged); members without one join on the static rows, and **one trial of the
+  train tip** after they are merged covers them all (red: pull the member it points to, ER-8, and run it again). Where a member has its own trial, `./dev merge check --gates` reads it
+  (red blocks, running is not a pass; `--no-trial "<reason>"` skips it, logged). The final full CI run and `landing-held` are unchanged (ER-49).
 - **Train merges are made by `./dev merge member` (user decision 100, 2026-11-27).** In the train's worktree: `./dev merge member <member-branch-or-sync-ref> [--reland <revert>]...`
   does the `git merge --no-ff` itself with the fixed subject `Merge <member> into <train>` and the trailers `Paddock-Member`, `Paddock-Sync-Ref` (a
   `sync/<member>/<sha>` ref was given), `Paddock-Sync-Sha`, the `Reverted:` lines `merge check --write-reverted` would write and `Paddock-Reland`

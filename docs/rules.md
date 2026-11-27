@@ -560,11 +560,16 @@ merge check (`./dev merge check`) refuses a member whose base is older than main
 `ci/old-base-block` (report-only until it lands). A refused member merges main, re-runs `./dev merge check --gates` on the result and
 is offered again. After merging main (or the train) into the member, `./dev merge sync-member <train>` runs the fast static rows
 (conformance, the gate register, Clippy and Windows Clippy of the touched workspaces) on that sync tip and ends non-zero on a failing
-or unmeasured row; fix it on the member and re-sync. `--no-static "<reason>"` is the logged escape. Once the rows pass it also
-dispatches the member's own narrowed CI run on the train (`ci dispatch ci.yml --trial`, the plan's affected jobs on its Linux and Windows
-legs; the integrator's sync-member pushes the sync tip as the new ref `sync/<member>/<short sha>` first) and prints the run id; a later `./dev merge check --gates` reads that run through the verdict reader: a
-red trial blocks the member, a running one is not a pass. `--no-trial "<reason>"` is the logged escape. *Why (trial):* members that passed
-on the Mac failed only on Windows or Linux CI in three trains. *Why:* on 2026-11-25 five members were pulled from trains i, k and m because their base was older than main (see
+or unmeasured row; fix it on the member and re-sync. `--no-static "<reason>"` is the logged escape. Once the rows pass it dispatches the member's own narrowed CI run on the train
+(`ci dispatch ci.yml --trial`, the plan's affected jobs on its Linux and Windows legs; the integrator's sync-member pushes the sync tip as the new ref
+`sync/<member>/<short sha>` first) and prints the run id, **only for a member with no green trial of its own on main** (user 2026-11-27): a Linux trial with
+`--onto origin/main` on the member's current head, or on a head whose only differences are merges of main. A member that has one joins with
+`--no-trial "trial <run id> green on main"` (logged). Members without one join on the fast static rows alone, and **one trial of the train tip covers them
+all**, dispatched after they are merged (`./dev ci dispatch ci.yml --ref <train>`). If that batched trial is red, the member it points to is pulled (ER-8) and the
+trial runs again. A later `./dev merge check --gates` reads a member's own trial through the verdict reader when there is one: a red trial blocks the
+member, a running one is not a pass. The final full CI run on the exact head and `landing-held` are unchanged (ER-49). *Why (trial):* members that passed
+on the Mac failed only on Windows or Linux CI in three trains. *Why (batched, user 2026-11-27):* on train y per-member trials on a moving train
+went red on other members' defects and proved little, at about 30 minutes each; train z merged 8 members in about 40 minutes with one trial of the tip, against about 90 minutes for one-by-one trials. *Why:* on 2026-11-25 five members were pulled from trains i, k and m because their base was older than main (see
 [lessons.md](lessons.md#members-on-an-old-base-were-pulled-from-trains-i-k-and-m-2026-11-25)).
 
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
