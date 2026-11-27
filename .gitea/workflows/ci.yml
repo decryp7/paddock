@@ -455,14 +455,13 @@ jobs:
   # tools/paddock-dev and crates/ since the train's base, to find a test or a guard that never reaches the code it claims to check
   # (`./dev mutants gate`, tools/paddock-dev/src/mutants_gate.rs). Trains and manual runs only (a push to main never runs it), and only
   # when the plan reaches paddock-dev or crates. Report-only (ER-41): a MISSED mutant is a `::warning::` naming the function and the
-  # mutation, the step exits 0 (`MODE`), and the job's `continue-on-error` stays until it blocks (review 2026-12-11). Four shards of the
+  # mutation, the step exits 0 while `MODE` is ReportOnly (review 2026-12-11), so no `continue-on-error` is needed. Four shards of the
   # diff's mutants (`--shard k/4`, consecutive slices): a shard with none says so after its listing and builds nothing, a shard over its
   # budget (MAX_MUTANTS) is "not measured" and asks for more shards; measured in docs/benchmarks.md ("Mutation testing of the diff").
   mutants:
     name: mutants (shard ${{ matrix.shard }})
     needs: [plan]
     if: ${{ (needs.plan.outputs.paddock_dev == 'true' || needs.plan.outputs.crates == 'true') && (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/heads/train/')) && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["mutants"]'), 'mutants') }}
-    continue-on-error: true
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
