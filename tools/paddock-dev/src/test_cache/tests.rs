@@ -39,6 +39,7 @@ fn cand(dir: &str, hash: &str) -> Candidate {
         target: Target::rust(dir, dir, "crates"),
         node_hash: hash.into(),
         dirty: false,
+        blind: Vec::new(),
     }
 }
 
@@ -834,4 +835,46 @@ fn a_redirect_is_never_followed_and_is_named_with_its_target() {
     assert!(super::s3::parse_done("garbage").is_err());
     // The whole call fails on a redirect, so the caller runs everything (fail open), whichever transfer it was.
     assert!(super::s3::parse_done("200||/tmp/a\n308|http://x/|/tmp/b\n").is_err());
+}
+
+#[test]
+fn a_target_with_a_read_the_graph_cannot_resolve_is_never_reused_and_says_why() {
+    let (_d, s) = scratch();
+    let class = RunnerClass::here();
+    let mut a = cand("crates/a", "h");
+    // A valid, trusted record exists under the key: only the blind read stands between it and a reuse (ER-33).
+    s.put_many(&[rec(&a, &class, NOW - 3600)]).unwrap();
+    assert!(matches!(
+        decide(std::slice::from_ref(&a), &cfg(), &class, &s, NOW, OK).0[0],
+        Decision::Reuse(_)
+    ));
+    a.blind = vec!["crates/a/tests/it.rs: `.ancestors()` walks up from a path".into()];
+    let d = decide(std::slice::from_ref(&a), &cfg(), &class, &s, NOW, OK).0.remove(0);
+    let Decision::Run(Why::Blind(w)) = &d else { panic!("{d:?}") };
+    assert!(
+        w.contains("crates/a/tests/it.rs") && w.contains("ancestors"),
+        "the reason names the site: {w}"
+    );
+    assert!(d_text(&d).contains("cannot be resolved"), "{}", d_text(&d));
+    // The log still records its pass: recording continues, only reading is refused.
+    let meta = RunMeta {
+        run: "1".into(),
+        job: String::new(),
+        git_ref: String::new(),
+        commit: String::new(),
+        at: NOW,
+        os_build: String::new(),
+    };
+    a.target.package = "nxflaky".into();
+    assert_eq!(
+        records_from_log(&clean_log(), std::slice::from_ref(&a), &cfg(), &class, &meta).len(),
+        1
+    );
+}
+
+fn d_text(d: &Decision) -> String {
+    match d {
+        Decision::Run(w) => w.text(),
+        Decision::Reuse(_) => String::new(),
+    }
 }

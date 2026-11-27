@@ -102,6 +102,23 @@ fn targets(graph: &paddock_repo_graph::Graph, workspace: &str) -> Vec<Target> {
     t
 }
 
+/// The model's unresolved references by the Cargo package folder of their referrer, one line each: a package with any is blind
+/// (its key cannot say what it reads, ADR 0116 §2).
+fn blind_reads(
+    cargo: &paddock_repo_graph::Graph,
+    unresolved: Vec<&paddock_repo_graph::model::Unresolved>,
+) -> std::collections::BTreeMap<String, Vec<String>> {
+    let mut out: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+    for u in unresolved {
+        if let Some(dir) = cargo.node_of(&u.referrer) {
+            out.entry(dir.to_string())
+                .or_default()
+                .push(format!("{}: {}", u.referrer, u.reference));
+        }
+    }
+    out
+}
+
 /// The graph and the model of the tree, read once: a plan asks for several workspaces and runner classes.
 pub struct World {
     graph: crate::plan::RepoGraph,
@@ -144,6 +161,7 @@ pub fn candidates_in(root: &Path, w: &World, workspace: &str, os: &str) -> Resul
     };
     let nodes: Vec<String> = ts.iter().map(|t| t.node.clone()).collect();
     let hashes = crate::repo_model::hash::node_hashes(&crate::input_hash::Real, &ctx, root, world, &tree, &nodes)?;
+    let blind = blind_reads(&w.graph.cargo, world.model.unresolved());
     ts.into_iter()
         .map(|t| {
             let h = hashes.get(&t.node).ok_or_else(|| {
@@ -152,10 +170,15 @@ pub fn candidates_in(root: &Path, w: &World, workspace: &str, os: &str) -> Resul
                     t.node, t.node
                 ))
             })?;
+            let blind_here = blind
+                .get(t.node.strip_prefix("crate:").unwrap_or(&t.node))
+                .cloned()
+                .unwrap_or_default();
             Ok(Candidate {
                 target: t,
                 node_hash: h.hash.clone(),
                 dirty: h.dirty,
+                blind: blind_here,
             })
         })
         .collect()
