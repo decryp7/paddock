@@ -11,7 +11,7 @@ publish = ["decryp7"]
 doctest = false # doctests are off (crates/README.md, "Doctests")
 
 [dependencies]
-paddock-proc = { workspace = true, features = ["test-support"] }
+paddock-proc = { workspace = true }
 paddock-testkit = { workspace = true }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 

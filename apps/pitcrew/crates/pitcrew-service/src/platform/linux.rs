@@ -194,14 +194,10 @@ mod tests {
     }
 
     #[test]
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
     fn a_copied_service_is_executable_and_replaces_the_old_one() {
         use std::os::unix::fs::PermissionsExt;
-        let d = std::env::temp_dir().join(format!("pitcrew-it-linux-copy-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
+        let scratch = paddock_testkit::canonical_tempdir();
+        let d = scratch.join("it-linux-copy");
         std::fs::create_dir_all(&d).unwrap();
         let src = d.join("src");
         std::fs::write(&src, "one").unwrap();
@@ -212,6 +208,5 @@ mod tests {
         stable_copy(&src, &d.join("data")).unwrap();
         assert_eq!(std::fs::read_to_string(&copy).unwrap(), "two");
         assert!(stable_copy(&d.join("missing"), &d.join("data")).is_err());
-        let _ = std::fs::remove_dir_all(&d);
     }
 }

@@ -276,13 +276,9 @@ mod tests {
     }
 
     #[test]
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
     fn scans_and_cleans_a_runner_folder_including_read_only_and_deep_files() {
-        let d = std::env::temp_dir().join(format!("pitcrew-it-clean-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
+        let scratch = paddock_testkit::canonical_tempdir();
+        let d = scratch.join("it-clean");
         let deep = d
             .join("work/abc")
             .join("x".repeat(60))
@@ -364,18 +360,13 @@ mod tests {
         let report = execute(&r, &evil, now());
         assert_eq!(report.failures.len(), 1);
         assert_eq!(report.deleted, 1);
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[cfg(windows)]
     #[test]
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
     fn a_file_in_use_is_reported_with_a_reason() {
-        let d = std::env::temp_dir().join(format!("pitcrew-it-inuse-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
+        let scratch = paddock_testkit::canonical_tempdir();
+        let d = scratch.join("it-inuse");
         std::fs::create_dir_all(d.join("work/job")).unwrap();
         let f = d.join("work/job/open.bin");
         std::fs::write(&f, b"x").unwrap();
@@ -386,6 +377,5 @@ mod tests {
         assert!(err.contains("tries again"), "{err}");
         drop(held);
         assert!(delete(&d.join("work/job")).is_ok());
-        let _ = std::fs::remove_dir_all(&d);
     }
 }

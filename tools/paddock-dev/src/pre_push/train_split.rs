@@ -67,11 +67,14 @@ pub struct Step {
 pub fn train_flow(dispatch: &str, run_id: &str) -> Vec<Step> {
     let step = |what, command: String| Step { what, command };
     vec![
-        step("fast rows, locally", "./dev check --pre-push --member-gate --set fast".into()),
+        step(
+            "fast rows, locally",
+            "./dev check --pre-push --member-gate --priority train --set fast".into(),
+        ),
         step("dispatch CI (prints `run <id>`)", dispatch.to_string()),
         step(
             "slow rows beside CI; a failure cancels the run",
-            format!("./dev check --pre-push --member-gate --set slow --cancel-ci-run {run_id}"),
+            format!("./dev check --pre-push --member-gate --priority train --set slow --cancel-ci-run {run_id}"),
         ),
         step("landing needs both halves", "./dev ci landing-held --sha <sha>".into()),
     ]

@@ -145,12 +145,9 @@ mod tests {
     use pitcrew_core::time::Timestamp;
 
     #[test]
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
     fn a_damaged_cache_starts_over_and_masked_jobs_are_not_looked_up() {
-        let f = std::env::temp_dir().join(format!("pitcrew-it-jobcache-{}.json", std::process::id()));
+        let scratch = paddock_testkit::canonical_tempdir();
+        let f = scratch.join("it-jobcache.json");
         std::fs::write(&f, "{broken").unwrap();
         let job = FinishedJob {
             info: JobInfo {
@@ -181,6 +178,5 @@ mod tests {
         save(&f, &c);
         assert_eq!(outcomes(&f, &[], None).len(), 1);
         assert!(get("ftp://x", "t").is_err());
-        let _ = std::fs::remove_file(&f);
     }
 }

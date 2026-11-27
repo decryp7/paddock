@@ -94,20 +94,13 @@ pub fn save(path: &Path, text: &str, now: Timestamp) -> Result<Saved, Error> {
 mod tests {
     use super::*;
 
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
-    fn dir(test: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("pitcrew-it-files-{test}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
+    fn dir() -> paddock_testkit::CanonicalTempDir {
+        paddock_testkit::canonical_tempdir()
     }
 
     #[test]
     fn a_missing_file_reads_as_empty_and_a_huge_one_is_refused() {
-        let d = dir("read");
+        let d = dir();
         let f = d.join("config.yaml");
         assert_eq!(read(&f).unwrap(), "");
         std::fs::write(&f, "a: 1\n").unwrap();
@@ -116,12 +109,11 @@ mod tests {
         let err = read(&f).unwrap_err().to_string();
         assert!(err.contains("larger than") && err.contains("your own editor"), "{err}");
         assert!(read(&d).is_err(), "a folder is not a file");
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
     fn saving_backs_up_the_old_file_and_keeps_only_the_newest_backups() {
-        let d = dir("save");
+        let d = dir();
         let f = d.join("config.yaml");
         // The first save has nothing to back up.
         let first = save(&f, "one\n", Timestamp(1_792_683_000_000)).unwrap();
@@ -145,14 +137,13 @@ mod tests {
         assert!(!std::fs::read_dir(&d)
             .unwrap()
             .any(|e| e.unwrap().file_name().to_string_lossy().contains("pitcrew-tmp")));
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[cfg(unix)]
     #[test]
     fn permissions_and_symbolic_links_are_respected() {
         use std::os::unix::fs::PermissionsExt;
-        let d = dir("link");
+        let d = dir();
         let real = d.join("real.yaml");
         std::fs::write(&real, "a: 1\n").unwrap();
         std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o640)).unwrap();
@@ -168,16 +159,14 @@ mod tests {
         assert!(std::fs::read_dir(&d)
             .unwrap()
             .any(|e| e.unwrap().file_name().to_string_lossy().starts_with("real.yaml.bak-")));
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
     fn a_folder_that_cannot_be_written_is_an_error_with_the_path() {
-        let d = dir("fail");
+        let d = dir();
         let blocker = d.join("file");
         std::fs::write(&blocker, "x").unwrap();
         let err = save(&blocker.join("config.yaml"), "a: 1\n", Timestamp(1)).unwrap_err().to_string();
         assert!(err.contains("file"), "{err}");
-        let _ = std::fs::remove_dir_all(&d);
     }
 }

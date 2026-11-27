@@ -6,28 +6,51 @@ use super::key::{KeyParts, RunnerClass, Target, key};
 use super::result::judge;
 use super::store::{FsStore, Lookup, Record, Store, StoreError};
 use super::*;
+use crate::job_outcome::JobOutcome;
 use std::collections::HashMap;
 
-const CFG: &str = include_str!("../../../../docs/test-cache.toml");
+/// The settings these tests run on: a copy of the shape `docs/test-cache.toml` has, owned by the tests. The shipped file is a register
+/// the tools write (`shadow-run --write` adds to `[switch] green_runs`), so no test asserts its content; the one test that reads it
+/// checks only its shape, through [`Config::read`] ([`the_shipped_file_parses_and_holds_its_invariants`]).
+const CFG: &str = "# The test-result cache (ADR 0116), a copy for the tests.
+epoch = 1
+nightly_paused = true
+max_age_hours = 48
+profile = \"ci\"
+no_test_cache = []
+
+# The switch (ER-41): reuse is report-only (shadow) until two green train runs are recorded here by run id.
+[switch]
+green_runs = []
+";
 
 fn fixture(name: &str) -> String {
     std::fs::read_to_string(format!("{}/tests/ci-runs/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap()
 }
 
-/// The shipped config with `[switch] green_runs` cleared. The runs in it are a record a train writes (`shadow-run --write`), not part of
-/// the schema these tests check, so the tests start from no green run whatever the shipped file holds.
 fn cfg_text() -> String {
-    let lines: Vec<&str> = CFG
-        .lines()
-        .map(|l| {
-            if l.trim_start().starts_with("green_runs") {
-                "green_runs = []"
-            } else {
-                l
-            }
-        })
-        .collect();
-    lines.join("\n") + "\n"
+    CFG.to_string()
+}
+
+/// The shipped file, through its accessor and by shape only: it parses, the cache epoch and profile exist, the age rule is usable and
+/// the switch lists run ids. Whatever a tool has written into it (`green_runs`) or the user listed in `no_test_cache` is not asserted.
+#[test]
+fn the_shipped_file_parses_and_holds_its_invariants() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let c = Config::read(&root).unwrap();
+    assert!(c.epoch >= 1, "the epoch starts at 1");
+    assert!(!c.profile.is_empty());
+    assert!(
+        !c.nightly_paused || c.max_age_hours > 0,
+        "a paused nightly needs a usable age limit"
+    );
+    assert!(c.switch.green_runs.iter().all(|r| *r > 0), "a run id is positive");
+    // the text a tool edits stays editable: the line `with_green_run` rewrites is there
+    let text = std::fs::read_to_string(root.join(super::config::FILE)).unwrap();
+    assert!(
+        with_green_run(&text, 1).is_ok(),
+        "shadow-run --write can still add a run to the shipped file"
+    );
 }
 
 fn cfg() -> Config {
@@ -44,11 +67,13 @@ fn cand(dir: &str, hash: &str) -> Candidate {
 
 fn rec(c: &Candidate, class: &RunnerClass, at: u64) -> Record {
     Record {
-        key: key_of(c, &cfg(), class),
+        key: key_of(c, &cfg(), class, ""),
         target: c.target.id.clone(),
         class: class.clone(),
+        filter: String::new(),
         run: "8635".into(),
-        job: "45047".into(),
+        job: "crate (linux)".into(),
+        attempt: 1,
         git_ref: "refs/heads/main".into(),
         commit: "0ae8b4794abc".into(),
         tests: 12,
@@ -67,7 +92,18 @@ fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
 fn the_key_changes_with_each_part_and_only_with_them() {
     let t = Target::rust("crates/a", "a", "crates");
     let linux = RunnerClass::of("linux", "x86_64");
-    let p = |epoch, class: &RunnerClass, profile| key(&t, "sha256:1", &KeyParts { epoch, class, profile });
+    let p = |epoch, class: &RunnerClass, profile| {
+        key(
+            &t,
+            "sha256:1",
+            &KeyParts {
+                epoch,
+                class,
+                profile,
+                filter: "",
+            },
+        )
+    };
     let base = p(1, &linux, "ci");
     assert_eq!(base, p(1, &linux, "ci"));
     assert_ne!(base, p(2, &linux, "ci"), "the epoch");
@@ -81,7 +117,8 @@ fn the_key_changes_with_each_part_and_only_with_them() {
             &KeyParts {
                 epoch: 1,
                 class: &linux,
-                profile: "ci"
+                profile: "ci",
+                filter: ""
             }
         ),
         "the node hash"
@@ -95,11 +132,32 @@ fn the_key_changes_with_each_part_and_only_with_them() {
             &KeyParts {
                 epoch: 1,
                 class: &linux,
-                profile: "ci"
+                profile: "ci",
+                filter: ""
             }
         ),
         "the target"
     );
+    let f = |filter: &str| {
+        key(
+            &t,
+            "sha256:1",
+            &KeyParts {
+                epoch: 1,
+                class: &linux,
+                profile: "ci",
+                filter,
+            },
+        )
+    };
+    assert_ne!(base, f("test(/^ci_host::/)"), "the filter");
+    assert_ne!(f("test(/^a::/)"), f("test(/^b::/)"), "a different filter");
+    assert_eq!(
+        f("test(/^a::/) &  not  package(=b)"),
+        f(" test(/^a::/) & not package(=b)\n"),
+        "whitespace is not a filter"
+    );
+    assert_eq!(base, f("  "), "a blank filter is the whole package");
     assert_eq!(RunnerClass::of("macos", "aarch64").0, "macOS-ARM64");
 }
 
@@ -199,7 +257,7 @@ fn scratch() -> (tempfile::TempDir, FsStore) {
 }
 
 const NOW: u64 = 1_800_000_000;
-const OK: &dyn Fn(&Record) -> Result<(), String> = &|_| Ok(());
+const OK: &dyn Fn(&Record) -> Result<(), super::trust::Distrust> = &|_| Ok(());
 
 #[test]
 fn an_unchanged_target_reuses_and_a_changed_one_runs() {
@@ -208,7 +266,7 @@ fn an_unchanged_target_reuses_and_a_changed_one_runs() {
     let (a, b) = (cand("crates/a", "h1"), cand("crates/b", "h2"));
     s.put_many(&[rec(&a, &class, NOW - 60), rec(&b, &class, NOW - 60)]).unwrap();
     let b2 = cand("crates/b", "h2-changed");
-    let (d, notice) = decide(&[a.clone(), b2], &cfg(), &class, &s, NOW, OK);
+    let (d, notice) = decide(&[a.clone(), b2], &cfg(), &class, "", &s, NOW, OK);
     assert!(notice.is_none());
     assert!(matches!(d[0], Decision::Reuse(_)));
     assert_eq!(d[1], Decision::Run(Why::Miss));
@@ -218,14 +276,112 @@ fn an_unchanged_target_reuses_and_a_changed_one_runs() {
         .into_iter()
         .find(|c| *c != class)
         .expect("two different classes");
-    let (d, _) = decide(&[a], &cfg(), &other, &s, NOW, OK);
+    let (d, _) = decide(&[a], &cfg(), &other, "", &s, NOW, OK);
     assert_eq!(d[0], Decision::Run(Why::Miss));
+}
+
+#[test]
+fn the_record_step_never_replaces_a_trusted_or_undecided_record_and_names_the_untrusted() {
+    // Run 9209 (red) re-stored the records run 9180 (green) had written under the same keys; every later lookup then refused them.
+    let (_d, s) = scratch();
+    let class = RunnerClass::here();
+    let (a, b, c, n, o) = (cand("a", "h1"), cand("b", "h2"), cand("c", "h3"), cand("n", "h4"), cand("o", "h5"));
+    s.put_many(&[
+        rec(&a, &class, NOW - 60),
+        rec(&b, &class, NOW - 60),
+        rec(&c, &class, NOW - 60),
+        rec(&o, &class, NOW - 49 * 3600),
+    ])
+    .unwrap();
+    // a's record is trusted, b's refused (its job failed), c's undecided (the API did not answer), o's too old (48 hours while the
+    // nightly is paused); n has none.
+    let trust = |r: &Record| -> Result<(), super::trust::Distrust> {
+        match r.target.as_str() {
+            "rust:b" => Err("job `crate (linux)` of run 8635 attempt 1 did not end success".into()),
+            "rust:c" => Err(super::trust::Distrust::Unknown("run 8635 could not be read: 502".into())),
+            _ => Ok(()),
+        }
+    };
+    let meta = RunMeta {
+        run: "9209".into(),
+        job: "crate (ubuntu-latest, 2/3)".into(),
+        attempt: 1,
+        git_ref: "refs/heads/main".into(),
+        commit: "c0ffee".into(),
+        at: NOW,
+        os_build: String::new(),
+    };
+    let log = [
+        "    Starting 5 tests across 5 binaries",
+        "        PASS [   0.010s] ( 1/5) a t::ok",
+        "        PASS [   0.010s] ( 2/5) b t::ok",
+        "        PASS [   0.010s] ( 3/5) c t::ok",
+        "        PASS [   0.010s] ( 4/5) n t::ok",
+        "        PASS [   0.010s] ( 5/5) o t::ok",
+        "     Summary [   0.050s] 5 tests run: 5 passed, 0 failed, 0 skipped",
+    ]
+    .join("\n");
+    let cands = [a.clone(), b.clone(), c.clone(), n.clone(), o.clone()];
+    let (lines, stored) = super::cmd::record_with(&log, &cands, &cfg(), &class, "", &meta, &s, &trust);
+    assert_eq!(
+        stored, 3,
+        "b (refused), n (missing) and o (too old) are replaced or written: {lines:?}"
+    );
+    let key = |c: &Candidate| Lookup {
+        target: c.target.id.clone(),
+        class: class.clone(),
+        key: key_of(c, &cfg(), &class, ""),
+    };
+    let back: Vec<String> = s
+        .get_many(&[key(&a), key(&b), key(&c), key(&n), key(&o)])
+        .unwrap()
+        .into_iter()
+        .map(|r| r.unwrap().run)
+        .collect();
+    assert_eq!(
+        back,
+        ["8635", "9209", "8635", "9209", "9209"],
+        "a trusted and c undecided stay; b, n and o are this run's"
+    );
+    let shadow = lines.iter().find(|l| l.starts_with("test-cache shadow:")).expect("a shadow line");
+    assert_eq!(
+        shadow,
+        "test-cache shadow: matched 1, passed 1, findings 0, untrusted 1 (1: job `crate (linux)` of run 8635 attempt 1 did not end \
+         success), undecided 1 (1: run 8635 could not be read: 502)"
+    );
+    // The reader of the shadow lines reads the counts of the longer line.
+    let (k, sum) = read_shadow(std::slice::from_ref(shadow)).unwrap();
+    assert_eq!((k, sum.matched, sum.passed, sum.findings.len()), (1, 1, 1, 0));
+    assert!(lines.iter().any(|l| l.contains("2 held back")), "{lines:?}");
+    // A store whose lookup fails but whose writes work (an S3 GET times out, the PUT goes through): nothing is replaced, because nothing
+    // is known.
+    let blind = BlindStore::default();
+    let (lines, stored) = super::cmd::record_with(&log, &cands, &cfg(), &class, "", &meta, &blind, &trust);
+    assert_eq!((stored, blind.put.get()), (0, 0), "{lines:?}");
+}
+
+/// A store whose lookups fail and whose writes succeed, counting the records it was given.
+#[derive(Default)]
+struct BlindStore {
+    put: std::cell::Cell<usize>,
+}
+impl Store for BlindStore {
+    fn get_many(&self, _: &[Lookup]) -> Result<Vec<Option<Record>>, StoreError> {
+        Err(StoreError("read timed out".into()))
+    }
+    fn put_many(&self, r: &[Record]) -> Result<(), StoreError> {
+        self.put.set(self.put.get() + r.len());
+        Ok(())
+    }
+    fn delete_many(&self, _: &[Lookup]) -> Result<Vec<Option<Record>>, StoreError> {
+        Ok(Vec::new())
+    }
 }
 
 #[test]
 fn an_unreachable_store_makes_everything_run() {
     let class = RunnerClass::here();
-    let (d, notice) = decide(&[cand("crates/a", "h"), cand("crates/b", "h")], &cfg(), &class, &Down, NOW, OK);
+    let (d, notice) = decide(&[cand("crates/a", "h"), cand("crates/b", "h")], &cfg(), &class, "", &Down, NOW, OK);
     assert!(d.iter().all(|x| matches!(x, Decision::Run(Why::Off(_)))));
     assert!(notice.unwrap().contains("refused"));
 }
@@ -239,27 +395,27 @@ fn never_cached_dirty_old_and_untrusted_records_run() {
     let mut c = cfg();
     c.no_test_cache = vec!["crate:crates/a".into()];
     assert_eq!(
-        decide(std::slice::from_ref(&a), &c, &class, &s, NOW, OK).0[0],
+        decide(std::slice::from_ref(&a), &c, &class, "", &s, NOW, OK).0[0],
         Decision::Run(Why::Never)
     );
     let mut dirty = a.clone();
     dirty.dirty = true;
-    assert_eq!(decide(&[dirty], &cfg(), &class, &s, NOW, OK).0[0], Decision::Run(Why::Dirty));
+    assert_eq!(decide(&[dirty], &cfg(), &class, "", &s, NOW, OK).0[0], Decision::Run(Why::Dirty));
     // 48 hours while the nightly is paused, no limit once it runs.
     let old = NOW + 49 * 3600;
     assert_eq!(
-        decide(std::slice::from_ref(&a), &cfg(), &class, &s, old, OK).0[0],
+        decide(std::slice::from_ref(&a), &cfg(), &class, "", &s, old, OK).0[0],
         Decision::Run(Why::TooOld)
     );
     let mut running = cfg();
     running.nightly_paused = false;
     assert!(matches!(
-        decide(std::slice::from_ref(&a), &running, &class, &s, old, OK).0[0],
+        decide(std::slice::from_ref(&a), &running, &class, "", &s, old, OK).0[0],
         Decision::Reuse(_)
     ));
-    let deny: &dyn Fn(&Record) -> Result<(), String> = &|_| Err("run 8635 is on a branch".into());
+    let deny: &dyn Fn(&Record) -> Result<(), super::trust::Distrust> = &|_| Err("run 8635 is on a branch".into());
     assert!(matches!(
-        decide(&[a], &cfg(), &class, &s, NOW, deny).0[0],
+        decide(&[a], &cfg(), &class, "", &s, NOW, deny).0[0],
         Decision::Run(Why::Untrusted(_))
     ));
 }
@@ -284,14 +440,14 @@ fn a_corrupt_or_foreign_record_is_a_miss() {
     let json = json.unwrap();
     std::fs::write(&json, "{not json").unwrap();
     assert_eq!(
-        decide(std::slice::from_ref(&a), &cfg(), &class, &s, NOW, OK).0[0],
+        decide(std::slice::from_ref(&a), &cfg(), &class, "", &s, NOW, OK).0[0],
         Decision::Run(Why::Miss)
     );
     // A record of another key sitting under this key's name is refused by its own fields.
     let mut other = r.clone();
     other.key = "deadbeef".into();
     std::fs::write(&json, serde_json::to_string(&other.json()).unwrap()).unwrap();
-    assert_eq!(decide(&[a], &cfg(), &class, &s, NOW, OK).0[0], Decision::Run(Why::Miss));
+    assert_eq!(decide(&[a], &cfg(), &class, "", &s, NOW, OK).0[0], Decision::Run(Why::Miss));
 }
 
 #[test]
@@ -313,7 +469,10 @@ fn eviction_removes_old_records_only() {
 fn the_reused_line_names_target_key_and_run() {
     let l = rec(&cand("crates/a", "h"), &RunnerClass::of("windows", "x86_64"), NOW).line();
     assert!(l.starts_with("test-cache: reused target=rust:crates/a@Windows-X64 key="), "{l}");
-    assert!(l.contains("from run 8635 job 45047 (commit 0ae8b4794, 12 tests, 2027-"), "{l}");
+    assert!(
+        l.contains("from run 8635 job `crate (linux)` attempt 1 (commit 0ae8b4794, 12 tests, 2027-"),
+        "{l}"
+    );
 }
 
 #[test]
@@ -393,7 +552,7 @@ fn an_s3_store_that_cannot_be_reached_fails_the_call_so_everything_runs() {
     let s = S3Store::from_env(&env, d.path().join("scratch")).unwrap();
     let class = RunnerClass::here();
     let c = cand("crates/a", "h");
-    let (dec, notice) = decide(&[c], &cfg(), &class, &s, NOW, OK);
+    let (dec, notice) = decide(&[c], &cfg(), &class, "", &s, NOW, OK);
     assert!(matches!(dec[0], Decision::Run(Why::Off(_))));
     let n = notice.expect("a notice names the cause");
     assert!(!n.contains("s3cr3t"), "{n}");
@@ -446,14 +605,14 @@ fn the_nightly_deletes_the_cached_pass_of_a_target_that_fails_and_names_its_run(
     let ask = |c: &Candidate| Lookup {
         target: c.target.id.clone(),
         class: class.clone(),
-        key: key_of(c, &cfg(), &class),
+        key: key_of(c, &cfg(), &class, ""),
     };
     let gone = invalidate(&s, &[ask(&a)]).unwrap();
     assert_eq!(gone.len(), 1);
     assert_eq!(gone[0].run, "8635");
     // Only `a` went; a second delete finds nothing, and `b` still reuses.
     assert!(invalidate(&s, &[ask(&a)]).unwrap().is_empty());
-    let (d, _) = decide(&[a, b], &cfg(), &class, &s, NOW, OK);
+    let (d, _) = decide(&[a, b], &cfg(), &class, "", &s, NOW, OK);
     assert_eq!(d[0], Decision::Run(Why::Miss));
     assert!(matches!(d[1], Decision::Reuse(_)));
 }
@@ -468,54 +627,169 @@ fn the_nightly_is_recognised_by_its_event_or_its_workflow() {
     assert!(!is_nightly(&env(&[("GITHUB_EVENT_NAME", "push")])));
 }
 
+/// A run's facts for the trust tests: its ref and its jobs (display name, ended success).
+fn run_facts(git_ref: &str, jobs: &[(&str, bool)]) -> super::trust::RunFacts {
+    super::trust::RunFacts {
+        git_ref: git_ref.into(),
+        jobs: jobs
+            .iter()
+            .map(|(n, ok)| (n.to_string(), if *ok { JobOutcome::Passed } else { JobOutcome::Failed }))
+            .collect(),
+    }
+}
+
+/// A CI record of `job` in attempt `attempt` of `run`.
+fn ci_rec(run: &str, job: &str, attempt: u64) -> Record {
+    Record {
+        run: run.into(),
+        job: job.into(),
+        attempt,
+        ..rec(&cand("crates/a", "h"), &RunnerClass::here(), NOW)
+    }
+}
+
 #[test]
-fn a_record_counts_only_when_its_run_is_a_main_or_train_run_with_a_successful_job() {
-    use super::trust::{Provenance, RunFacts};
-    let class = RunnerClass::here();
-    let facts = |r: &str, ok: bool| RunFacts {
-        git_ref: r.into(),
-        jobs: vec![(45047, ok)],
-        success: ok,
-    };
-    let world = |id: u64| match id {
-        8635 => Ok(Some(facts("refs/heads/main", true))),
-        8636 => Ok(Some(facts("refs/heads/train/x", true))),
-        8637 => Ok(Some(facts("refs/heads/feat/branch", true))),
-        8638 => Ok(Some(facts("refs/heads/main", false))),
-        8639 => Err("503".to_string()),
+fn a_record_counts_only_when_its_run_is_a_main_or_train_run_and_its_own_job_succeeded() {
+    use super::trust::Provenance;
+    let world = |id: u64, attempt: u64| match (id, attempt) {
+        (8635, 1) => Ok(Some(run_facts("refs/heads/main", &[("crate (linux)", true)]))),
+        (8636, 1) => Ok(Some(run_facts("refs/heads/train/x", &[("crate (linux)", true)]))),
+        (8637, 1) => Ok(Some(run_facts("refs/heads/feat/branch", &[("crate (linux)", true)]))),
+        (8638, 1) => Ok(Some(run_facts("refs/heads/main", &[("crate (linux)", false)]))),
+        (8639, 1) => Err("503".to_string()),
+        (8641, 1) => Ok(Some(super::trust::RunFacts {
+            git_ref: "refs/heads/main".into(),
+            jobs: vec![("crate (linux)".into(), JobOutcome::Unfinished)],
+        })),
+        (8640, 1) => Ok(Some(run_facts(
+            "refs/heads/main",
+            &[("crate (linux)", true), ("crate (linux)", true)],
+        ))),
         _ => Ok(None),
     };
     let calls = std::cell::Cell::new(0);
-    let p = Provenance::new(|id| {
+    let p = Provenance::new(|id, attempt| {
         calls.set(calls.get() + 1);
-        world(id)
+        world(id, attempt)
     });
-    let r = |run: &str, job: &str| Record {
-        run: run.into(),
-        job: job.into(),
-        ..rec(&cand("crates/a", "h"), &class, NOW)
-    };
-    assert!(p.check(&r("8635", "45047")).is_ok());
-    assert!(p.check(&r("8635", "45047")).is_ok());
-    assert_eq!(calls.get(), 1, "one call per distinct run");
-    assert!(p.check(&r("8636", "45047")).is_ok());
+    assert!(p.check(&ci_rec("8635", "crate (linux)", 1)).is_ok());
+    assert!(p.check(&ci_rec("8635", "crate (linux)", 1)).is_ok());
+    assert_eq!(calls.get(), 1, "one call per distinct run attempt");
+    assert!(p.check(&ci_rec("8636", "crate (linux)", 1)).is_ok());
     assert!(
-        p.check(&r("8637", "45047")).unwrap_err().contains("not main or a train"),
+        p.check(&ci_rec("8637", "crate (linux)", 1))
+            .unwrap_err()
+            .reason()
+            .contains("not main or a train"),
         "a branch run"
     );
     assert!(
-        p.check(&r("8638", "45047")).unwrap_err().contains("did not end success"),
+        p.check(&ci_rec("8638", "crate (linux)", 1))
+            .unwrap_err()
+            .reason()
+            .contains("did not end success"),
         "a failed job"
     );
+    // No answer is not a no: an unreadable run and a job still running are undecided, so their records are never replaced.
+    let unread = p.check(&ci_rec("8639", "crate (linux)", 1)).unwrap_err();
     assert!(
-        p.check(&r("8639", "45047")).unwrap_err().contains("could not be read"),
-        "an unreadable run refuses"
+        matches!(&unread, super::trust::Distrust::Unknown(w) if w.contains("could not be read")),
+        "an unreadable run is undecided: {unread:?}"
     );
-    assert!(p.check(&r("9999", "45047")).unwrap_err().contains("does not exist"));
-    assert!(p.check(&r("8635", "1")).unwrap_err().contains("no job 1"), "a job the run lacks");
+    let running = p.check(&ci_rec("8641", "crate (linux)", 1)).unwrap_err();
     assert!(
-        p.check(&r("local-12", "")).unwrap_err().contains("not a CI run id"),
+        matches!(&running, super::trust::Distrust::Unknown(w) if w.contains("has not finished")),
+        "a job still running is undecided: {running:?}"
+    );
+    assert!(
+        matches!(
+            p.check(&ci_rec("8638", "crate (linux)", 1)),
+            Err(super::trust::Distrust::Refused(_))
+        ),
+        "a failed job is a definite no"
+    );
+    let no_token = Provenance::new(|_, _| Err("no API token (PLAN_TOKEN or GITEA_TOKEN)".to_string()));
+    assert!(matches!(
+        no_token.check(&ci_rec("8635", "crate (linux)", 1)),
+        Err(super::trust::Distrust::Unknown(_))
+    ));
+    assert!(
+        p.check(&ci_rec("9999", "crate (linux)", 1))
+            .unwrap_err()
+            .reason()
+            .contains("does not exist")
+    );
+    assert!(
+        p.check(&ci_rec("8635", "crate (macos-latest)", 1))
+            .unwrap_err()
+            .reason()
+            .contains("has no job"),
+        "a job the run lacks"
+    );
+    assert!(
+        p.check(&ci_rec("8635", "crate (linux)", 2))
+            .unwrap_err()
+            .reason()
+            .contains("does not exist"),
+        "an attempt the server does not have"
+    );
+    assert!(
+        p.check(&ci_rec("8640", "crate (linux)", 1))
+            .unwrap_err()
+            .reason()
+            .contains("several jobs"),
+        "two jobs of one name are ambiguous, so untrusted"
+    );
+    assert!(
+        p.check(&ci_rec("local-12", "", 0))
+            .unwrap_err()
+            .reason()
+            .contains("not a CI run id"),
         "a local record in CI"
+    );
+}
+
+#[test]
+fn a_passing_jobs_records_are_trusted_in_a_run_where_another_job_is_red_and_a_failed_jobs_are_not() {
+    use super::trust::Provenance;
+    // Run 8800 ended red (the macOS leg failed), but the Linux leg of the same run passed.
+    let p = Provenance::new(|_, _| {
+        Ok(Some(run_facts(
+            "refs/heads/train/x",
+            &[
+                ("crate (ubuntu-latest)", true),
+                ("crate (macos-latest)", false),
+                ("paddock-dev (windows-latest)", true),
+            ],
+        )))
+    });
+    assert!(
+        p.check(&ci_rec("8800", "crate (ubuntu-latest)", 1)).is_ok(),
+        "the passing job of a red run"
+    );
+    assert!(p.check(&ci_rec("8800", "paddock-dev (windows-latest)", 1)).is_ok());
+    assert!(
+        p.check(&ci_rec("8800", "crate (macos-latest)", 1))
+            .unwrap_err()
+            .reason()
+            .contains("did not end success"),
+        "the failed job's own records"
+    );
+}
+
+#[test]
+fn a_record_that_names_no_job_or_no_attempt_is_untrusted() {
+    use super::trust::Provenance;
+    let p = Provenance::new(|_, _| Ok(Some(run_facts("refs/heads/main", &[("crate (linux)", true)]))));
+    assert!(
+        p.check(&ci_rec("8635", "", 1)).unwrap_err().reason().contains("names no job"),
+        "an unknown job counts as untrusted"
+    );
+    assert!(
+        p.check(&ci_rec("8635", "crate (linux)", 0))
+            .unwrap_err()
+            .reason()
+            .contains("names no job")
     );
 }
 
@@ -550,6 +824,7 @@ fn record_stores_a_package_only_when_all_its_tests_passed_first_time_in_a_whole_
     let meta = RunMeta {
         run: "8700".into(),
         job: String::new(),
+        attempt: 0,
         git_ref: "refs/heads/main".into(),
         commit: "c0ffee".into(),
         at: NOW,
@@ -579,7 +854,7 @@ fn record_stores_a_package_only_when_all_its_tests_passed_first_time_in_a_whole_
         l.extend(extra.iter().map(|s| s.to_string()));
         l.join("\n")
     };
-    let got: Vec<String> = records_from_log(&log(&[]), &cands, &cfg(), &class, &meta)
+    let got: Vec<String> = records_from_log(&log(&[]), &cands, &cfg(), &class, "", &meta)
         .into_iter()
         .map(|r| r.target)
         .collect();
@@ -590,7 +865,7 @@ fn record_stores_a_package_only_when_all_its_tests_passed_first_time_in_a_whole_
     );
     // A log with no summary (the run was cut short) stores nothing at all, even for the package that passed.
     let cut: String = log(&[]).lines().filter(|l| !l.contains("Summary")).collect::<Vec<_>>().join("\n");
-    assert!(records_from_log(&cut, &cands, &cfg(), &class, &meta).is_empty());
+    assert!(records_from_log(&cut, &cands, &cfg(), &class, "", &meta).is_empty());
 }
 
 fn leg(os: &str, packages: &str, filter: &str) -> serde_json::Value {
@@ -599,8 +874,9 @@ fn leg(os: &str, packages: &str, filter: &str) -> serde_json::Value {
 
 fn reuse_plan() -> super::plan::ReusePlan {
     super::plan::ReusePlan::parse(
-        r#"{"macOS-ARM64": {"a": "rust:crates/a@macOS-ARM64 from run 8635", "b": "rust:crates/b@macOS-ARM64 from run 8635"},
-            "Linux-X64": {"a": "rust:crates/a@Linux-X64 from run 8635"}}"#,
+        r#"{"macOS-ARM64": {"": {"a": "rust:crates/a@macOS-ARM64 from run 8635", "b": "rust:crates/b@macOS-ARM64 from run 8635"},
+                            "test(/^ci_host::/)": {"c": "rust:crates/c@macOS-ARM64 from run 8635"}},
+            "Linux-X64": {"": {"a": "rust:crates/a@Linux-X64 from run 8635"}}}"#,
     )
     .unwrap()
 }
@@ -643,20 +919,62 @@ fn a_package_list_leg_loses_the_reused_packages_and_ends_when_none_is_left() {
 }
 
 #[test]
-fn a_narrowed_leg_and_the_coverage_run_are_left_alone() {
-    // A filtered leg is not a whole-package run, and the crate job's Linux leg runs no tests (the coverage job does, uncached, D4).
-    let narrowed = super::plan::apply(vec![leg("macos-latest", "", "package(=a)")], "crate", &reuse_plan(), false);
-    assert!(narrowed.legs[0].get("test_cache_exclude").is_none() && narrowed.reused.is_empty());
+fn a_filtered_leg_reuses_only_a_pass_of_its_own_filter() {
+    // The leg's filter has an entry: its package is left out, the filter stays (the run stays declared as it was).
+    let same = super::plan::apply(vec![leg("macos-latest", "c", "test(/^ci_host::/)")], "crate", &reuse_plan(), false);
+    assert_eq!(same.legs[0]["test_skip"], "true", "the only package has a pass under this filter");
+    assert_eq!(same.legs[0]["test_filter"], "test(/^ci_host::/)");
+    assert_eq!(same.reused["crate@macos-latest"].len(), 1);
+    // The spelling of the filter is not part of it.
+    let spaced = super::plan::apply(
+        vec![leg("macos-latest", "c", "  test(/^ci_host::/) ")],
+        "crate",
+        &reuse_plan(),
+        false,
+    );
+    assert_eq!(spaced.legs[0]["test_skip"], "true");
+    // Another filter finds no pass: the unfiltered pass of `a` does not stand in for a filtered run, nor the other way round.
+    let other = super::plan::apply(vec![leg("macos-latest", "a c", "test(/^other::/)")], "crate", &reuse_plan(), false);
+    assert_eq!(other.legs[0], leg("macos-latest", "a c", "test(/^other::/)"));
+    assert!(other.reused.is_empty());
+    let whole = super::plan::apply(vec![leg("macos-latest", "c", "")], "crate", &reuse_plan(), false);
+    assert!(
+        whole.reused.is_empty(),
+        "the filtered pass of `c` is not a pass of the whole package"
+    );
+    // A one-crate workspace (no package list): an exclusion, which the step ANDs with the leg's filter.
+    let ws = super::plan::apply(
+        vec![leg("macos-latest", "", "test(/^ci_host::/)")],
+        "paddock-dev",
+        &reuse_plan(),
+        true,
+    );
+    assert_eq!(ws.legs[0]["test_cache_exclude"], "not (package(=c))");
+}
+
+#[test]
+fn the_coverage_run_and_a_leg_with_nothing_to_test_are_left_alone() {
+    // The crate job's Linux leg runs no tests (the coverage job does, uncached, D4).
     let linux_crate = super::plan::apply(vec![leg("ubuntu-latest", "", "")], "crate", &reuse_plan(), false);
     assert!(linux_crate.reused.is_empty());
     // The same Linux leg of paddock-dev runs its tests plainly, so it is cacheable there.
     let linux_dev = super::plan::apply(vec![leg("ubuntu-latest", "", "")], "paddock-dev", &reuse_plan(), true);
     assert_eq!(linux_dev.legs[0]["test_cache_exclude"], "not (package(=a))");
+    let mut skip = leg("macos-latest", "a", "");
+    skip["test_skip"] = serde_json::json!("true");
+    assert!(super::plan::apply(vec![skip], "crate", &reuse_plan(), false).reused.is_empty());
 }
 
 #[test]
 fn a_plan_file_that_is_not_a_class_package_note_map_is_refused() {
-    for bad in ["[]", "{\"macOS-ARM64\": []}", "{\"macOS-ARM64\": {\"a\": \"\"}}", "not json"] {
+    for bad in [
+        "[]",
+        "{\"macOS-ARM64\": []}",
+        "{\"macOS-ARM64\": {\"\": []}}",
+        "{\"macOS-ARM64\": {\"\": {\"a\": \"\"}}}",
+        "{\"macOS-ARM64\": {\"a\": \"note\"}}",
+        "not json",
+    ] {
         assert!(super::plan::ReusePlan::parse(bad).is_err(), "{bad}");
     }
     let p = reuse_plan();
@@ -682,6 +1000,43 @@ fn a_matched_target_that_ran_and_failed_is_a_soundness_finding_and_a_missing_one
     // A log that is not whole proves nothing: no match counted, no finding.
     let cut = judge("garbage", &names(&["a"]));
     assert_eq!(shadow_outcome(&[&a], &cut), Shadow::default());
+}
+
+#[test]
+fn a_filtered_local_run_reports_matched_targets_it_never_ran_as_not_seen_never_as_findings() {
+    // Train x's member gate: `test-cache run --filter 'package(=a)'` over a workspace whose other targets b and c matched local records.
+    // Only a ran; b was outside the filter (not seen) and must not be a finding. d ran and failed without a record: not stored.
+    let (a, b, c, d) = (cand("a", "h"), cand("b", "h"), cand("c", "h"), cand("d", "h"));
+    let log = [
+        "    Starting 2 tests across 2 binaries",
+        "        PASS [   0.010s] ( 1/2) a t::ok",
+        "        FAIL [   0.010s] ( 2/2) d t::broken",
+        "     Summary [   0.050s] 2 tests run: 1 passed, 1 failed, 0 skipped",
+        "        FAIL [   0.010s] ( 2/2) d t::broken",
+    ]
+    .join("\n");
+    let judged = judge(&log, &names(&["a", "b", "c", "d"]));
+    let out = super::run_outcome(&[&a, &b, &c, &d], &[&a, &b, &c], &judged);
+    assert_eq!(
+        out.shadow,
+        shadow_outcome(&[&a, &b, &c], &judged),
+        "one rule for the local run and the CI record step"
+    );
+    assert!(
+        out.shadow.findings.is_empty(),
+        "a target outside the filter is not a finding: {:?}",
+        out.shadow.findings
+    );
+    assert_eq!((out.shadow.matched, out.shadow.passed), (1, 1));
+    assert_eq!(out.not_seen, 2, "b and c are not seen");
+    assert_eq!(out.not_stored.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), vec!["rust:d"]);
+    // The nightly invalidates only what ran and failed: d, never b or c (not seen) or a (passed).
+    assert!(out.ran_and_failed("rust:d"));
+    assert!(!out.ran_and_failed("rust:a") && !out.ran_and_failed("rust:b") && !out.ran_and_failed("rust:c"));
+    // A matched target that ran and failed is still the finding.
+    let red = super::run_outcome(&[&a, &d], &[&a, &d], &judged);
+    assert_eq!(red.shadow.findings, vec!["rust:d".to_string()]);
+    assert!(red.not_stored.is_empty() && red.not_seen == 0 && red.ran_and_failed("rust:d"));
 }
 
 #[test]
@@ -797,4 +1152,99 @@ fn a_redirect_is_never_followed_and_is_named_with_its_target() {
     assert!(super::s3::parse_done("garbage").is_err());
     // The whole call fails on a redirect, so the caller runs everything (fail open), whichever transfer it was.
     assert!(super::s3::parse_done("200||/tmp/a\n308|http://x/|/tmp/b\n").is_err());
+}
+
+#[test]
+fn a_filtered_host_leg_records_under_its_filter_and_an_identical_one_reuses_but_another_filter_does_not() {
+    let (_d, s) = scratch();
+    let class = RunnerClass::of("macos", "aarch64");
+    let a = cand("a", "h");
+    let filter = "test(/^ci_host::/)";
+    let log = [
+        "    Starting 1 test across 1 binary",
+        "        PASS [   0.010s] ( 1/1) a ci_host::t",
+        "     Summary [   0.010s] 1 test run: 1 passed, 0 skipped",
+    ]
+    .join("\n");
+    let meta = RunMeta {
+        run: "8900".into(),
+        job: "crate (macos-latest)".into(),
+        attempt: 1,
+        git_ref: "refs/heads/main".into(),
+        commit: "c0ffee".into(),
+        at: NOW,
+        os_build: String::new(),
+    };
+    let put = records_from_log(&log, std::slice::from_ref(&a), &cfg(), &class, filter, &meta);
+    assert_eq!(put.len(), 1, "a filtered leg records the package it ran");
+    assert_eq!(
+        (put[0].filter.as_str(), put[0].job.as_str(), put[0].attempt),
+        (filter, "crate (macos-latest)", 1)
+    );
+    s.put_many(&put).unwrap();
+    let ask = |f: &str| decide(std::slice::from_ref(&a), &cfg(), &class, f, &s, NOW, OK).0.remove(0);
+    assert!(matches!(ask(filter), Decision::Reuse(_)), "a later identical leg reuses");
+    assert!(
+        matches!(ask("  test(/^ci_host::/)\n"), Decision::Reuse(_)),
+        "spelling is not part of the filter"
+    );
+    assert_eq!(
+        ask("test(/^other::/)"),
+        Decision::Run(Why::Miss),
+        "a different filter does not reuse"
+    );
+    assert_eq!(
+        ask(""),
+        Decision::Run(Why::Miss),
+        "a filtered pass is not a pass of the whole package"
+    );
+    // And the other way round: a whole-package record is not read by a filtered leg.
+    let whole = records_from_log(&log, std::slice::from_ref(&a), &cfg(), &class, "", &meta);
+    let (_d2, s2) = scratch();
+    s2.put_many(&whole).unwrap();
+    assert_eq!(
+        decide(std::slice::from_ref(&a), &cfg(), &class, filter, &s2, NOW, OK).0[0],
+        Decision::Run(Why::Miss)
+    );
+}
+
+#[test]
+fn a_record_of_the_schema_before_the_filter_key_is_refused() {
+    let class = RunnerClass::here();
+    let a = cand("crates/a", "h");
+    let mut old = rec(&a, &class, NOW).json();
+    old["schema"] = serde_json::json!(1);
+    assert!(Record::parse(&old.to_string(), &rec(&a, &class, NOW).key, &a.target.id, &class).is_none());
+}
+
+#[test]
+fn the_record_steps_carry_their_jobs_name_and_the_leg_filter_as_the_workflow_names_them() {
+    // The reader finds a record's job by the display name the writer passes, so the step's copy of the name must be the job's own.
+    let text = include_str!("../../../../.gitea/workflows/ci.yml");
+    let docs = yaml_rust2::YamlLoader::load_from_str(text).unwrap();
+    for job in ["crate", "paddock-dev"] {
+        let j = &docs[0]["jobs"][job];
+        let name = j["name"].as_str().unwrap_or_else(|| panic!("job {job} has no name"));
+        let step = j["steps"]
+            .as_vec()
+            .unwrap()
+            .iter()
+            .find(|s| s["name"].as_str() == Some("Record test results (test cache)"))
+            .unwrap_or_else(|| panic!("job {job} has no record step"));
+        assert_eq!(step["env"]["PADDOCK_JOB_NAME"].as_str(), Some(name), "{job}: the step's job name");
+        assert_eq!(
+            step["env"]["PADDOCK_RUN_ATTEMPT"].as_str(),
+            Some("${{ github.run_attempt }}"),
+            "{job}"
+        );
+        assert_eq!(step["env"]["LEG_FILTER"].as_str(), Some("${{ matrix.test_filter }}"), "{job}");
+        assert!(
+            !step["if"].as_str().unwrap_or("").contains("test_filter"),
+            "{job}: a filtered leg records too (its filter is in the key)"
+        );
+        assert!(
+            step["run"].as_str().unwrap_or("").contains("--filter \"$LEG_FILTER\""),
+            "{job}: the record is keyed by the filter"
+        );
+    }
 }
