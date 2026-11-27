@@ -652,6 +652,12 @@ fn guard_config_reader() {
     let found = config_target_dirs(&proj, None);
     assert_eq!(
         found,
-        vec![rig.root().join("a/out").to_string_lossy().into_owned()]
+        vec![
+            rig.root()
+                .join("a")
+                .join("out")
+                .to_string_lossy()
+                .into_owned()
+        ]
     );
 }

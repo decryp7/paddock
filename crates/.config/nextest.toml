@@ -78,3 +78,11 @@ success-output = "final"
 [[profile.ci.overrides]]
 filter = "package(paddock-service) & binary(it) & test(/^model::the_crash_model_/)"
 slow-timeout = { period = "30s", terminate-after = 4 }
+
+# waiver: ADR 0103's size class "cpu-heavy": paddock-throttle's queue model explores random interleavings of waiters and holders and is pure CPU.
+# Measured: 16 s to 28 s on the Mac under the agents' load (2026-11-27, three runs), and stopped at 60 s on the Windows CI runner (run 9242, job
+# 52621, test slots::the_queue_model_has_no_wait_cycle_and_never_exceeds_the_maximum, TMT at 60.4 s), where the tool's tests did not run before
+# the core moved into this crate. n = 1 for Windows: the log does not record the runner's load (not measured). The class gives it 180 s.
+[[profile.ci.overrides]]
+filter = "package(paddock-throttle) & binary(it) & test(the_queue_model_has_no_wait_cycle_and_never_exceeds_the_maximum)"
+slow-timeout = { period = "30s", terminate-after = 6 }

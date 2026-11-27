@@ -456,6 +456,9 @@ fn a_row_expected_at_the_limit_is_not_quick() {
 /// The lock folder (and the history in it) moves where a reboot does not clear it (./dev sets `THROTTLE_DIR=<dev-targets>/throttle`; it was
 /// /private/tmp, and every reboot lost the history, so no row was ever quick, 2026-11-25), and the old folder's file is read once: the
 /// first record copies its lines over, and the new file is read from then on.
+// Unix only: the default folder is derived from HOME and the old folder is a Unix path (LEGACY_ROOT); on Windows the same rules read
+// USERPROFILE and the test would model a different host (the tool's tests ran on Unix only before the core moved into this crate).
+#[cfg(unix)]
 #[test]
 fn the_history_moves_with_the_lock_folder_and_reads_the_old_file_once() {
     let rig = Rig::new();
