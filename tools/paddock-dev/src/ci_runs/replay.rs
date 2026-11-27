@@ -66,6 +66,7 @@ enum R {
 /// What the trial reader says, as the table writes it.
 #[derive(Debug)]
 enum T {
+    Green,
     NotMeasured(&'static str),
 }
 
@@ -241,8 +242,8 @@ const SHAPES: &[Shape] = &[
         on_line: V::Red(None, "plan verdict: complete="),
         on_landing: V::Red(None, ""),
         reuse: None,
-        trial: Some(T::NotMeasured("did not test a full scope")),
-        why: "a member's trial with a v3 line that ran only its affected jobs (eslint and icons not run): the trial reader counts a green trial only for a complete or landing scope (ADR 0123 section 7), so it is not measured",
+        trial: Some(T::Green),
+        why: "a member's trial with a v3 line that ran only its affected jobs (eslint and icons not run): the trial reader grades a trial on its own scope line (every expected job ran and passed), so it is green; the full scope is the landing verdict's",
     },
 ];
 
@@ -362,6 +363,7 @@ fn every_shape_is_answered_as_written_down() {
             let mut f = serve(s.name);
             let got = verdict::trial(&mut client(&mut f), s.workflow, &branch, &member);
             let ok = match (&got, want) {
+                (verdict::Trial::Green { run }, T::Green) => *run == s.run,
                 (verdict::Trial::NotMeasured(why), T::NotMeasured(phrase)) => why.contains(phrase),
                 _ => false,
             };

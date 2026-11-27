@@ -2179,7 +2179,7 @@ fn forge(w: &World, f: Forged) -> String {
         if let Some(x) = m.extra {
             put(x);
         }
-        let msg = format!("Merge {} ({}) into train", m.branch, &m.msg_head[..9]);
+        let msg = real::merge_message(m.branch, m.msg_head);
         git(a, &["commit", "--quiet", "-m", &msg]);
     }
     let mut body = format!("Queue-Prs: {}\nQueue-Round: 1", f.prs);
@@ -2973,4 +2973,17 @@ fn a_blocking_guard_stops_the_real_adapter_before_anything_is_sent() {
         "{log}"
     );
     assert!(server.posted.is_empty(), "nothing sent");
+}
+
+#[test]
+fn the_queues_merge_message_names_its_member_in_trailers_the_one_reader_reads() {
+    let head = "a".repeat(40);
+    let m = real::merge_message("feat/pr1", &head);
+    assert_eq!(
+        m.lines().next(),
+        Some(format!("Merge feat/pr1 ({}) into train", "a".repeat(9)).as_str())
+    );
+    let block = m.split_once("\n\n").unwrap().1;
+    let read = crate::merge_check::trailers::merge_member("x", block);
+    assert_eq!((read.branch.as_str(), read.sync_sha.as_deref()), ("feat/pr1", Some(head.as_str())));
 }

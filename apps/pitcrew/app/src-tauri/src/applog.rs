@@ -57,12 +57,9 @@ mod tests {
     use super::*;
 
     #[test]
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
     fn lines_are_appended_bounded_and_rotated() {
-        let dir = std::env::temp_dir().join(format!("pitcrew-it-applog-{}", std::process::id()));
+        let scratch = paddock_testkit::canonical_tempdir();
+        let dir = scratch.join("it-applog");
         let p = dir.join("app.log");
         append(&p, "first\nwith a newline");
         append(&p, "second");
@@ -73,6 +70,5 @@ mod tests {
         append(&p, "after");
         assert!(p.with_extension("log.1").exists());
         assert!(std::fs::read_to_string(&p).unwrap().ends_with("after\n"));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

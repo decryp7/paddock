@@ -352,7 +352,10 @@ jobs:
           filter=()
           if [ -n "$FILTER" ]; then echo "::notice::nextest runs only the selected tests (a rerun's failed tests, or the plan's smoke set or affected targets): $FILTER"; filter=(-E "$FILTER" --no-tests=warn)
           elif [ -n "$TEST_FILTER" ]; then echo "::notice::nextest filter (hostTests, and the packages this change reaches in a member run): $TEST_FILTER"; filter=(-E "$TEST_FILTER" --no-tests=fail); fi
-          if [ -n "$TEST_CACHE_EXCLUDE" ] && [ -z "$FILTER" ] && [ -z "$TEST_FILTER" ]; then echo "::notice::test-cache: nextest leaves out the packages with a reusable pass of the same key: $TEST_CACHE_EXCLUDE"; filter=(-E "$TEST_CACHE_EXCLUDE" --no-tests=warn); fi
+          if [ -n "$TEST_CACHE_EXCLUDE" ] && [ -z "$FILTER" ]; then
+            echo "::notice::test-cache: nextest leaves out the packages with a reusable pass of the same key (and filter): $TEST_CACHE_EXCLUDE"
+            if [ -n "$TEST_FILTER" ]; then filter=(-E "($TEST_FILTER) & ($TEST_CACHE_EXCLUDE)" --no-tests=warn); else filter=(-E "$TEST_CACHE_EXCLUDE" --no-tests=warn); fi
+          fi
           # A partition runs its share of the tests the filters select; a rerun of named failed tests (FILTER) runs those whole.
           part=()
           if [ -n "$PART_LABEL" ] && [ -z "$FILTER" ]; then part=(--partition "hash:${PART_LABEL#, }"); echo "::notice::nextest partition ${PART_LABEL#, } (hash of the test)"; fi
@@ -360,22 +363,26 @@ jobs:
           cargo nextest run --profile ci --locked --no-fail-fast ${part[@]+"${part[@]}"} ${filter[@]+"${filter[@]}"} 2>&1 | tee "$RUNNER_TEMP/nextest-paddock-dev.log"
 
       # ADR 0116, report-only (ER-41): the test-result record of paddock-dev's package (see the crates leg's step). Unlike the crates
-      # job, paddock-dev's Linux leg runs its tests plainly (no coverage run), so it is cacheable on every runner; but a leg that runs only a
-      # filtered part of the package (hostTests modules on Windows and macOS, a member run's filter) has a non-empty `test_filter` and
-      # records nothing, because the package's pass would then rest on a part of its tests. `record` stores only packages whose tests all
-      # passed on the first try in a whole log (test_cache::records_from_log).
+      # job, paddock-dev's Linux leg runs its tests plainly (no coverage run), so it is cacheable on every runner. A leg that runs only a
+      # filtered part of the package (hostTests modules on Windows and macOS, a member run's filter) records under its `test_filter`: the
+      # key holds the filter, so that pass counts only for a later leg with the same filter (user decision 97). `record` stores only
+      # packages whose tests all passed on the first try in a whole log (test_cache::records_from_log).
       - name: Record test results (test cache)
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter && matrix.test_filter == '' && matrix.part_label == '' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/train/')) }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter && matrix.part_label == '' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/train/')) }}
         continue-on-error: true
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
         env:
           PLAN_TOKEN: ${{ github.token }}
+          LEG_FILTER: ${{ matrix.test_filter }}
+          # The job's display name (the `name:` of this job) and the run's attempt: the reader trusts a record by its own job's result.
+          PADDOCK_JOB_NAME: paddock-dev (${{ matrix.os }})
+          PADDOCK_RUN_ATTEMPT: ${{ github.run_attempt }}
           PADDOCK_TEST_CACHE_KEY_ID: ${{ secrets.PADDOCK_TEST_CACHE_KEY_ID }}
           PADDOCK_TEST_CACHE_SECRET: ${{ secrets.PADDOCK_TEST_CACHE_SECRET }}
           PADDOCK_SCCACHE_S3_ENDPOINT: ${{ vars.PADDOCK_SCCACHE_S3_ENDPOINT }}
         run: |
           [ -s "$RUNNER_TEMP/nextest-paddock-dev.log" ] || { echo "::notice::test-cache: no nextest output to record"; exit 0; }
-          "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci test-cache record --workspace tools/paddock-dev --shared --log "$RUNNER_TEMP/nextest-paddock-dev.log"
+          "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci test-cache record --workspace tools/paddock-dev --shared --filter "$LEG_FILTER" --log "$RUNNER_TEMP/nextest-paddock-dev.log"
 
       # ADR 0121, report-only (ER-41): the cost-class charges the tests recorded; a ::warning:: and a job-summary row per test outside its class.
       - name: Test cost report
@@ -1064,7 +1071,7 @@ jobs:
           TEST_FILTER: ${{ matrix.test_filter }}
           TEST_SKIP: ${{ matrix.test_skip }}
           # The packages whose pass of the same key the test cache reuses (ADR 0116, `./dev plan --ci`): a filterset that leaves them out;
-          # empty while the switch is off. Used only by a leg with no filter of its own, so the run stays whole.
+          # empty while the switch is off. A leg with a filter of its own (hostTests) ANDs it with that filter: its pass was recorded under the same filter.
           TEST_CACHE_EXCLUDE: ${{ matrix.test_cache_exclude }}
           # A failed-only round (since_run): each failed test of FILTER must still select a test (./dev ci rerun-check), never a warning.
           RERUN: ${{ github.event.inputs.since_run }}
@@ -1083,23 +1090,30 @@ jobs:
           fi
           # The output is kept for the test-cache record step below (ADR 0116, report-only); pipefail keeps nextest's exit code.
           set -o pipefail
-          if [ -n "$TEST_CACHE_EXCLUDE" ] && [ -z "$FILTER" ] && [ -z "$TEST_FILTER" ]; then echo "::notice::test-cache: nextest leaves out the packages with a reusable pass of the same key: $TEST_CACHE_EXCLUDE"; filter=(-E "$TEST_CACHE_EXCLUDE" --no-tests=warn); fi
+          if [ -n "$TEST_CACHE_EXCLUDE" ] && [ -z "$FILTER" ]; then
+            echo "::notice::test-cache: nextest leaves out the packages with a reusable pass of the same key (and filter): $TEST_CACHE_EXCLUDE"
+            if [ -n "$TEST_FILTER" ]; then filter=(-E "($TEST_FILTER) & ($TEST_CACHE_EXCLUDE)" --no-tests=warn); else filter=(-E "$TEST_CACHE_EXCLUDE" --no-tests=warn); fi
+          fi
           cargo nextest run "${sel[@]}" --all-features --profile ci ${filter[@]+"${filter[@]}"} 2>&1 | tee "$RUNNER_TEMP/nextest-crates.log"
 
-      # ADR 0116, report-only (ER-41): stores the pass of every package this run proved (and only a leg with no filter: `test_filter` empty) (whole, first try, no flake) in the shared test-result
-      # store. Only a main or train run writes (`./dev ci test-cache record` refuses any other ref and any rerun itself). Never fails the job.
+      # ADR 0116, report-only (ER-41): stores the pass of every package this run proved (whole, first try, no flake) in the shared test-result
+      # store, keyed by the leg's `test_filter` (a host leg's pass counts only for a later leg with the same filter; user decision 97). Only a main or train run writes (`./dev ci test-cache record` refuses any other ref and any rerun itself). Never fails the job.
       - name: Record test results (test cache)
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && (runner.os != 'Linux' || !(inputs.os_full == true || inputs.os_full == 'true' || github.event.inputs.os_full == 'true' || inputs.release == true || startsWith(github.ref, 'refs/tags/'))) && !matrix.filter && matrix.test_filter == '' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/train/')) }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && (runner.os != 'Linux' || !(inputs.os_full == true || inputs.os_full == 'true' || github.event.inputs.os_full == 'true' || inputs.release == true || startsWith(github.ref, 'refs/tags/'))) && !matrix.filter && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/train/')) }}
         continue-on-error: true
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         env:
           PLAN_TOKEN: ${{ github.token }}
+          LEG_FILTER: ${{ matrix.test_filter }}
+          # The job's display name (the `name:` of this job) and the run's attempt: the reader trusts a record by its own job's result.
+          PADDOCK_JOB_NAME: crate (${{ matrix.os }}${{ matrix.part_label }})
+          PADDOCK_RUN_ATTEMPT: ${{ github.run_attempt }}
           PADDOCK_TEST_CACHE_KEY_ID: ${{ secrets.PADDOCK_TEST_CACHE_KEY_ID }}
           PADDOCK_TEST_CACHE_SECRET: ${{ secrets.PADDOCK_TEST_CACHE_SECRET }}
           PADDOCK_SCCACHE_S3_ENDPOINT: ${{ vars.PADDOCK_SCCACHE_S3_ENDPOINT }}
         run: |
           [ -s "$RUNNER_TEMP/nextest-crates.log" ] || { echo "::notice::test-cache: no nextest output to record"; exit 0; }
-          "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci test-cache record --workspace crates --shared --log "$RUNNER_TEMP/nextest-crates.log"
+          "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci test-cache record --workspace crates --shared --filter "$LEG_FILTER" --log "$RUNNER_TEMP/nextest-crates.log"
 
       - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
         if: failure() && runner.os == 'Windows'

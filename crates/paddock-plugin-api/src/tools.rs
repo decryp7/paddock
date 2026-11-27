@@ -797,6 +797,7 @@ mod tests {
     use std::sync::Mutex;
 
     fn abs() -> String {
+        // conformance: shared-temp-parent — an absolute path the schema validates and the host policy is asked about; never created or written
         std::env::temp_dir()
             .join("set.xml")
             .to_string_lossy()

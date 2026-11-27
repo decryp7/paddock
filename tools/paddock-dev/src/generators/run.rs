@@ -155,6 +155,8 @@ pub struct Real {
     built_throttle: OnceLock<Result<crate::tool_cache::Held, String>>,
     /// The local sccache wrapper (`None`: off, or a test; [`crate::local_sccache`]).
     wrapper: crate::local_sccache::Lazy,
+    /// Who the heavy builds are for: train work takes `throttle`'s priority lane ([`crate::priority`]).
+    priority: crate::priority::Priority,
 }
 
 impl Real {
@@ -178,7 +180,14 @@ impl Real {
             default_roots,
             built_throttle: OnceLock::new(),
             wrapper: crate::local_sccache::Lazy::off(),
+            priority: crate::priority::Priority::Normal,
         }
+    }
+
+    /// The same, with its heavy builds for `priority` (train work goes before normal waiters in `throttle`).
+    pub fn with_priority(mut self, priority: crate::priority::Priority) -> Real {
+        self.priority = priority;
+        self
     }
 
     /// The kept build folder of a workspace: `<root>/gen-check/<workspace>`, where the root is `PADDOCK_DEV_TARGET_DIR`, else the
@@ -268,7 +277,7 @@ impl Runner for Real {
                 &self.built_throttle,
                 limit,
             ) {
-                Ok(prefix) => full.extend(prefix),
+                Ok(prefix) => full.extend(crate::pre_push::budget::with_priority(&prefix, self.priority.is_train())),
                 Err(why) => return Ran::Unavailable(format!("no machine-wide heavy slot: {why}")),
             }
         }

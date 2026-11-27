@@ -185,15 +185,8 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
 
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
-    fn temp(name: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!("pitcrew-it-handoff-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&p);
-        std::fs::create_dir_all(&p).unwrap();
-        p
+    fn temp() -> paddock_testkit::CanonicalTempDir {
+        paddock_testkit::canonical_tempdir()
     }
 
     const LOG: &str =
@@ -205,7 +198,7 @@ mod tests {
 
     #[test]
     fn a_job_is_cut_out_written_and_opened_when_debrief_is_found() {
-        let d = temp("open");
+        let d = temp();
         let log = d.join("runner.log");
         std::fs::write(&log, LOG).unwrap();
         let started = RefCell::new(vec![]);
@@ -227,12 +220,11 @@ mod tests {
         assert!(file.ends_with("mac-build_7.log"));
         assert_eq!(started.borrow().len(), 1);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), LOG);
-        let _ = std::fs::remove_dir_all(d);
     }
 
     #[test]
     fn without_debrief_the_file_is_still_written_and_the_message_says_what_to_do() {
-        let d = temp("missing");
+        let d = temp();
         let log = d.join("runner.log");
         std::fs::write(&log, LOG).unwrap();
         let r = hand_off(&log, "mac", "all", None, &d.join("out"), Lookup::Missing, &|_, _| {
@@ -265,12 +257,11 @@ mod tests {
             Err("boom".into())
         });
         assert_eq!(failing.unwrap_err(), "boom");
-        let _ = std::fs::remove_dir_all(d);
     }
 
     #[test]
     fn the_older_rotated_log_is_tried_when_the_job_is_not_in_the_current_one() {
-        let d = temp("rotated");
+        let d = temp();
         let log = d.join("runner.log");
         std::fs::write(&log, "time=\"2026-10-23T09:00:00+00:00\" msg=\"new\"\n").unwrap();
         std::fs::write(d.join("runner.log.1"), LOG).unwrap();
@@ -285,15 +276,14 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(r, Handoff::NotInstalled { .. }));
-        let _ = std::fs::remove_dir_all(d);
     }
 
     #[test]
     fn debrief_is_found_on_path_or_in_install_places_only_when_it_is_a_file() {
-        let d = temp("find");
+        let d = temp();
         let file = d.join(format!("{DEBRIEF_CLI}{}", std::env::consts::EXE_SUFFIX));
         std::fs::write(&file, "x").unwrap();
-        let path = std::env::join_paths([&d]).unwrap().to_string_lossy().into_owned();
+        let path = std::env::join_paths([d.path()]).unwrap().to_string_lossy().into_owned();
         assert_eq!(find(Some(&path), &|_| None), Some(file));
         assert_eq!(
             find(Some("/definitely/not/here"), &|_| None).filter(|p| p.starts_with("/definitely")),
@@ -302,13 +292,12 @@ mod tests {
         let s = status();
         assert_eq!(s.cli_name, DEBRIEF_CLI);
         assert!(!s.needs_update || !s.installed);
-        let _ = std::fs::remove_dir_all(d);
     }
 
     #[test]
     fn only_the_old_imt_program_means_debrief_needs_an_update() {
-        let d = temp("legacy");
-        let path = std::env::join_paths([&d]).unwrap().to_string_lossy().into_owned();
+        let d = temp();
+        let path = std::env::join_paths([d.path()]).unwrap().to_string_lossy().into_owned();
         let none = |_: &str| None;
         assert!(!legacy_only(Some(&path), &none));
         std::fs::write(d.join(format!("{LEGACY_DEBRIEF_CLI}{}", std::env::consts::EXE_SUFFIX)), "x").unwrap();
@@ -329,16 +318,14 @@ mod tests {
         assert!(message.starts_with("Update Debrief"));
         assert!(not_found_message(true).starts_with("Update Debrief to use Open in Debrief"));
         assert!(not_found_message(false).contains(DEBRIEF_CLI));
-        let _ = std::fs::remove_dir_all(d);
     }
 
     #[test]
     fn only_the_newest_part_of_a_huge_log_is_read() {
-        let d = temp("tail");
+        let d = temp();
         let f = d.join("a.log");
         std::fs::write(&f, "hello\n").unwrap();
         assert_eq!(read_tail(&f).unwrap(), "hello\n");
         assert!(read_tail(&d.join("none")).is_err());
-        let _ = std::fs::remove_dir_all(d);
     }
 }
