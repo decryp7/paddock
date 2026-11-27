@@ -40,7 +40,6 @@ const KEEP_RUN_LOGS: usize = 20;
 pub mod deny;
 pub mod exec;
 pub mod gates;
-pub mod heavy_tool;
 pub mod kept;
 pub mod known;
 pub mod outcome;
@@ -50,8 +49,9 @@ pub mod train_split;
 
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_repo::git_text;
+use crate::throttle::{QUEUE_STALL, ROW_CAP};
 use clap::Args;
-use exec::{Kind, QUEUE_STALL, RealExec, Row, RunOpts, heavy_limit, run_all_limited, workers};
+use exec::{Kind, RealExec, Row, RunOpts, heavy_limit, run_all_limited, workers};
 use gates::{Change, Facts};
 use paddock_cli::{CliError, Exit, Report};
 use paddock_env::winpath;
@@ -382,7 +382,7 @@ fn command_in(
     let env: HashMap<String, String> = crate::git_env::without(&paddock_env::vars().collect());
     let accept = accepted_ids(&args.accept_not_measured, &env);
     let stop = Arc::new(AtomicBool::new(false));
-    stop_on_signals(&stop);
+    crate::stop_signals::stop_on_signals(&stop);
     let state = state_dir(&root);
     let pushes = if args.refs_from_stdin { parse_push(stdin) } else { Vec::new() };
     let pushed: Vec<String> = pushes.iter().map(|p| p.sha.clone()).collect();
@@ -496,7 +496,7 @@ fn command_in(
             stall::GAP,
             Some(Arc::new(history::History::new(state.join("step-history.jsonl")))),
         )),
-        row_cap: exec::ROW_CAP,
+        row_cap: ROW_CAP,
         state: state.clone(),
     };
     let queue_stall = queue_stall(&env);
@@ -562,10 +562,10 @@ fn command_in(
     let load = ex.load();
     let n = workers(load, std::thread::available_parallelism().map_or(1, |n| n.get()));
     let mut overridden = String::new();
-    if exec::throttle_override(&env).map(|v| v.trim()) == Some("off") && !env.contains_key(exec::TEST_THROTTLE_OFF) {
+    if crate::throttle::throttle_override(&env).map(|v| v.trim()) == Some("off") && !env.contains_key(crate::throttle::TEST_THROTTLE_OFF) {
         overridden =
             "OVERRIDE SET: PADDOCK_THROTTLE=off is not allowed outside the tests; every compile (clippy, xwin) is not measured\n".into();
-    } else if exec::throttle_prefix(&env, &|p| ex.has_tool(p)).is_empty() {
+    } else if crate::throttle::throttle_prefix(&env, &|p| ex.has_tool(p)).is_empty() {
         notes.push("no heavy on PATH: the compiles (clippy, xwin) run through the heavy built from tools/throttle (cached under ~/.paddock-dev/bin); if that build fails they are not measured (ER-24)".into());
     }
     let head = format!(
@@ -576,7 +576,7 @@ fn command_in(
         change.files.len(),
         n,
         load.map_or("unknown".to_string(), |l| format!("{l:.1}")),
-        exec::ROW_CAP.as_secs() / 60,
+        ROW_CAP.as_secs() / 60,
         real.watchdog.name(),
         queue_stall.as_secs() / 60,
         if real.priority {
@@ -758,32 +758,6 @@ fn accepted_ids(option: &[String], env: &HashMap<String, String>) -> Vec<String>
         .map(|v| v.split(',').map(|w| w.trim().to_string()).collect::<Vec<_>>())
         .unwrap_or_default();
     option.iter().cloned().chain(from_env).filter(|w| !w.is_empty()).collect()
-}
-
-/// The exit code of a second Ctrl+C or SIGTERM: 128 + SIGINT.
-#[cfg(unix)]
-const SECOND_SIGNAL_EXIT: i32 = 130;
-
-#[cfg(unix)]
-pub(crate) fn stop_on_signals(stop: &Arc<AtomicBool>) {
-    use signal_hook::consts::{SIGINT, SIGTERM};
-    for sig in [SIGINT, SIGTERM] {
-        // Registered first, so it sees the flag the second signal finds set: the first signal only sets the flag (the gates end,
-        // the table prints), the second one leaves at once.
-        let _ = signal_hook::flag::register_conditional_shutdown(sig, SECOND_SIGNAL_EXIT, Arc::clone(stop));
-        let _ = signal_hook::flag::register(sig, Arc::clone(stop));
-    }
-}
-
-/// Windows: Ctrl+C reaches the whole console group; the handler sets the same flag so the table prints and the gates end.
-#[cfg(windows)]
-pub(crate) fn stop_on_signals(stop: &Arc<AtomicBool>) {
-    let flag = Arc::clone(stop);
-    let _ = ctrlc::set_handler(move || {
-        if flag.swap(true, Ordering::SeqCst) {
-            std::process::exit(130);
-        }
-    });
 }
 
 /// The folder for this checkout's gate logs and override log: `<git common dir>/paddock-pre-push`.

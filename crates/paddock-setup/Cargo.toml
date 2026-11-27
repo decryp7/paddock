@@ -14,6 +14,9 @@ build = "build.rs"
 scaffold = true
 # What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
 # repository root. `build.rs` tests whether `../paddock-proc/src/installed.rs` exists (a cfg), through a path built from `CARGO_MANIFEST_DIR`.
+# Root rules (ADR 0116 §6), read site by site: also `current_exe` (the test binary started again, or files beside it: build output);
+# paths taken from the environment (`HOME`, `XDG_*`, `OUT_DIR`, `CARGO_*`, tool and runtime folders, folders a test passes). None is
+# a repository file outside the globs.
 test-reads = ["crates/paddock-proc/src/installed.rs"]
 
 [lib]

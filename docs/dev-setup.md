@@ -202,6 +202,12 @@ The one exception is the `./dev` binary: the plan job keeps the verified tool by
 copies it into its own tool folder before it asks the Actions cache (user decision 109; `actions/cache` stays the fallback). Each Linux
 job also asks the Actions cache service once, with a 5 s limit (`dev-tool-cache.sh probe`); when it does not answer, the job skips its
 `actions/cache` steps with one `::warning::` and goes on cold.
+The second exception is the compile cache of `./dev`'s own cold build: a Linux CI job whose image has sccache and whose runner has the
+volume builds the tool through a local-disk sccache in `<mount>/paddock-dev-build-cache/` (owner: the `dev` launcher's `selfbuild_cached`;
+at most 5 GB, sccache's least-recently-used eviction; one build at a time under `<mount>/paddock-dev-build-cache.lock`, held for the server's
+whole life, server port 4229). Only the tool's own crate then compiles
+([benchmarks](benchmarks.md#2026-11-27-the-tools-own-build-through-sccache-ci-dev-selfbuild-sccache)). It stays off when `RUSTC_WRAPPER`
+is set, outside CI, on a release, rule 54 or tag run, and with `PADDOCK_DEV_SELFBUILD_CACHE=off`; none of these is part of the tool's hash.
 
 **Linker on Linux.** On a Linux development machine use mold (`sudo apt install mold`), in `~/.cargo/config.toml`:
 

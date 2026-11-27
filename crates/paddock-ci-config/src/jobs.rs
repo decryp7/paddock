@@ -210,6 +210,54 @@ fn tool_cache_before_first_dev(steps: &[Node], declared: &Declared) -> bool {
     true
 }
 
+/// Whether `steps` restore the dev tool before the first `./dev` call: a step that uses `restoring` (a local action that restores it)
+/// comes first. A list that never calls `./dev` and never restores is not one that restores.
+fn restores_dev_tool(steps: &[Node], restoring: &BTreeSet<String>) -> bool {
+    for step in steps {
+        if let Some(action) = step
+            .get_text("uses")
+            .and_then(|u| u.strip_prefix("./.gitea/actions/"))
+            && (action == TOOL_CACHE_ACTION || restoring.contains(action))
+        {
+            return true;
+        }
+        if step.get_text("run").is_some_and(runs_dev) {
+            return false;
+        }
+    }
+    false
+}
+
+/// The local actions (by folder name, with their `action.yml` text) that restore the dev tool before any `./dev` of their own: the
+/// action `dev-tool-cache` itself, and every composite action whose steps use one of those first (to a fixed point). What the model's
+/// [`Declared::tool_cache_actions`] is made of, so a new action that restores it counts without a hand list (ADR 0123 §7, ER-42).
+pub fn tool_cache_actions(
+    action_files: &BTreeMap<String, String>,
+) -> Result<BTreeSet<String>, String> {
+    let mut parsed: BTreeMap<&str, Vec<Node>> = BTreeMap::new();
+    for (name, text) in action_files {
+        let doc = yaml::parse(text).map_err(|e| format!("action {name}: {e}"))?;
+        let steps = doc
+            .get("runs")
+            .and_then(|r| r.get("steps"))
+            .map(|s| s.items().to_vec())
+            .unwrap_or_default();
+        parsed.insert(name.as_str(), steps);
+    }
+    let mut found: BTreeSet<String> = BTreeSet::new();
+    loop {
+        let before = found.len();
+        for (name, steps) in &parsed {
+            if *name == TOOL_CACHE_ACTION || restores_dev_tool(steps, &found) {
+                found.insert((*name).to_string());
+            }
+        }
+        if found.len() == before {
+            return Ok(found);
+        }
+    }
+}
+
 fn is_tool_cache_use(step: &Node, declared: &Declared) -> bool {
     step.get_text("uses")
         .and_then(|u| u.strip_prefix("./.gitea/actions/"))
@@ -477,6 +525,137 @@ pub fn named_jobs(workflow_text: &str) -> Result<Vec<NamedJob>, Vec<Problem>> {
     } else {
         Err(problems)
     }
+}
+
+/// What a job's matrix says about the values its `runs-on` expression can take.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MatrixValues {
+    /// No matrix.
+    None,
+    /// Every text written in the file under `matrix:`.
+    Literal(Vec<String>),
+    /// Written at run time (a `fromJSON(...)` of a plan output or of a caller's input): the file does not say.
+    Dynamic,
+}
+
+/// The runner side of one job: what a reader that only asks "which machines can this workflow use" needs. It reads no leg and
+/// expands nothing, so a matrix the model cannot expand ([`named_jobs`]) still gives its runners.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunnerJob {
+    /// The key under `jobs:`.
+    pub id: String,
+    /// Every `runs-on` label, whatever the nesting (a list, or the `labels:` of a mapping); a `${{ matrix.x }}` label stays an
+    /// expression and stands for [`RunnerJob::matrix`].
+    pub runs_on: Vec<String>,
+    /// The `uses:` of a job that calls a reusable workflow.
+    pub uses: Option<String>,
+    /// The matrix values the `runs-on` expression can take.
+    pub matrix: MatrixValues,
+    /// The display `name:` (the id when absent).
+    pub name: String,
+    /// The jobs it needs.
+    pub needs: Vec<String>,
+    /// The `uses:` of each step (a step without one is left out).
+    pub step_uses: Vec<String>,
+}
+
+/// What starts a workflow (`on:`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Triggers {
+    /// The event names: `on: push`, `on: [push, pull_request]` or the keys of `on: {push: ..., workflow_dispatch: ...}`.
+    pub events: Vec<String>,
+    /// The names of the `workflow_dispatch` inputs (empty when the workflow cannot be dispatched or declares none).
+    pub dispatch_inputs: Vec<String>,
+}
+
+impl Triggers {
+    /// Whether `workflow_dispatch` declares the input `name`.
+    pub fn takes_input(&self, name: &str) -> bool {
+        self.dispatch_inputs.iter().any(|i| i == name)
+    }
+}
+
+/// The triggers of a workflow; a problem when the text is not YAML. A workflow without `on:` has none.
+pub fn triggers(workflow_text: &str) -> Result<Triggers, Vec<Problem>> {
+    let doc = yaml::parse(workflow_text).map_err(|e| vec![problem(None, 0, e)])?;
+    let Some(on) = doc.get("on") else {
+        return Ok(Triggers::default());
+    };
+    let events = match on.text() {
+        Some(t) => vec![t.to_string()],
+        None if !on.items().is_empty() => on
+            .items()
+            .iter()
+            .filter_map(|i| i.text().map(str::to_string))
+            .collect(),
+        None => on.entries().iter().map(|(k, _)| k.clone()).collect(),
+    };
+    let dispatch_inputs = on
+        .get("workflow_dispatch")
+        .and_then(|d| d.get("inputs"))
+        .map(|i| i.entries().iter().map(|(k, _)| k.clone()).collect())
+        .unwrap_or_default();
+    Ok(Triggers {
+        events,
+        dispatch_inputs,
+    })
+}
+
+/// Every scalar under `n`, whatever the nesting.
+fn scalars(n: &Node, out: &mut Vec<String>) {
+    if let Some(t) = n.text() {
+        out.push(t.to_string());
+    }
+    n.items().iter().for_each(|i| scalars(i, out));
+    n.entries().iter().for_each(|(_, v)| scalars(v, out));
+}
+
+/// The runner side of every job of a workflow, in file order; a problem when the text is not YAML or has no `jobs:`.
+pub fn runner_jobs(workflow_text: &str) -> Result<Vec<RunnerJob>, Vec<Problem>> {
+    let doc = yaml::parse(workflow_text).map_err(|e| vec![problem(None, 0, e)])?;
+    let Some(jobs_node) = doc.get("jobs").filter(|j| !j.entries().is_empty()) else {
+        return Err(vec![problem(
+            None,
+            0,
+            "the workflow has no `jobs:` mapping".to_string(),
+        )]);
+    };
+    Ok(jobs_node
+        .entries()
+        .iter()
+        .map(|(id, body)| {
+            let mut runs_on = Vec::new();
+            if let Some(r) = body.get("runs-on") {
+                scalars(r, &mut runs_on);
+            }
+            let mut values = Vec::new();
+            if let Some(m) = body.get("strategy").and_then(|s| s.get("matrix")) {
+                scalars(m, &mut values);
+            }
+            let matrix = if values.iter().any(|v| v.contains("${{")) {
+                MatrixValues::Dynamic
+            } else if values.is_empty() {
+                MatrixValues::None
+            } else {
+                MatrixValues::Literal(values)
+            };
+            RunnerJob {
+                id: id.clone(),
+                runs_on,
+                uses: body.get_text("uses").map(str::to_string),
+                matrix,
+                name: body.get_text("name").unwrap_or(id).to_string(),
+                needs: text_list(body.get("needs")),
+                step_uses: body
+                    .get("steps")
+                    .map(Node::items)
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|st| st.get_text("uses").map(str::to_string))
+                    .collect(),
+            }
+        })
+        .collect())
 }
 
 /// [`render`] of a raw `name:` template.

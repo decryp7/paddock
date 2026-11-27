@@ -72,6 +72,8 @@ required-features = ["probe"]
 # repository root; `[]` says the blind reads touch no repository file.
 # `src/probe.rs`: the real-window probe (`PADDOCK_REAL_WINDOWS=1`, never in a normal run) reads the shell-demo capability and the
 # shell plugin's permission folder beside this crate.
+# Root rules (ADR 0116 §6), read site by site: also paths taken from the environment (`HOME`, `XDG_*`, `OUT_DIR`, `CARGO_*`, tool
+# and runtime folders, folders a test passes). None is a repository file outside the globs.
 test-reads = [
     "apps/shell-demo/src-tauri/capabilities/dialog.json",
     "crates/paddock-shell/permissions/**",

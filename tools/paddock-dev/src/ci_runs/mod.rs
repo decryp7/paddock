@@ -1288,7 +1288,7 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
     let mut inputs = a.inputs.clone();
     let mut git_ref = a.git_ref.clone().unwrap_or_default();
     let mut trial = None;
-    // The train always goes first (2026-11-16): while a train's CI sequence holds its reservation, a run that is not a train's
+    // The train always goes first (2026-11-16): while a train's CI sequence holds its local reservation, a run that is not a train's
     // (a trial, a member, a manual run) waits, at most --max, before anything is pushed. A `train/*` dispatch never waits here.
     // It runs after the arguments are parsed: bad arguments are refused at once, wherever the tool runs (run 8208).
     let waits = a.trial.is_some() || !dispatch::is_train(&git_ref);
@@ -1314,7 +1314,7 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
         }
         let mut probe_inputs = inputs.clone();
         probe_inputs.push(format!("base={}", "0".repeat(40)));
-        dispatch::parse_request(
+        let probe_req = dispatch::parse_request(
             &a.workflow,
             &format!("trial/{branch}"),
             &probe_inputs,
@@ -1323,7 +1323,36 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
         )
         .map_err(|e| CliError::usage(e).with_hint(hint))?;
         dispatch::classes_of(&a.workflow, &read).map_err(|e| CliError::usage(e).with_hint("Check the workflow name and --root."))?;
+        // Two waits, two jobs. The local reservation (`wait_for_trains`) covers what the server cannot show: the gaps between the
+        // workflows of a train's CI sequence, when no train run exists yet (run 8166), and two dispatches from this Mac in the
+        // same second. The server wait (`yield_to_trains`) covers what the lock cannot: a train run that was dispatched from
+        // elsewhere, queued or running. Both come before the trial ref is pushed, so a trial that never gets its turn leaves
+        // nothing on origin.
         wait_for_trains()?;
+        let mut log = std::io::stderr();
+        match dispatch::yield_to_trains(
+            &mut CurlHttp,
+            &dispatch::Target {
+                server: &a.server,
+                repo: &a.repo,
+                token: &token,
+            },
+            &probe_req,
+            &mut dispatch::system_clock(),
+            &mut log,
+            None,
+        ) {
+            Ok(Ok(_)) => {}
+            Ok(Err(dispatch::Dispatched::StillBusy { last } | dispatch::Dispatched::ServiceDown { last })) => {
+                return Err(CliError::failure(format!("not dispatched: {last}."))
+                    .with_hint("Wait for that train run with `./dev wait --ci-run <id> --max <duration>`, then dispatch again."));
+            }
+            Ok(Err(dispatch::Dispatched::Yes { .. })) => unreachable!("yield_to_trains never sends"),
+            Err(e) => {
+                eprintln!("::error::dispatch: {e}");
+                return Err(CliError::failure(e).with_hint("Check the workflow name, GITEA_TOKEN's scope and the network."));
+            }
+        }
         let (g, trial_ref, base) = trial_merge(a, &root, branch, &token)?;
         git_ref = trial_ref.clone();
         inputs.push(format!("base={base}"));

@@ -36,3 +36,10 @@ tempfile = "3"
 
 [target.'cfg(windows)'.dev-dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Globalization"] }
+
+[package.metadata.paddock]
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `src/dirs.rs` reads the running program's own location and `src/private/dir.rs` starts the test binary again (`current_exe`): no
+# repository file.
+test-reads = []
