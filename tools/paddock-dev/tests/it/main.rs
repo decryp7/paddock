@@ -16,6 +16,7 @@ mod check_c174;
 mod check_c175;
 mod check_c176;
 mod check_c177;
+mod check_c180;
 mod check_engine;
 mod check_ids;
 mod check_lex;

@@ -64,6 +64,7 @@ register_checks! {
     c175::C175,
     c176::C176,
     c177::C177,
+    c180::C180,
 }
 
 use config::Config;

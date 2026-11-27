@@ -1235,3 +1235,10 @@ by = "user"
 date = "2026-11-27"
 count = 16
 digest = "9f5c42619c0600fee89c2e0a4c805e59c13fc31a92851034e7ee5937702dd031"
+
+[[report_only]]
+id = "C180"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c180.rs, then flip the mode to Gate. A pipeline stage after the first that is grep -q, --quiet, --silent, grep -m N or head, in a bash `run:` step (shell absent or bash; read through paddock-ci-config's YAML reader) or in a .sh file after its `set -o pipefail`, exits early and gives the writer SIGPIPE, so pipefail fails the pipeline although the text matched (user decision 130a: the shell demo's macOS verify, run 9247's throttle graph probe, 3+ times). The shell is parsed with tree-sitter-bash, never matched as text. The fix is a here-string or a captured output. No baseline file (ER-46): the report is the list. Positive control in the check and tests/it/check_c180.rs: a bash step, a composite step and a pipefail script go red; a here-string, a first-stage grep, a non-bash shell, a script without pipefail and a comment or here-document stay green"
+owner = "ER-21 class: producer | grep -q under pipefail (run 9247 check broken in ci.yml's heavy tool GTK probe; the shell demo's macOS verify; Debrief's and Pitwall's verify scripts)"
+since = 2026-11-27
+review_by = 2026-12-11
