@@ -383,7 +383,7 @@ fn command_in(
     let accept = accepted_ids(&args.accept_not_measured, &env);
     let stop = Arc::new(AtomicBool::new(false));
     crate::stop_signals::stop_on_signals(&stop);
-    let state = state_dir(&root);
+    let state = state_dir_for(&root, &env);
     let pushes = if args.refs_from_stdin { parse_push(stdin) } else { Vec::new() };
     let pushed: Vec<String> = pushes.iter().map(|p| p.sha.clone()).collect();
     // Every pushed commit's base comes first: a pass record counts only when it was measured from that base or an older one.
@@ -758,6 +758,15 @@ fn accepted_ids(option: &[String], env: &HashMap<String, String>) -> Vec<String>
         .map(|v| v.split(',').map(|w| w.trim().to_string()).collect::<Vec<_>>())
         .unwrap_or_default();
     option.iter().cloned().chain(from_env).filter(|w| !w.is_empty()).collect()
+}
+
+/// The state folder of a run: `PADDOCK_PREPUSH_STATE` when set (a test's own folder, so it never waits for a build-folder lock a real
+/// gate of this checkout holds, ER-14, ER-51), else [`state_dir`].
+fn state_dir_for(root: &Path, env: &HashMap<String, String>) -> PathBuf {
+    match env.get("PADDOCK_PREPUSH_STATE").filter(|v| !v.is_empty()) {
+        Some(v) => PathBuf::from(v),
+        None => state_dir(root),
+    }
 }
 
 /// The folder for this checkout's gate logs and override log: `<git common dir>/paddock-pre-push`.

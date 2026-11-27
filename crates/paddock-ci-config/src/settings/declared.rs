@@ -170,6 +170,7 @@ pub const DECLARED: &[Decl] = &[
     d("PADDOCK_NO_REUSE", Exact("1"), Machine, None, "The push gate re-runs rows whose verdict it could reuse."),
     d("PADDOCK_OUT", Path, Handoff, None, "The folder a host tool writes to (set by setup-rust for its child)."),
     d("PADDOCK_PLAN_SELECTION", Text, Handoff, None, "The plan's selection a run step reads."),
+    d("PADDOCK_PREPUSH_STATE", Path, TestOnly, None, "The folder of the pre-push gate's state (logs, history, build-folder locks): a test gives its own, never the repository's."),
     d("PADDOCK_PREPUSH_WORKTREES", Path, Machine, None, "Where the pre-push gate makes its scratch worktrees."),
     d("PADDOCK_PROC_GUARDIAN_LOG", Path, Handoff, None, "The orphan guardian's log file."),
     d("PADDOCK_PRUNE_UNIT", Text, Handoff, None, "The unit a kept-folder prune reports in."),
