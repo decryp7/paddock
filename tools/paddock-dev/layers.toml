@@ -41,6 +41,7 @@ modules = [
     "audit",
     "ci_build_env",
     "ci_build_jobs",
+    "ci_dev_tool_store",
     "ci_dyno_linux_units",
     "ci_host",
     "ci_isolation",
