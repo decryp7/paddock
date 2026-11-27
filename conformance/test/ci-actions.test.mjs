@@ -2771,18 +2771,8 @@ test('the breaker: the probe comes first, and every actions/cache step of dev-to
   assert.doesNotMatch("runner.os == 'Linux'", down);
 });
 
-test('only the plan action passes producer: true to dev-tool-cache (the one writer)', () => {
-  const producers = [];
-  for (const n of names) {
-    for (const s of stepsOf(loadAction(n))) if (usesToolCache(s) && String(s.with?.producer) === 'true') producers.push(`actions/${n}`);
-  }
-  for (const file of readdirSync(WORKFLOWS).filter((f) => f.endsWith('.yml'))) {
-    for (const [id, job] of Object.entries(loadWorkflow(file).jobs ?? {})) {
-      for (const s of stepsOf(job)) if (usesToolCache(s) && String(s.with?.producer) === 'true') producers.push(`${file}:${id}`);
-    }
-  }
-  assert.deepEqual(producers, ['actions/plan'], 'the plan action is the one producer');
-});
+// The one producer of each workflow is checked through the job model in Rust (tools/paddock-dev/src/run_scope/expected.rs,
+// exactly_one_job_of_ci_yml_produces_the_dev_tool_and_its_action_hands_the_input_on), which reads ci.yml as the planner does.
 
 // ADR 0115: every `actions/cache` step is followed, in its own job, by a step that reports it (the cache-report action, or for the
 // workflow template that runs in other repositories, a step named "Cache report" / "Cache save report" that prints the same line).
