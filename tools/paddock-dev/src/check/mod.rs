@@ -88,6 +88,7 @@ pub struct Ctx<'a> {
     scope: Option<String>,
     today: String,
     ci: bool,
+    stage: paddock_approvals::Stage,
     workflows: OnceCell<Rc<Vec<util::workflows::Workflow>>>,
 }
 
@@ -109,6 +110,7 @@ impl<'a> Ctx<'a> {
             scope,
             today,
             ci: false,
+            stage: paddock_approvals::Stage::Landing,
             workflows: OnceCell::new(),
         }
     }
@@ -117,6 +119,17 @@ impl<'a> Ctx<'a> {
     pub fn with_ci(mut self, ci: bool) -> Ctx<'a> {
         self.ci = ci;
         self
+    }
+
+    /// Where the run is ([`paddock_approvals::Stage`]): what a missing approval counts as. Landing (the strictest) unless the caller says.
+    pub fn with_stage(mut self, stage: paddock_approvals::Stage) -> Ctx<'a> {
+        self.stage = stage;
+        self
+    }
+
+    /// The stage of this run.
+    pub fn stage(&self) -> paddock_approvals::Stage {
+        self.stage
     }
 
     /// Whether this is a CI run.
@@ -517,11 +530,26 @@ fn control_holds(check: &dyn Check) -> bool {
 /// Runs the selected checks of `registry` over the tree. A check that panics, did not complete, failed its control, had no
 /// precondition or looked at nothing adds an error no waiver covers, whatever else it found; waivers are applied last.
 pub fn run_checks(opts: &RunOptions, registry: &[Box<dyn Check>]) -> Result<RunResult, UnknownCheck> {
-    run_checks_in(&Tree::open(&opts.root), opts, registry)
+    run_checks_at(opts, registry, paddock_approvals::Stage::Landing)
+}
+
+/// [`run_checks`] at `stage`: what a missing approval of a growth check counts as ([`paddock_approvals::severity`]).
+pub fn run_checks_at(opts: &RunOptions, registry: &[Box<dyn Check>], stage: paddock_approvals::Stage) -> Result<RunResult, UnknownCheck> {
+    run_checks_in_at(&Tree::open(&opts.root), opts, registry, stage)
 }
 
 /// [`run_checks`] over a tree the caller opened (a test passes one that reports a listing error).
 pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]) -> Result<RunResult, UnknownCheck> {
+    run_checks_in_at(tree, opts, registry, paddock_approvals::Stage::Landing)
+}
+
+/// [`run_checks_in`] at `stage`.
+pub fn run_checks_in_at(
+    tree: &Tree,
+    opts: &RunOptions,
+    registry: &[Box<dyn Check>],
+    stage: paddock_approvals::Stage,
+) -> Result<RunResult, UnknownCheck> {
     let only = opts.only.clone().unwrap_or_default();
     let unknown: Vec<String> = only
         .iter()
@@ -553,7 +581,8 @@ pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]
         opts.scope.clone(),
         opts.today.clone(),
     )
-    .with_ci(opts.ci.unwrap_or_else(|| baseline::is_ci(&|k| std::env::var(k).ok())));
+    .with_ci(opts.ci.unwrap_or_else(|| baseline::is_ci(&|k| std::env::var(k).ok())))
+    .with_stage(stage);
 
     let mut findings: Vec<Finding> = unknown_files
         .iter()
@@ -735,7 +764,8 @@ pub fn command(args: Args) -> Result<Report, CliError> {
         base_ref: None,
         ci: None,
     };
-    let result = run_checks(&opts, &registry()).map_err(|u| {
+    let stage = growth_approval::stage_from_env(&|k| std::env::var(k).ok()).map_err(CliError::usage)?;
+    let result = run_checks_at(&opts, &registry(), stage).map_err(|u| {
         let known: Vec<&str> = registry().iter().map(|c| c.id()).collect();
         CliError::usage(format!("unknown check: {}.", u.0.join(", "))).with_hint(format!(
             "`./dev check run --only` knows {} so far; the rest still run in conformance/.",
