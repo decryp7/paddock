@@ -528,6 +528,9 @@ impl Probe for CiRunProbe<'_> {
     }
 }
 
+/// The `Accept` value of an artifact download, the one request that follows redirects.
+const ACCEPT_ZIP: &str = "application/zip";
+
 /// The real HTTP: `curl`, with the URL and the Authorization header on standard input (`-K -`) so the token is in no argument list.
 pub struct CurlHttp;
 
@@ -581,6 +584,10 @@ impl CurlHttp {
                 format!("header = \"Authorization: token {token}\"\n")
             };
             let _ = write!(stdin, "url = \"{url}\"\n{auth}header = \"Accept: {accept}\"\n");
+            // An artifact download answers 302 to a signed URL on the same server (Gitea 28.4): follow it, a few hops at most.
+            if accept == ACCEPT_ZIP {
+                let _ = writeln!(stdin, "location\nmax-redirs = 3");
+            }
             if method != "GET" {
                 let _ = writeln!(stdin, "request = \"{method}\"");
             }
@@ -626,7 +633,7 @@ impl Http for CurlHttp {
     }
 
     fn get_bytes(&mut self, url: &str, token: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
-        CurlHttp::get(url, token, "application/zip", max_bytes, 120)
+        CurlHttp::get(url, token, ACCEPT_ZIP, max_bytes, 120)
     }
 
     fn send_json(&mut self, method: &str, url: &str, token: &str, body: Option<&Value>) -> Result<Value, String> {
@@ -1197,6 +1204,31 @@ mod tests {
             "{o:?}"
         );
         assert!(log.contains("has exited"), "{log}");
+    }
+
+    /// The v4 artifact download answers 302 to a signed URL (Gitea 28.4, trial run 9272): get_bytes follows it, and a JSON GET does not.
+    #[test]
+    fn get_bytes_follows_the_redirect_of_an_artifact_download() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut c, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 2048];
+                let n = c.read(&mut buf).unwrap();
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let reply = if req.starts_with("GET /zip ") {
+                    format!("HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{port}/raw\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                } else {
+                    "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nPK!".to_string()
+                };
+                c.write_all(reply.as_bytes()).unwrap();
+            }
+        });
+        let got = CurlHttp.get_bytes(&format!("http://127.0.0.1:{port}/zip"), "", 1024).unwrap();
+        assert_eq!(got, b"PK!");
+        server.join().unwrap();
     }
 
     #[test]
