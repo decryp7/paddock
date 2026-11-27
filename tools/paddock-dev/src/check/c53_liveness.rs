@@ -7,6 +7,7 @@
 use super::Ctx;
 use super::baseline::{self, Growth, reconcile};
 use super::finding::Finding;
+use super::growth_approval::{self, Standing};
 use super::inline_waiver::{CommentView, InlineWaiver, Kind};
 use super::jsre::{LineIndex, is_js_space, rx};
 use super::mask::mask_rust;
@@ -373,7 +374,7 @@ pub fn liveness_findings(ctx: &Ctx) -> LivenessRun {
                 "the baseline",
                 &why,
             )),
-            Growth::Added { base, added, moved } => {
+            Growth::Added { base, added, moved, fresh } => {
                 for m in &moved {
                     let (hash, from, to) = (&m.from.hash, &m.from.file, &entries[m.current].file);
                     out.push(Finding::warn(
@@ -385,18 +386,23 @@ pub fn liveness_findings(ctx: &Ctx) -> LivenessRun {
                         "Nothing to do: the entry was rewritten to the file the code moved to.",
                     ));
                 }
-                if added > 0 {
+                let standing = if added > 0 {
+                    growth_approval::standing(ctx, "C53", &fresh)
+                } else {
+                    Standing::Approved
+                };
+                if let Standing::Stands { detail, ask } = standing {
                     out.push(Finding::error(
                         "C53",
                         53,
                         LIVENESS_BASELINE,
                         1,
                         format!(
-                            "the baseline grew: {added} entr{} not in the baseline at the merge base {}; it may only shrink",
+                            "the baseline grew: {added} entr{} not in the baseline at the merge base {}; it may only shrink{detail}",
                             if added == 1 { "y is" } else { "ies are" },
                             &base[..base.len().min(9)]
                         ),
-                        "Remove the entries and fix the sites through a ProcessId. Growing the baseline needs the user's approval.",
+                        format!("Remove the entries and fix the sites through a ProcessId. {ask}"),
                     ));
                 }
             }

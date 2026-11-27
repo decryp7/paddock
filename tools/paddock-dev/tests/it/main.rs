@@ -17,6 +17,7 @@ mod check_c175;
 mod check_c176;
 mod check_c177;
 mod check_engine;
+mod check_growth_approval;
 mod check_ids;
 mod check_lex;
 mod check_units;

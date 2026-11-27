@@ -7,9 +7,20 @@ use serde_json::{Value, json};
 use std::path::Path;
 use std::process::Command;
 
-/// The part of a report the JS host also writes.
+/// The part of a report the JS host also writes. The Rust host's growth finding adds the line the user writes to approve the growth
+/// (`check::growth_approval`, the one reader, Rust only: tested in `check_growth_approval.rs`); the JS port has no such reader, so
+/// that sentence of a `fix` is left out of the comparison.
 fn shared_part(v: &Value) -> Value {
-    json!({"app": v["app"], "checks": v["checks"], "findings": v["findings"], "waived": v["waived"], "errors": v["errors"], "warnings": v["warnings"]})
+    let mut findings = v["findings"].clone();
+    for f in findings.as_array_mut().into_iter().flatten() {
+        if let Some(fix) = f["fix"]
+            .as_str()
+            .and_then(|t| t.split(" Or the user adds to docs/gates.toml:").next())
+        {
+            f["fix"] = json!(fix);
+        }
+    }
+    json!({"app": v["app"], "checks": v["checks"], "findings": findings, "waived": v["waived"], "errors": v["errors"], "warnings": v["warnings"]})
 }
 
 const R: &str = "paddock/e2e-ready-reads";

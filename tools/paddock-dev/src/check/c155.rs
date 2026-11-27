@@ -33,6 +33,7 @@
 
 use super::baseline::{self, Growth};
 use super::finding::Finding;
+use super::growth_approval::{self, Standing};
 use super::record::Precondition;
 use super::{Check, CheckOutput, CheckScope, Control, Ctx, Mode};
 use crate::host_tests::{Derived, Exception, Exceptions, resolved_covers};
@@ -367,8 +368,8 @@ fn approval_keys(approved: &BTreeMap<String, BTreeSet<String>>) -> Vec<String> {
 }
 
 /// The register is itself a shrink-only list (ER-46, final review P1-2): an approval the merge base's register lacks is growth, one
-/// unwaivable finding, so no agent can approve a removal by writing `by = "user"`. The user's approval of growth is recorded as for
-/// the other lists (the check's entry in docs/gates.toml names it with its date).
+/// unwaivable finding, so no agent can approve a removal by writing `by = "user"`. The user's approval of growth is the shared
+/// reader's ([`growth_approval`]: one `[[register_growth]]` entry in docs/gates.toml).
 fn register_growth(ctx: &Ctx, approved: &BTreeMap<String, BTreeSet<String>>) -> Option<Finding> {
     let current = approval_keys(approved);
     if current.is_empty() || ctx.is_in_memory() || !baseline::is_work_tree(ctx.root()) {
@@ -382,25 +383,31 @@ fn register_growth(ctx: &Ctx, approved: &BTreeMap<String, BTreeSet<String>>) -> 
             "C155",
             RULE,
             APPROVALS,
-            "the register of OS-removal approvals",
+            "the register of approvals",
             &why,
         )),
         Growth::Added { added: 0, .. } => None,
-        Growth::Added { base, added, .. } => Some(
-            Finding::error(
-                "C155",
-                RULE,
-                APPROVALS,
-                1,
-                format!(
-                    "[os-removal] the register of approvals grew: {added} approval{} not in {APPROVALS} at the merge base {}; only the user approves a removal",
-                    if added == 1 { " is" } else { "s are" },
-                    &base[..base.len().min(9)]
-                ),
-                "Remove the added approvals, or record the user's approval of them (ER-46; the check's entry in docs/gates.toml).",
+        Growth::Added { base, added, fresh, .. } => {
+            let (detail, ask) = match growth_approval::standing(ctx, "C155", &fresh) {
+                Standing::Approved => return None,
+                Standing::Stands { detail, ask } => (detail, ask),
+            };
+            Some(
+                Finding::error(
+                    "C155",
+                    RULE,
+                    APPROVALS,
+                    1,
+                    format!(
+                        "[os-removal] the register of approvals grew: {added} approval{} not in {APPROVALS} at the merge base {}; only the user approves a removal{detail}",
+                        if added == 1 { " is" } else { "s are" },
+                        &base[..base.len().min(9)]
+                    ),
+                    format!("Remove the added approvals. {ask}"),
+                )
+                .unwaivable(),
             )
-            .unwaivable(),
-        ),
+        }
     }
 }
 

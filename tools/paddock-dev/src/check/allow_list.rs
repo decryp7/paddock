@@ -22,6 +22,7 @@
 
 use super::baseline::{self, Growth};
 use super::finding::Finding;
+use super::growth_approval::{self, Standing};
 use super::outcome::Outcome;
 use super::record::Precondition;
 use super::{CheckOutput, Ctx};
@@ -279,7 +280,7 @@ impl AllowList {
             growth_blocks,
             ..
         } = *self.spec;
-        let severity = |id: &str, rule: u32, file: &str, line: usize, message: String, fix: &str| {
+        let severity = |id: &str, rule: u32, file: &str, line: usize, message: String, fix: String| {
             if growth_blocks {
                 Finding::error(id, rule, file, line, message, fix)
             } else {
@@ -295,21 +296,27 @@ impl AllowList {
         match baseline::growth(ctx.root(), &ctx.base_ref(), file, &current, &entries_of, &exact, None) {
             Growth::Unmeasured(why) => vec![baseline::unmeasured_finding(ctx.in_ci(), id, rule, file, "the allow list", &why)],
             Growth::Added { added: 0, .. } => Vec::new(),
-            Growth::Added { base, added, .. } => vec![
-                severity(
-                    id,
-                    rule,
-                    file,
-                    1,
-                    format!(
-                        "the allow list grew: {added} entr{} (counting each `count`) not in {file} at the merge base {}; it may only shrink",
-                        if added == 1 { "y is" } else { "ies are" },
-                        &base[..base.len().min(9)]
-                    ),
-                    "Remove the added entries or lower the raised counts and fix the sites. Growing the list needs the user's approval.",
-                )
-                .unwaivable(),
-            ],
+            Growth::Added { base, added, fresh, .. } => {
+                let (detail, ask) = match growth_approval::standing(ctx, id, &fresh) {
+                    Standing::Approved => return Vec::new(),
+                    Standing::Stands { detail, ask } => (detail, ask),
+                };
+                vec![
+                    severity(
+                        id,
+                        rule,
+                        file,
+                        1,
+                        format!(
+                            "the allow list grew: {added} entr{} (counting each `count`) not in {file} at the merge base {}; it may only shrink{detail}",
+                            if added == 1 { "y is" } else { "ies are" },
+                            &base[..base.len().min(9)]
+                        ),
+                        format!("Remove the added entries or lower the raised counts and fix the sites. {ask}"),
+                    )
+                    .unwaivable(),
+                ]
+            }
         }
     }
 

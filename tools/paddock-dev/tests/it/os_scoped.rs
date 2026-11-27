@@ -434,3 +434,62 @@ fn tree_every_declared_scope_is_unscoped_on_linux_and_scoped_on_the_hosts() {
     }
     assert_eq!(declared, 7);
 }
+
+/// The register's growth is approved by the user's line in docs/gates.toml (ER-46): count and digest of exactly the added approvals.
+/// No line, or a line that names other additions, leaves the finding; a matching line clears it. The digest is computed here by its
+/// definition (SHA-256 of the sorted keys joined by a newline), an oracle independent of the check's code.
+#[test]
+fn tree_a_register_growth_is_cleared_only_by_the_users_gates_line_that_names_exactly_those_approvals() {
+    use sha2::{Digest, Sha256};
+    let d = scratch_of(&["crates"]);
+    let root = d.path();
+    git(root, &["init", "-q", "-b", "work"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "chore: base"]);
+    git(root, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    edit_contract(root, "crates/paddock.ci.json", |v| {
+        v["hostTests"]["only"] =
+            serde_json::json!([{"os": "macos-latest", "name": "paddock-proc", "reason": "a control for the unsafe direction"}]);
+    });
+    std::fs::create_dir_all(root.join("docs")).unwrap();
+    std::fs::write(
+        root.join("docs/os-removals.toml"),
+        "version = 1\n[[approved]]\ncontract = \"crates/paddock.ci.json\"\nby = \"user\"\ndate = \"2026-11-23\"\nwhy = \"a control\"\nentries = [\"only macos-latest paddock-proc\"]\n",
+    )
+    .unwrap();
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "chore: an approved only"]);
+    let grew = |findings: &[(String, String)]| {
+        findings
+            .iter()
+            .any(|(f, m)| f == "docs/os-removals.toml" && m.contains("register of approvals grew"))
+    };
+    let (findings, _) = run(root);
+    assert!(grew(&findings), "no approval of the growth: {findings:#?}");
+    let line = |count: usize, digest: &str, by: &str| {
+        format!(
+            "version = 1\n[[register_growth]]\ncheck = \"C155\"\nby = \"{by}\"\ndate = \"2026-11-27\"\ncount = {count}\ndigest = \"{digest}\"\n"
+        )
+    };
+    let digest: String = Sha256::digest("crates/paddock.ci.json only macos-latest paddock-proc".as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    // Another content (or another count): the approval names additions the user did not see.
+    let other = Sha256::digest("crates/paddock.ci.json only macos-latest paddock-env".as_bytes());
+    let other: String = other.iter().map(|b| format!("{b:02x}")).collect();
+    std::fs::write(root.join("docs/gates.toml"), line(1, &other, "user")).unwrap();
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "chore: a gates line for other additions"]);
+    let (findings, _) = run(root);
+    assert!(grew(&findings), "a digest of other additions approves nothing: {findings:#?}");
+    std::fs::write(root.join("docs/gates.toml"), line(1, &digest, "coordinator")).unwrap();
+    git(root, &["commit", "-qam", "chore: a gates line that is not the user's"]);
+    let (findings, _) = run(root);
+    assert!(grew(&findings), "a line that is not the user's approves nothing: {findings:#?}");
+    // The user's line that matches.
+    std::fs::write(root.join("docs/gates.toml"), line(1, &digest, "user")).unwrap();
+    git(root, &["commit", "-qam", "chore: the user's gates line"]);
+    let (findings, _) = run(root);
+    assert!(!grew(&findings), "a matching line approves the growth: {findings:#?}");
+}
