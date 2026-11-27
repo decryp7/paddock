@@ -1099,6 +1099,21 @@ jobs:
           fi
           cargo nextest run "${sel[@]}" --all-features --profile ci ${filter[@]+"${filter[@]}"} 2>&1 | tee "$RUNNER_TEMP/nextest-crates.log"
 
+      # ADR 0116 amendment (ER-33): the positive control of the record step below. One put, get, list and delete of a scratch object in the
+      # shared store, from this runner, on every OS and every ref (it writes only its own scratch key and removes it). A store that cannot
+      # answer here prints its cause and ends this step red (never the job: continue-on-error); the record step then holds every record
+      # back, and this line says why: the leg's test cache is "not measured". Run 9265's Windows leg recorded nothing and printed no cause.
+      - name: Test cache store check
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && (runner.os != 'Linux' || !(inputs.os_full == true || inputs.os_full == 'true' || github.event.inputs.os_full == 'true' || inputs.release == true || startsWith(github.ref, 'refs/tags/'))) && !matrix.filter }}
+        continue-on-error: true
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
+        env:
+          PADDOCK_TEST_CACHE_KEY_ID: ${{ secrets.PADDOCK_TEST_CACHE_KEY_ID }}
+          PADDOCK_TEST_CACHE_SECRET: ${{ secrets.PADDOCK_TEST_CACHE_SECRET }}
+          PADDOCK_SCCACHE_S3_ENDPOINT: ${{ vars.PADDOCK_SCCACHE_S3_ENDPOINT }}
+        run: |
+          "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci test-cache selfcheck --shared
+
       # ADR 0116, report-only (ER-41): stores the pass of every package this run proved (whole, first try, no flake) in the shared test-result
       # store, keyed by the leg's `test_filter` (a host leg's pass counts only for a later leg with the same filter; user decision 97). Only a main or train run writes (`./dev ci test-cache record` refuses any other ref and any rerun itself). Never fails the job.
       - name: Record test results (test cache)

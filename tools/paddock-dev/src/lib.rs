@@ -63,6 +63,7 @@ pub mod ci_s3_guard;
 pub mod ci_setup_rust;
 pub mod ci_tool;
 mod cli;
+pub mod curl_config;
 pub mod deps_cache;
 pub mod disk;
 pub mod escape;

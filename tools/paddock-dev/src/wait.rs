@@ -19,6 +19,7 @@
 //! A [`Probe`] answers one question per poll; [`wait_for`] owns the clock, the interval, the limit and the log. Both the probe's
 //! inputs (files, processes, HTTP) and the [`Clock`] are traits, so the tests run with fakes and a fake clock and never sleep.
 
+use crate::curl_config;
 use crate::health::{Health, wait_held};
 use clap::{ArgGroup, Args};
 use paddock_cli::{CliError, Report};
@@ -532,6 +533,24 @@ impl CurlHttp {
         CurlHttp::request("GET", url, token, accept, None, max_bytes, seconds)
     }
 
+    /// The curl config of one request, every value through [`crate::curl_config`]. An empty token is an anonymous request (the planner reads
+    /// public run lists without one).
+    pub(crate) fn config(method: &str, url: &str, token: &str, accept: &str, body: Option<&str>) -> String {
+        let mut out = curl_config::line("url", url);
+        if !token.is_empty() {
+            out.push_str(&curl_config::line("header", &format!("Authorization: token {token}")));
+        }
+        out.push_str(&curl_config::line("header", &format!("Accept: {accept}")));
+        if method != "GET" {
+            out.push_str(&curl_config::line("request", method));
+        }
+        if let Some(body) = body {
+            out.push_str(&curl_config::line("header", "Content-Type: application/json"));
+            out.push_str(&curl_config::line("data-binary", body));
+        }
+        out
+    }
+
     /// One request through curl; a body is sent as JSON through the config on standard input (never an argument).
     fn request(
         method: &str,
@@ -543,8 +562,9 @@ impl CurlHttp {
         seconds: u32,
     ) -> Result<Vec<u8>, String> {
         use std::process::Stdio;
-        if url.contains(['"', '\n', '\\']) || token.contains(['"', '\n', '\\']) {
-            return Err("the URL or the token has a character that cannot be sent".into());
+        // A line break would end the value and start a header of its own, so it is refused; every other character is escaped.
+        if url.contains(['\n', '\r']) || token.contains(['\n', '\r']) {
+            return Err("the URL or the token has a line break, which cannot be sent".into());
         }
         if method.is_empty() || !method.bytes().all(|b| b.is_ascii_uppercase()) {
             return Err(format!("{method:?} is not an HTTP method"));
@@ -569,25 +589,7 @@ impl CurlHttp {
             .spawn()
             .map_err(|e| format!("cannot start curl: {e}"))?;
         if let Some(mut stdin) = child.stdin.take() {
-            // An empty token is an anonymous request (the planner reads public run lists without one).
-            let auth = if token.is_empty() {
-                String::new()
-            } else {
-                format!("header = \"Authorization: token {token}\"\n")
-            };
-            let _ = write!(stdin, "url = \"{url}\"\n{auth}header = \"Accept: {accept}\"\n");
-            if method != "GET" {
-                let _ = writeln!(stdin, "request = \"{method}\"");
-            }
-            if let Some(body) = body {
-                // curl's config quoting: within double quotes only \\ and \" (and \t \n \r \v) are escapes.
-                let quoted = body
-                    .replace('\\', "\\\\")
-                    .replace('"', "\\\"")
-                    .replace('\n', "\\n")
-                    .replace('\r', "\\r");
-                let _ = write!(stdin, "header = \"Content-Type: application/json\"\ndata-binary = \"{quoted}\"\n");
-            }
+            let _ = stdin.write_all(CurlHttp::config(method, url, token, accept, body).as_bytes());
         }
         let out = child.wait_with_output().map_err(|e| format!("curl failed: {e}"))?;
         if !out.status.success() {
@@ -915,6 +917,32 @@ fn finish(kind: &str, (outcome, next): (Outcome, String), log: &mut dyn Write) -
 
 #[cfg(test)]
 mod tests {
+    /// Run 9265's class: every value of the request config goes through the shared writer (`curl_config`), so a backslash or quote in the
+    /// URL, the token or the body reaches curl as written.
+    #[test]
+    fn the_request_config_is_written_by_the_shared_curl_writer() {
+        let c = CurlHttp::config(
+            "POST",
+            "https://h/a\\b?x=\"1\"",
+            "t\\k\"n",
+            "application/json",
+            Some("{\"a\":\"b\\c\"}\n"),
+        );
+        for (k, v) in [
+            ("url", "https://h/a\\b?x=\"1\""),
+            ("header", "Authorization: token t\\k\"n"),
+            ("header", "Accept: application/json"),
+            ("request", "POST"),
+            ("data-binary", "{\"a\":\"b\\c\"}\n"),
+        ] {
+            assert!(c.contains(&curl_config::line(k, v)), "{k}: {c}");
+        }
+        assert!(
+            !CurlHttp::config("GET", "u", "", "a", None).contains("Authorization"),
+            "an empty token is anonymous"
+        );
+    }
+
     use super::*;
     use std::cell::RefCell;
     use std::collections::HashMap;
