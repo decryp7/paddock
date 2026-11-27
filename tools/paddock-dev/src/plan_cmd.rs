@@ -584,10 +584,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         emitted_legs.insert(if key == "crates" { "crate" } else { "paddock-dev" }, legs_of.clone());
         workspace_oses.insert(
             if key == "crates" { "crate" } else { "paddock-dev" },
-            legs_of
-                .iter()
-                .filter_map(|l| l["os"].as_str().map(str::to_string))
-                .collect::<BTreeSet<String>>(),
+            crate::plan_graph::legs_oses(&legs_of),
         );
         outputs.push((name.into(), serde_json::to_string(&legs_of).unwrap_or_default()));
     }
@@ -626,10 +623,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         ran.smoke = smoke;
         ran.affected = affected;
         // A narrowed `crate` or `paddock-dev` job runs on the legs the selection kept.
-        ran.jobs.retain(|j| match j.split_once('@') {
-            Some((job, os)) => workspace_oses.get(job).is_none_or(|o| o.contains(os)),
-            None => true,
-        });
+        ran.jobs = crate::plan_graph::on_selected_legs(&ran.jobs, &workspace_oses);
     }
 
     // A push to main is its own measure (its plan is the diff from the last green main), and so is a train's landing run (its plan is
@@ -669,7 +663,13 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     .map_err(fail)?;
     // A push to main's scope has no WebKit and no reference-app end-to-end jobs (the nightly's), so a train's full run is complete
     // without them (user, 2026-11-24).
-    let need = scope_of(&model, &need_plan, &need_legs, false, &os_legs, &[]);
+    let mut need = scope_of(&model, &need_plan, &need_legs, false, &os_legs, &[]);
+    // A push's or a landing's need is its own plan, so it needs a narrowed `crate` or `paddock-dev` job on the legs that plan's
+    // selection keeps, by the same definition as `ran` above (ER-22; train y, run 9243: a crates smoke set ran on Linux only and the
+    // need still asked for macOS and Windows). The whole tree's need is not narrowed.
+    if graph_mode && !need_whole {
+        need.jobs = crate::plan_graph::on_selected_legs(&need.jobs, &workspace_oses);
+    }
     // A push's or a landing's need is its own diff: the line names the base it was diffed from (a push reuses a landing run of
     // the same diff only, review round 2 P1-A).
     let need_base = if need_whole { None } else { base.as_deref() };

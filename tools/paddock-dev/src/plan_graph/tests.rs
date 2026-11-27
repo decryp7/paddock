@@ -361,3 +361,56 @@ fn the_escape_record_names_what_the_graph_runs_not_the_rule_tables() {
     let sel = escape_selected(&p, &legs_of(&p, &g), &[]);
     assert_eq!((sel["app:x"].runs.as_str(), sel["app:x"].targets.is_none()), ("all", true));
 }
+
+/// The declared scope of a landing (or push) whose need is its own diff: the ran and need jobs both pass through
+/// [`on_selected_legs`] over the OS of the legs [`narrow_workspace_legs`] kept, the one definition of a narrowed run's legs.
+fn landing_declared(plan: &Value, ran_oses: &[&str]) -> crate::run_scope::Declared {
+    use crate::run_scope::{Scope, ci_scope};
+    let legs: Vec<Value> = ["ubuntu-latest", "windows-latest", "macos-latest"]
+        .iter()
+        .map(|os| json!({"os": os, "test_packages": "", "test_filter": "", "test_skip": ""}))
+        .collect();
+    let kept = narrow_workspace_legs(legs, plan, &graph(), "crates", "crates");
+    let oses: BTreeMap<&str, BTreeSet<String>> = [("crate", legs_oses(&kept))].into();
+    let all: BTreeSet<String> = ["crates", "crate@ubuntu-latest", "crate@windows-latest", "crate@macos-latest"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let (smoke, _) = partial_projects(plan);
+    let ran_jobs: BTreeSet<String> = all
+        .iter()
+        .filter(|j| j.split_once('@').is_none_or(|(_, os)| ran_oses.contains(&os)))
+        .cloned()
+        .collect();
+    let ran = Scope {
+        jobs: on_selected_legs(&ran_jobs, &oses),
+        whole: true,
+        smoke,
+        ..Scope::default()
+    };
+    let need = Scope {
+        jobs: on_selected_legs(&all, &oses),
+        whole: true,
+        ..Scope::default()
+    };
+    ci_scope(ran, false, need, false)
+}
+
+#[test]
+fn a_landing_that_smoke_tests_crates_needs_only_the_legs_its_selection_runs_and_one_that_changes_crates_needs_every_os() {
+    // Train y (run 9243): the train did not touch crates, the landing plan gave crates a smoke set, its `crate` job ran on Linux
+    // only, but the need asked for crate@macos-latest and crate@windows-latest too, so `lands()` could never hold.
+    let smoke =
+        json!({"graph": {"crates": {"nextest": "package(=paddock-proc)", "affectedOnly": false, "targets": [], "modes": ["smoke"]}}});
+    let d = landing_declared(&smoke, &["ubuntu-latest"]);
+    assert_eq!(d.lands(), Ok(()), "the smoke selection's own legs are what the landing needs");
+    assert!(d.complete().is_err(), "a smoke run lands but is never complete");
+    // Control: a train that changes crates runs them in full, so the landing needs every OS, and a run without the macOS leg fails.
+    let full = json!({"graph": {}});
+    assert_eq!(
+        landing_declared(&full, &["ubuntu-latest", "windows-latest", "macos-latest"]).lands(),
+        Ok(())
+    );
+    let missing = landing_declared(&full, &["ubuntu-latest", "windows-latest"]).lands();
+    assert!(missing.as_ref().is_err_and(|e| e.contains("crate@macos-latest")), "{missing:?}");
+}

@@ -357,6 +357,25 @@ pub fn narrow_workspace_legs(legs: Vec<Value>, plan: &Value, graph: &RepoGraph, 
         .collect()
 }
 
+/// The operating systems of `legs` (the `crate` or `paddock-dev` legs a plan emitted).
+pub fn legs_oses(legs: &[Value]) -> BTreeSet<String> {
+    legs.iter().filter_map(|l| l["os"].as_str().map(str::to_string)).collect()
+}
+
+/// The jobs of `jobs` on the legs the selection kept: a `crate@<os>` or `paddock-dev@<os>` job stays only when `oses` holds that OS
+/// for its job (the legs [`narrow_workspace_legs`] left); every other job stays. The one definition of a narrowed run's legs (ER-22):
+/// what the run declares it ran and what a push's or a landing's own diff needs both take it, so a landing whose selection ran a
+/// project's smoke set on Linux only is not asked for that project's macOS and Windows legs (train y, run 9243).
+pub fn on_selected_legs(jobs: &BTreeSet<String>, oses: &BTreeMap<&str, BTreeSet<String>>) -> BTreeSet<String> {
+    jobs.iter()
+        .filter(|j| match j.split_once('@') {
+            Some((job, os)) => oses.get(job).is_none_or(|o| o.contains(os)),
+            None => true,
+        })
+        .cloned()
+        .collect()
+}
+
 /// The `selection` output: each narrowed project's [`Narrow`] (a project in full is not named).
 pub fn selection_output(plan: &Value) -> Value {
     Value::Object(
