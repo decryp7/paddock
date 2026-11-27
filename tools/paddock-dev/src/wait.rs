@@ -485,13 +485,61 @@ pub struct CiRunProbe<'a> {
     url: String,
     token: String,
     run: u64,
+    /// Looks that Gitea answered since the start of this wait (the token worked).
+    good_looks: u32,
+    /// Looks in a row that Gitea refused the token after `good_looks` > 0: held, not failed ([`REFUSED_HOLD_LOOKS`]).
+    refused_in_a_row: u32,
+    notes: Vec<String>,
+}
+
+/// How many looks in a row a 401 is held through once the same token has been answered in this wait: 40 looks is 10 minutes at
+/// the default 15 s. Cause: on 2026-11-27/28 five waiters (runs 9284, 9285, 9286, 9320, 9321) ended on a 401 for a token that had
+/// worked minutes earlier and that a fresh `curl` accepted, each after the five failed looks (about 2.5 minutes) the wait tolerates;
+/// the real length of such a refusal is not measured, so the hold is bounded and ends with an `::error::` that names the cause.
+pub const REFUSED_HOLD_LOOKS: u32 = 40;
+
+/// Whether a failed look is Gitea refusing the token (curl's `--fail-with-body` text: HTTP 401).
+fn is_refused(error: &str) -> bool {
+    error.contains("error: 401") || error.contains("invalid username, password or token")
 }
 
 impl<'a> CiRunProbe<'a> {
     /// `server` like `https://dev.decryptology.net`, `repo` like `decryp7/paddock`.
     pub fn new(http: &'a mut dyn Http, server: &str, repo: &str, run: u64, token: String) -> CiRunProbe<'a> {
         let url = format!("{}/api/v1/repos/{repo}/actions/runs/{run}", server.trim_end_matches('/'));
-        CiRunProbe { http, url, token, run }
+        CiRunProbe {
+            http,
+            url,
+            token,
+            run,
+            good_looks: 0,
+            refused_in_a_row: 0,
+            notes: Vec::new(),
+        }
+    }
+
+    /// A 401 after good looks: the token is not wrong (it worked), so the wait holds up to [`REFUSED_HOLD_LOOKS`] looks in a row,
+    /// says so once, and only then fails with the likely causes.
+    fn refused(&mut self, error: &str) -> Result<Poll, String> {
+        self.refused_in_a_row += 1;
+        if self.refused_in_a_row == 1 {
+            self.notes.push(format!(
+                "::warning::wait: Gitea answered 401 to a token that worked {} looks earlier in this wait; holding up to {REFUSED_HOLD_LOOKS} looks",
+                self.good_looks
+            ));
+        }
+        if self.refused_in_a_row <= REFUSED_HOLD_LOOKS {
+            return Ok(Poll::Pending(format!(
+                "run {}: Gitea refused the token ({} looks in a row); holding",
+                self.run, self.refused_in_a_row
+            )));
+        }
+        Err(format!(
+            "{error}: the token worked {} looks earlier in this wait, so it is probably not wrong: Gitea or its proxy refused a valid \
+             token for {REFUSED_HOLD_LOOKS}+ looks, or the token was revoked. Check with `curl -H \"Authorization: token $GITEA_TOKEN\" \
+             <server>/api/v1/user` (never print the token), then run the wait again",
+            self.good_looks
+        ))
     }
 }
 
@@ -500,7 +548,19 @@ impl Probe for CiRunProbe<'_> {
         format!("CI run {} to complete", self.run)
     }
     fn poll(&mut self) -> Result<Poll, String> {
-        let v = self.http.get_json(&self.url, &self.token)?;
+        let v = match self.http.get_json(&self.url, &self.token) {
+            Ok(v) => v,
+            Err(e) if is_refused(&e) && self.good_looks > 0 => return self.refused(&e),
+            Err(e) => return Err(e),
+        };
+        if self.refused_in_a_row > 0 {
+            self.notes.push(format!(
+                "Gitea answers the token again after {} refused looks",
+                self.refused_in_a_row
+            ));
+            self.refused_in_a_row = 0;
+        }
+        self.good_looks += 1;
         let status = v.get("status").and_then(Value::as_str).unwrap_or("unknown");
         let conclusion = v.get("conclusion").and_then(Value::as_str).unwrap_or("");
         let finished = matches!(status, "completed" | "success" | "failure" | "cancelled" | "skipped") || !conclusion.is_empty();
@@ -514,6 +574,9 @@ impl Probe for CiRunProbe<'_> {
         } else {
             Poll::Failed(text)
         })
+    }
+    fn take_notes(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.notes)
     }
     fn next_step(&self) -> String {
         format!(
@@ -1238,6 +1301,54 @@ mod tests {
             matches!(o, Outcome::Failed { ref detail, .. } if detail.contains("failure")),
             "{o:?}"
         );
+    }
+
+    const REFUSED: &str = "curl exited with exit status: 22: curl: (22) The requested URL returned error: 401 {\"message\":\"invalid username, password or token\"}";
+
+    /// A 401 that follows good looks in the same wait is not a wrong token (it worked): the wait holds through it, says so once
+    /// and goes on when the server answers again (2026-11-27/28: five waiters ended on a 401 their own token had not earned).
+    #[test]
+    fn a_401_after_good_looks_is_held_through_and_named_once() {
+        let mut answers = vec![Ok(json!({"status": "in_progress"})); 3];
+        answers.extend(vec![Err(REFUSED.to_string()); 12]);
+        answers.push(Ok(json!({"status": "completed", "conclusion": "success"})));
+        let mut http = FakeHttp { answers, urls: vec![] };
+        let mut probe = CiRunProbe::new(&mut http, "https://ci.example", "o/r", 77, "tok".into());
+        let (o, log, _) = go(&mut probe, 3600, 15);
+        assert!(matches!(o, Outcome::Done { .. }), "{o:?}\n{log}");
+        assert_eq!(log.matches("::warning::wait: Gitea answered 401").count(), 1, "{log}");
+        assert!(log.contains("answers the token again"), "{log}");
+        assert!(!log.contains("look failed"), "a held 401 is not a failed look: {log}");
+    }
+
+    /// A 401 that never ends is still an end: one `::error::` that names the likely cause, not just "invalid token".
+    #[test]
+    fn a_401_that_outlasts_the_hold_ends_with_one_error_naming_the_cause() {
+        let mut answers = vec![Ok(json!({"status": "in_progress"})); 2];
+        answers.push(Err(REFUSED.to_string()));
+        let mut http = FakeHttp { answers, urls: vec![] };
+        let mut probe = CiRunProbe::new(&mut http, "https://ci.example", "o/r", 77, "tok".into());
+        let (o, log, _) = go(&mut probe, 36000, 15);
+        let Outcome::Broken { error, .. } = &o else {
+            panic!("{o:?}\n{log}")
+        };
+        assert!(error.contains("worked 2 looks earlier"), "{error}");
+        assert!(error.contains("/api/v1/user") && error.contains("revoked"), "{error}");
+        assert!(!error.contains("tok\""), "no token: {error}");
+        assert_eq!(log.matches("::warning::wait: Gitea answered 401").count(), 1, "{log}");
+    }
+
+    /// A 401 on the first look is a wrong token: no hold, the plain error (the existing five strikes).
+    #[test]
+    fn a_401_on_the_first_look_is_not_held() {
+        let mut http = FakeHttp {
+            answers: vec![Err(REFUSED.to_string())],
+            urls: vec![],
+        };
+        let mut probe = CiRunProbe::new(&mut http, "https://ci.example", "o/r", 77, "tok".into());
+        let (o, log, _) = go(&mut probe, 3600, 15);
+        assert!(matches!(o, Outcome::Broken { .. }), "{o:?}");
+        assert_eq!(http.urls.len(), MAX_CONSECUTIVE_ERRORS as usize, "{log}");
     }
 
     fn args(rest: &[&str]) -> WaitArgs {
