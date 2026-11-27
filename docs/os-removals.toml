@@ -2,7 +2,7 @@
 # os-removal compares every such entry with the contract at the merge base and counts the ones recorded here as approved (ER-46).
 # Each approval names its contract, the removal keys exactly as C155 reports them (`only <os> <name>`, `skip <package> [<module>]`),
 # `by = "user"`, the date and why. Adding an entry is the user's decision, never an agent's: the register is shrink-only, so C155 reports
-# an approval the merge base lacks as one unwaivable finding (the user's approval of growth is named in the C155 entry of docs/gates.toml),
+# an approval the merge base lacks as one unwaivable finding (the user approves the growth with a `[[register_growth]]` line for C155 in docs/gates.toml: date, count and digest of exactly the added approvals),
 # and an approval the merge base already covers as stale. An entry leaves once its exception is on the target branch, or with it.
 version = 1
 
