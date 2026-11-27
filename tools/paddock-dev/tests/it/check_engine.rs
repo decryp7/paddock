@@ -523,7 +523,7 @@ fn a_new_rust_check_file_is_named_in_the_registry_message() {
 /// `tests/fixtures/check/recorded`, `units` or the `expected.json` of C39 and C53, named after it (a check with none was ported without
 /// a parity proof). A check written in Rust from the start has no JavaScript answers to be held to: it is named in [`BORN_IN_RUST`]
 /// (with its own fixtures in `tests/it/check_c<n>.rs`), and a check that is listed there and also has a JS module is an error.
-const BORN_IN_RUST: [&str; 7] = ["C145", "C173", "C174", "C175", "C176", "C177", "C179"];
+const BORN_IN_RUST: [&str; 8] = ["C145", "C173", "C174", "C175", "C176", "C177", "C178", "C179"];
 
 #[test]
 fn every_rust_only_check_has_recorded_js_answers() {

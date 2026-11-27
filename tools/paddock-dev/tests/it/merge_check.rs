@@ -3116,6 +3116,42 @@ mod member_trial {
         assert_eq!(code, 2, "{text}");
     }
 
+    /// `sync-member` and `merge member` read the member's own relands through one reader. A member rewritten from the base (so it
+    /// holds none of the reverted merge's commits) that reverts the train's revert is a reland for both.
+    #[test]
+    fn a_rewritten_member_that_reverts_the_trains_revert_is_a_reland_for_sync_member_too() {
+        let r = Repo::new();
+        r.write("base.txt", "base\n");
+        let base = r.commit("base");
+        r.git(&["checkout", "-q", "-b", "feat/x"]);
+        r.write("x.txt", "x\n");
+        r.commit("feat: x");
+        r.git(&["checkout", "-q", "main"]);
+        r.git(&[
+            "merge",
+            "-q",
+            "--no-ff",
+            "-m",
+            "Merge feat/x into train/t\n\nPaddock-Member: feat/x\n",
+            "feat/x",
+        ]);
+        let m = r.git(&["rev-parse", "HEAD"]);
+        let revert = revert_merge(&r, &m);
+        r.write("other.txt", "other\n");
+        r.commit("feat: other");
+        r.git(&["checkout", "-q", "-b", "sync/feat/x", &base]);
+        r.write("x_new.txt", "x\n");
+        r.commit("feat: x again, rewritten");
+        let bare = r.owned_file("origin.git");
+        r.git(&["init", "-q", "--bare", bare.to_str().unwrap()]);
+        r.git(&["remote", "add", "origin", bare.to_str().unwrap()]);
+        r.git(&["merge", "-q", "--no-edit", "main"]);
+        r.git(&["revert", "--no-edit", &revert]);
+        let (code, text, log) = sync(&r, GREEN, "run 4250", "0", &[]);
+        assert_eq!(code, 0, "{text}");
+        assert!(log.contains(&format!("--reland {revert}")), "{log}\n{text}");
+    }
+
     /// A re-sync is a new commit and pushes a second, new ref: a plain push, no force and no lease, and the first ref is untouched.
     #[test]
     fn a_re_sync_pushes_a_second_new_ref_with_no_force() {
@@ -3713,6 +3749,60 @@ mod merge_member {
         assert!(t.contains("Paddock-Member: feat/r"), "one trailer block: {t}");
         let (code, text) = member(&r, &["feat/r", "--reland", "not-a-commit"]);
         assert_eq!(code, 2, "{text}");
+    }
+
+    /// The train made a tool merge of `feat/r` and reverted it; the member then merged the train and reverted the revert
+    /// (`reapply`), or did not (the control). Returns the repo with `main` checked out and the train's revert.
+    fn reverted_own_merge(reapply: bool) -> (Repo, String) {
+        let r = Repo::new();
+        r.write("base.txt", "base\n");
+        r.commit("base");
+        r.git(&["checkout", "-q", "-b", "feat/r"]);
+        r.write("r.txt", "r\n");
+        r.commit("feat: r");
+        r.git(&["checkout", "-q", "main"]);
+        let (code, text) = member(&r, &["feat/r"]);
+        assert_eq!(code, 0, "{text}");
+        let m = r.git(&["rev-parse", "HEAD"]);
+        r.git(&["revert", "-m", "1", "--no-edit", &m]);
+        let revert = r.git(&["rev-parse", "HEAD"]);
+        r.write("train.txt", "train\n");
+        r.commit("train: moves on");
+        r.git(&["checkout", "-q", "feat/r"]);
+        r.git(&["merge", "-q", "--no-edit", "main"]);
+        if reapply {
+            r.git(&["revert", "--no-edit", &revert]);
+        } else {
+            r.write("r2.txt", "r2\n");
+            r.commit("feat: more r");
+        }
+        r.git(&["checkout", "-q", "main"]);
+        (r, revert)
+    }
+
+    /// The member's own earlier merge was reverted on the train and the member re-adds that content: no `--reland` needed.
+    #[test]
+    fn a_reland_of_the_members_own_reverted_merge_is_found_without_the_flag() {
+        let (r, revert) = reverted_own_merge(true);
+        let (code, text) = member(&r, &["feat/r"]);
+        assert_eq!(code, 0, "{text}");
+        let t = trailers(&r, "HEAD");
+        assert!(t.contains(&format!("Paddock-Reland: {revert}")), "{t}\n{text}");
+        assert_eq!(t.matches("Paddock-Reland").count(), 1, "named once: {t}");
+        // The override still works and does not name it twice.
+        let (r, revert) = reverted_own_merge(true);
+        let (code, text) = member(&r, &["feat/r", "--reland", &revert]);
+        assert_eq!(code, 0, "{text}");
+        assert_eq!(trailers(&r, "HEAD").matches("Paddock-Reland").count(), 1);
+    }
+
+    /// Control: a member that holds the reverted work but does not re-add it is not a reland.
+    #[test]
+    fn a_member_that_does_not_re_add_the_reverted_work_names_no_reland() {
+        let (r, _) = reverted_own_merge(false);
+        let (_, text) = member(&r, &["feat/r"]);
+        let t = trailers(&r, "HEAD");
+        assert!(!t.contains("Paddock-Reland"), "{t}\n{text}");
     }
 
     #[test]

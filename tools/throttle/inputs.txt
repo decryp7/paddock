@@ -5,5 +5,7 @@ tools/throttle
 crates/Cargo.toml
 crates/paddock-env
 crates/paddock-proc
+crates/paddock-shim
+crates/paddock-throttle
 crates/paddock-workspace-hack
 .cargo/config.toml

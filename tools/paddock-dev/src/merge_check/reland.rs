@@ -16,7 +16,7 @@
 //! left for a person; this never answers a finding it cannot tie. It reads and prints; it changes no merge.
 
 use super::git::{Git, short};
-use super::reverted_base::{resolve, trailer_targets};
+use super::reverted_base::{resolve, subject_and_member, trailer_targets};
 use super::{Finding, Kind, Merge};
 use std::collections::HashSet;
 
@@ -131,6 +131,41 @@ fn relands(git: &Git, target: &str, member: &str, base: &str) -> Result<Vec<Rela
             undoes,
             files: files_of(git, sha)?.into_iter().collect(),
         });
+    }
+    Ok(out)
+}
+
+/// The reverts on `head` (the train) of a merge of the member's own branch that the member tip `sha` re-adds, found without
+/// `--reland` (full shas, oldest commit of the member first): a commit in `head..sha` that git's `This reverts commit X` names, where
+/// `X` is on `head`, is a revert, undoes a merge whose `Paddock-Member` (else its subject) is `member`'s own branch, and is not itself
+/// reverted on `head` yet. A revert that names no such line (a hand-made `Revert "..."`) is not found here; `--reland` names it.
+pub fn own_relands(git: &Git, head: &str, sha: &str, member: &str) -> Result<Vec<String>, String> {
+    let log = git.text(&[
+        "log",
+        "--no-merges",
+        "--reverse",
+        "--format=%H%x00%B%x01",
+        &format!("{head}..{sha}"),
+    ])?;
+    let mut out: Vec<String> = Vec::new();
+    for body in log
+        .split('\u{1}')
+        .filter_map(|rec| rec.trim_start().split_once('\0').map(|(_, b)| b))
+    {
+        for name in trailer_targets(body) {
+            let Some((x, _)) = target_revert(git, head, &name)? else { continue };
+            if out.contains(&x) || !reverts_of(git, head, &x)?.is_empty() {
+                continue;
+            }
+            for merge in trailer_targets(&git.text(&["show", "-s", "--format=%B", &x])?) {
+                let Some(m) = resolve(git, &merge)? else { continue };
+                let is_merge = git.text(&["rev-list", "--parents", "-n", "1", &m])?.split_whitespace().count() > 2;
+                if is_merge && super::sync_member::is_own(&subject_and_member(git, &m)?.1.branch, member) {
+                    out.push(x.clone());
+                    break;
+                }
+            }
+        }
     }
     Ok(out)
 }

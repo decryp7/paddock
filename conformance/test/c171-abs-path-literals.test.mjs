@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { makeApp } from './helpers.mjs';
 import check, { absPathSites, addedLines } from '../src/checks/C171-abs-path-literals.mjs';
 
 const lines = (text, file = 'tools/x/tests/it/a.rs') => absPathSites(text, file).map((s) => s.line);
@@ -76,4 +80,36 @@ test('C171: when the base cannot be read a site is a warning, and in CI a not-me
 test('C171: the check is a gate (new lines block) with id C171', () => {
   assert.equal(check.mode, 'gate');
   assert.equal(check.id, 'C171');
+});
+
+test('C171: a waiver sits on the statement: rustfmt may move the literal below the comment (the throttle move, bf651d875), and it does not reach another statement', () => {
+  const spread = 'fn t() {\n    // conformance: abs-path — the expected macOS default of a modelled host, compared as text\n    assert_eq!(\n        c.root,\n        PathBuf::from("/Users/u/x")\n    );\n}\n';
+  assert.deepEqual(lines(spread), [], 'the comment above the statement covers its literal');
+  assert.deepEqual(lines(spread.replace('    // conformance: abs-path — the expected macOS default of a modelled host, compared as text\n    assert_eq!(', '    // conformance: abs-path — the expected macOS default of a modelled host, compared as text\n    let a = 1;\n    assert_eq!(')), [6], 'a waiver on an earlier statement does not');
+  assert.deepEqual(lines('fn t() {\n    // conformance: abs-path — a reason that is long enough\n    f(g(1), PathBuf::from("/a/b"), [1, 2]);\n}\n'), [], 'a waiver above a one-line statement, as before');
+});
+
+// ---- a moved file's old sites are not "added lines": the check reads git's rename detection (ER-21) ----
+const sh = (root, ...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: root, stdio: 'ignore' });
+const BODY = Array.from({ length: 30 }, (_, i) => `    let v${i} = ${i};\n`).join('');
+const OLD_RS = `fn t() {\n${BODY}    let p = PathBuf::from("/planted/abs");\n}\n`;
+function movedRepo(newText) {
+  const root = makeApp({ 'tools/x/tests/it/old.rs': OLD_RS });
+  sh(root, 'init', '-q', '-b', 'main');
+  sh(root, 'add', '.');
+  sh(root, 'commit', '-q', '-m', 'base');
+  sh(root, 'checkout', '-q', '-b', 'topic');
+  sh(root, 'mv', 'tools/x/tests/it/old.rs', 'tools/x/tests/it/new.rs');
+  if (newText) writeFileSync(join(root, 'tools/x/tests/it/new.rs'), newText);
+  sh(root, 'commit', '-q', '-a', '-m', 'move');
+  return root;
+}
+const runReal = (root) => check.run({ root, files: () => ['tools/x/tests/it/new.rs'], read: (f) => execFileSync('cat', [join(root, f)], { encoding: 'utf8' }), options: { baseRef: 'main', ci: false } });
+
+test('C171: a pure move keeps its old sites warnings; a moved file that gains a literal still blocks on that line', () => {
+  const moved = runReal(movedRepo(null));
+  assert.deepEqual(moved.map((f) => f.severity), ['warn'], 'the move adds no line');
+  const plus = runReal(movedRepo(OLD_RS.replace('}\n', '    let q = Path::new("/new/abs");\n}\n')));
+  assert.deepEqual(plus.map((f) => f.severity).sort(), ['error', 'warn'], 'the new line blocks, the old site still warns');
+  assert.match(plus.find((f) => f.severity === 'error').message, /this line is new/);
 });

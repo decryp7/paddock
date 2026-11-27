@@ -1,7 +1,7 @@
 //! C139 (the exceptions to `paddock/e2e-ready-reads`, an `eslint-suppressions.json`, only shrink): the Rust host against its JavaScript port, on
 //! fixture trees (with and without git history) and on this working tree. The check's own test file: nothing in it is read as a spec.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use super::check::{has_node, node, repo_root, skip};
+use super::check::{has_node, js_findings, node, repo_root, skip};
 use paddock_dev::check::{RunOptions, registry, run_checks};
 use serde_json::{Value, json};
 use std::path::Path;
@@ -9,7 +9,7 @@ use std::process::Command;
 
 /// The part of a report the JS host also writes.
 fn shared_part(v: &Value) -> Value {
-    json!({"app": v["app"], "checks": v["checks"], "findings": v["findings"], "waived": v["waived"], "errors": v["errors"], "warnings": v["warnings"]})
+    json!({"app": v["app"], "checks": v["checks"], "findings": js_findings(&v["findings"]), "waived": v["waived"], "errors": v["errors"], "warnings": v["warnings"]})
 }
 
 const R: &str = "paddock/e2e-ready-reads";

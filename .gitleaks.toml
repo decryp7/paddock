@@ -271,7 +271,7 @@ regexes = [
 description = "an invented value in a redaction test: the code under test must hide it"
 condition = "AND"
 targetRules = ["gitlab-pat"]
-paths = ['''^tools/throttle/tests/it/ported\.rs$''']
+paths = ['''^crates/paddock-throttle/tests/it/ported\.rs$''']
 regexes = [
   '''^glpat-abcdefghijklmnopqrst$''',
 ]
@@ -280,7 +280,7 @@ regexes = [
 description = "an invented value in a redaction test: the code under test must hide it"
 condition = "AND"
 targetRules = ["stripe-access-token"]
-paths = ['''^tools/throttle/tests/it/ported\.rs$''']
+paths = ['''^crates/paddock-throttle/tests/it/ported\.rs$''']
 regexes = [
   '''^sk_live_abcdefghijklmnopqrstuvwx$''',
 ]

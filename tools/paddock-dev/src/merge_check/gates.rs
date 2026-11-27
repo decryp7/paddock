@@ -74,7 +74,12 @@ impl Gates for Real {
 /// Runs `<this tool> --json check --pre-push <extra> --base <base> --root <root>` in `root` and reads what it printed (the member gate
 /// and the static rows of `merge sync-member` differ only in `extra`).
 pub fn run_pre_push(root: &Path, base: &str, extra: &[&str]) -> Result<GateRun, String> {
-    let mut cmd = command(program()?);
+    run_pre_push_with(&program()?, root, base, extra)
+}
+
+/// [`run_pre_push`] with the program given (`merge sync-member` runs the sync tip's own `./dev`).
+pub fn run_pre_push_with(program: &Path, root: &Path, base: &str, extra: &[&str]) -> Result<GateRun, String> {
+    let mut cmd = command(program);
     cmd.args(["--json", "check", "--pre-push"])
         .args(extra)
         .args(["--base", base, "--root"])

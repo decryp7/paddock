@@ -1230,16 +1230,17 @@ review_by = 2026-12-11
 approved = "user"
 
 [[report_only]]
+id = "C178"
+reason = "ER-41: report-only until the back-edges are gone (the test-split ADR's WP-4, one refactor branch per batch), then flip the mode to Gate; the check is deleted if the crate split lands (cargo then refuses a crate cycle). It reads tools/paddock-dev/layers.toml (the one module-to-layer table, the crate table of docs/plans/paddock-dev-crate-split.md 9354c6308 with its diamond: core, host, repo, ci, gates, bin, each layer naming the layers it uses) and reports each production `crate::<module>` reference to a layer its own does not use, each module of src/ the table lacks and each stale entry; test code is not read. First real-tree count 2026-11-27 on origin/main 5e5991a31 with the plan's table: 32 references in 19 module pairs (against the ADR's first sketch: 64 references in 31 pairs; the plan counts 35 production items); 0 table gaps. No baseline file (ER-46): the report is the list. Positive control in the check and tests/it/check_c178.rs: an upward use and a macro path go red, a downward path, test code and the lib.rs items stay green; a missing or broken table is not measured"
+owner = "ER-21 class: paddock-dev's modules form one reference cycle (45 of 66 modules, 90% of the lines), so no crate split or per-area test unit is possible"
+since = 2026-11-27
+review_by = 2026-12-11
+approved = "user"
+
+[[report_only]]
 id = "C179"
 reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c179.rs, then flip the mode to Gate. A member crate of a Cargo workspace whose Rust sources hold a read the reads extractor cannot resolve (a manifest folder in a variable, .ancestors(), current_dir, git ls-files, a join with a non-literal: repo_model::code::blind_of, the model's own definition) and that has no [package.metadata.paddock] test-reads makes the test cache refuse it and every crate that depends on it (ADR 0116 section 2, user decision 122); a declared glob that matches no tracked file is a finding too. First count 2026-11-27 on feat/test-cache-declared-reads: 49 crates with 221 blind sites and no declaration; 47 declared the same day, left: tools/paddock-dev (143 sites: it reads the whole tree) and tools/throttle (2: the cargo config folders above a working folder). No baseline file (ER-46): the report is the list. Positive control in the check and tests/it/check_c179.rs: a blind crate and a stale glob go red, a declared crate, an empty declaration, a crate with no blind site and a non-member stay green"
 owner = "ER-21 class: one blind crate (paddock-testkit, a dev-dependency of nearly every crate) kept 121 of 137 test crates Never; ADR 0116 amendment 2026-11-27"
 since = 2026-11-27
 review_by = 2026-12-11
 approved = "user"
-
-[[register_growth]]
-check = "C155"
-by = "user"
-date = "2026-11-27"
-count = 16
-digest = "9f5c42619c0600fee89c2e0a4c805e59c13fc31a92851034e7ee5937702dd031"

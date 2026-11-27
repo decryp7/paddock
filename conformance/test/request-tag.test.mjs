@@ -16,13 +16,13 @@ const conf = (v) => JSON.stringify({ version: v });
 // throttle-vX.Y.Z publishes the tool (throttle-release.yml): its version source is tools/throttle/Cargo.toml, not an app folder.
 test('a throttle-v tag is checked against the version of tools/throttle/Cargo.toml', () => {
   const cargo = 'tools/throttle/Cargo.toml';
-  const toml = (v) => `[package]\nname = "paddock-throttle"\nversion = "${v}"\n`;
+  const toml = (v) => `[package]\nname = "throttle"\nversion = "${v}"\n`;
   assert.equal(checkVersion('throttle', 'throttle-v0.2.0', files({ [cargo]: toml('0.2.0') })), '0.2.0');
   assert.throws(() => checkVersion('throttle', 'throttle-v0.2.0', files({ [cargo]: toml('0.1.0') })), /says 0\.2\.0, tools\/throttle\/Cargo\.toml says 0\.1\.0/);
   assert.throws(() => checkVersion('throttle', 'throttle-v0.2.0', files({})), /tools\/throttle\/Cargo\.toml is missing/);
   assert.equal(gateWorkflow('throttle', files({})), 'ci.yml');
   // The release workflow, read through the workflow accessor (not by text): it runs on that tag only, builds the four targets, attaches
-  // SHA256SUMS through the release script, keeps its notes out of the assets and publishes the crate last.
+  // SHA256SUMS through the release script, keeps its notes out of the assets (the core crate goes out with the other crates, publish.yml).
   const wf = loadWorkflow('throttle-release.yml');
   assert.deepEqual(wf.on?.push?.tags ?? wf.true?.push?.tags, ['throttle-v*']);
   const targets = ['build-linux', 'build-host'].flatMap((id) => (wf.jobs[id].strategy.matrix.include ?? []).map((m) => m.target)).sort();
@@ -32,11 +32,7 @@ test('a throttle-v tag is checked against the version of tools/throttle/Cargo.to
   assert.match(run('release'), /conformance\/release\/publish\.mjs .*--dir release\b/);
   assert.doesNotMatch(run('release'), /release\/NOTES\.md/, 'the notes are not an uploaded asset');
   assert.deepEqual(wf.jobs.release.needs, ['build-linux', 'build-host']);
-  const crate = wf.jobs.crate;
-  assert.deepEqual(crate.needs, ['release']);
-  assert.equal(crate['continue-on-error'], true);
-  assert.match(run('crate'), /cargo publish --locked --registry decryp7 \|\| \{ echo "::error::/);
-  assert.match(run('crate'), /crate not published/);
+  assert.equal(wf.jobs.crate, undefined, 'the crate paddock-throttle is published by a v* tag, not by this workflow');
   // Every build job checks the compiler against the pin right before it builds: the step before `cargo build` is `./dev ci rust-pin`.
   for (const id of ['build-linux', 'build-host']) {
     const steps = wf.jobs[id].steps;

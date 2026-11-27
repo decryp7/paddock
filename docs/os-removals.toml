@@ -5,14 +5,3 @@
 # an approval the merge base lacks as one unwaivable finding (the user approves the growth with a `[[register_growth]]` line for C155 in docs/gates.toml: date, count and digest of exactly the added approvals),
 # and an approval the merge base already covers as stale. An entry leaves once its exception is on the target branch, or with it.
 version = 1
-
-[[approved]]
-contract = "tools/paddock-dev/paddock.ci.json"
-by = "user"
-date = "2026-11-27"
-why = "decision 114 (user, in chat): paddock-dev's OS-independent test areas run on Linux only (ER-52); Windows and macOS keep the OS-specific tests"
-entries = [
-  "skip merge_check::", "skip ci_runs::", "skip ci_run::", "skip plan_graph::", "skip plan_repo::", "skip plan_since::",
-  "skip plan_gitea::", "skip run_scope::", "skip nextest_log::", "skip log_text::", "skip job_outcome::", "skip active_apps::",
-  "skip test_cost::", "skip os_placement::", "skip repo_model::hash::", "skip repo_model::replay::",
-]

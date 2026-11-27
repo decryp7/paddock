@@ -53,5 +53,6 @@ dependencies, regenerate the tool's lockfile in the same change (`cd tools/paddo
 
 ## throttle
 
-`tools/throttle` (package `paddock-throttle`, binary `throttle`): the machine-wide heavy-step lock that replaces the shell `plock`
-and engineering-playbook `scripts/heavy.sh` (ER-24). Its own Cargo workspace; see [tools/throttle/README.md](throttle/README.md).
+`tools/throttle` (package `throttle`, binary `throttle`): the machine-wide heavy-step lock that replaces the shell `plock`
+and engineering-playbook `scripts/heavy.sh` (ER-24), a thin binary over the shared crate `crates/paddock-throttle` (admission, queue,
+load rules, priority lane, run log, stall detector). Its own Cargo workspace; see [tools/throttle/README.md](throttle/README.md).
