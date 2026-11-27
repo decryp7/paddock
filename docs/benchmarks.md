@@ -84,6 +84,22 @@ uses it, results in
 
 ## Results of shared tooling
 
+### 2026-11-27, trials yield to train runs; planned legs count as Mac and Windows (fix/trials-yield-to-trains)
+
+- **Commit:** origin/main 7da64dedb plus this branch's change. Not a new run: the saving is read from the recorded timeline of train run 9248 against trial run 9247 (CI replay of the two runs), so it is an expected figure.
+- **Machine:** the CI runners: d-gtr9 (6 Linux slots, `conformance/ci/runner-slots.json`) and the Windows runner (3 slots).
+- **Method:** trial 9247 (a member trial of `ci.yml`) was dispatched while train run 9248 of the same workflow was queued. The run lists and job timestamps of both runs were read. `classes_of` found no Mac or Windows class in `ci.yml` (a planned matrix is not a literal value), so neither `ci dispatch` nor `runner-wait` guarded those slots.
+- **Numbers:**
+
+  | Measure | Before | Expected after |
+  |---|---|---|
+  | 9248 `plan` job queued | 87 s (behind 9247's Linux jobs) | 0 s of trial load: the trial waits for the train run to finish |
+  | 9248 `crate (windows-latest)` queued | 315 s (9247 held 2 of 3 Windows slots) | the Windows slots are free of the trial |
+  | Critical-path cost of the trial | about 117 s or more | 0 s |
+  | `ci.yml` runner classes seen by `classes_of` | none | macOS and Windows |
+
+- **Reading:** a trial now waits (at most its `--max`) while a `train/*` run of the same workflow is queued or running, so the train's `plan` and Windows legs start at once. The cost moves to the trial, which is not on a train's critical path. A trial that waits for the whole `--max` ends with an `::error::` naming the train run. Tests: `ci_runs::dispatch::tests::a_trial_waits_while_a_train_run_of_its_workflow_is_queued` and the two beside it. Not measured: the real saving. The next train run with a trial dispatched beside it gives it; record it here.
+
 ### 2026-11-27, train priority in throttle (feat/throttle-train-priority)
 
 - **Commit:** origin/main 696f472f4 plus this branch's change (a debug build of tools/throttle, the binary the tests ran).
@@ -332,7 +348,7 @@ failing mode.
 - **Queue length:** the most steps waiting at once in the same log: 13 (`position N of 13`). Rows of the three refused pushes of 2026-11-21 (watch-rescan push4, push5, push6): 45 rows decided per push (32 passed + 13 not measured, 31 + 14, 30 + 15) and 20 skipped; the longest of those gate runs was 76 minutes (the log files' times, 15:32 to 16:48), and the push of this change itself, with the new gate, ran 95 minutes (5,705 s, 27 rows passed, none not measured: clippy crates queued 1,225 s and ran 312 s, clippy-windows crates queued 758 s and ran 339 s, doctest crates queued 593 s and ran 334 s).
 - **Derived limits (ER-12):** `WAIT_BACKSTOP` = 2 x 13 x 1,122 s (the slowest healthy row, "Doctest row of the push gate") = 29,172 s (8 h 6 min); the member gate's outer `TIMEOUT` is 24 h, 15 times the longest push gate run seen (95 min). Both are backstops for a hung client or gate: the judgement is the row cap and the queue's progress.
 - **Holders count while they live:** a holder whose record is inside the cap its own row lives under (the waiter's `--run-max`, `ROW_CAP` + grace, 3,675 s) is progress by itself, so a waiter behind a healthy 31 to 60 minute step is not stalled; past the cap it is not live, and the same picture ends the wait a stall limit later.
-- **Notes:** the basis of `QUEUE_STALL` (30 min, 1,800 s) in `tools/paddock-dev/src/pre_push/exec.rs`: over the longest gap seen, so a queue that moves is never ended. A holder that runs longer is ended by its own row cap. The per-push totals it replaces (15 min of run, 30 min of queue) were exceeded by three pushes on 2026-11-21 with no row running too long: 13, 14 and 15 rows, and 5 rows, were not measured. Not measured: the gaps of a quiet machine.
+- **Notes:** the basis of `QUEUE_STALL` (30 min, 1,800 s) in `tools/paddock-dev/src/throttle.rs`: over the longest gap seen, so a queue that moves is never ended. A holder that runs longer is ended by its own row cap. The per-push totals it replaces (15 min of run, 30 min of queue) were exceeded by three pushes on 2026-11-21 with no row running too long: 13, 14 and 15 rows, and 5 rows, were not measured. Not measured: the gaps of a quiet machine.
 
 ### 2026-11-24, scope grace: from the stop request to the exit (feat/adr-0119-wp1-scope)
 

@@ -46,3 +46,29 @@ pub fn scrub(cmd: &mut std::process::Command, parent: &[String]) {
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_TERMINAL_PROMPT", "0");
 }
+
+/// Variables a child of the push gate may see besides the base list (every gate but the rows of CI's own tests, which take CI's job
+/// environment less the secrets instead): the caller's account (CI's runner has it, and tests read it: paddock-env's
+/// macOS ACL test writes `user:$USER`; ER-47), the toolchain, Docker, caches and Paddock's own settings.
+pub const PASS: &[&str] = &[
+    "USER",
+    "LOGNAME",
+    "CARGO_*",
+    "RUSTUP_*",
+    "RUSTFLAGS",
+    "RUSTC_WRAPPER",
+    "DOCKER*",
+    "PADDOCK_*",
+    "HEAVY_*",
+    "XWIN_*",
+    "SCCACHE_*",
+    "NODE_*",
+    "CC",
+    "CXX",
+    "CLANG*",
+    "LIBRARY_PATH",
+    "SDKROOT",
+    "TMPDIR",
+    "NPM_CONFIG_*",
+    "npm_config_*",
+];

@@ -1,5 +1,6 @@
 ## Working practices
 
+- Flaky or platform-dependent failures cite the vendor's documentation in the commit (ER-28; the bug-fix skill has the steps).
 - Research official sources before choosing libraries or relying on another program's behaviour, and record what you
   found and when in the ADR or doc comment. Prefer well-maintained, permissively licensed dependencies.
 - Navigate code with Serena's symbol tools (find symbol, references, overview) when they are available instead of

@@ -560,11 +560,16 @@ merge check (`./dev merge check`) refuses a member whose base is older than main
 `ci/old-base-block` (report-only until it lands). A refused member merges main, re-runs `./dev merge check --gates` on the result and
 is offered again. After merging main (or the train) into the member, `./dev merge sync-member <train>` runs the fast static rows
 (conformance, the gate register, Clippy and Windows Clippy of the touched workspaces) on that sync tip and ends non-zero on a failing
-or unmeasured row; fix it on the member and re-sync. `--no-static "<reason>"` is the logged escape. Once the rows pass it also
-dispatches the member's own narrowed CI run on the train (`ci dispatch ci.yml --trial`, the plan's affected jobs on its Linux and Windows
-legs; the integrator's sync-member pushes the sync tip as the new ref `sync/<member>/<short sha>` first) and prints the run id; a later `./dev merge check --gates` reads that run through the verdict reader: a
-red trial blocks the member, a running one is not a pass. `--no-trial "<reason>"` is the logged escape. *Why (trial):* members that passed
-on the Mac failed only on Windows or Linux CI in three trains. *Why:* on 2026-11-25 five members were pulled from trains i, k and m because their base was older than main (see
+or unmeasured row; fix it on the member and re-sync. `--no-static "<reason>"` is the logged escape. Once the rows pass it dispatches the member's own narrowed CI run on the train
+(`ci dispatch ci.yml --trial`, the plan's affected jobs on its Linux and Windows legs; the integrator's sync-member pushes the sync tip as the new ref
+`sync/<member>/<short sha>` first) and prints the run id, **only for a member with no green trial of its own on main** (user 2026-11-27): a Linux trial with
+`--onto origin/main` on the member's current head, or on a head whose only differences are merges of main. A member that has one joins with
+`--no-trial "trial <run id> green on main"` (logged). Members without one join on the fast static rows alone, and **one trial of the train tip covers them
+all**, dispatched after they are merged (`./dev ci dispatch ci.yml --ref <train>`). If that batched trial is red, the member it points to is pulled (ER-8) and the
+trial runs again. A later `./dev merge check --gates` reads a member's own trial through the verdict reader when there is one: a red trial blocks the
+member, a running one is not a pass. A train takes up to 8 ready members (user 2026-11-27, was 3 to 4); a red full run pulls the member its failure points to (ER-8) and the train runs again once. The final full CI run on the exact head and `landing-held` are unchanged (ER-49). *Why (trial):* members that passed
+on the Mac failed only on Windows or Linux CI in three trains. *Why (batched, user 2026-11-27):* on train y per-member trials on a moving train
+went red on other members' defects and proved little, at about 30 minutes each; train z merged 8 members in about 40 minutes with one trial of the tip, against about 90 minutes for one-by-one trials. *Why:* on 2026-11-25 five members were pulled from trains i, k and m because their base was older than main (see
 [lessons.md](lessons.md#members-on-an-old-base-were-pulled-from-trains-i-k-and-m-2026-11-25)).
 
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
@@ -590,7 +595,7 @@ Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as writt
     (d) The landing needs the normal green gates and is a merge or fast-forward, never a rebase or squash, so the tag is an ancestor of main (later release notes read the history from the previous tag). Fixes for other products go on their own line, not on the release branch.
     *Why:* Dyno 1.1.0 was correctly blocked by Paddock run 7485 (mostly code Dyno ships). Run 7489 failed in the shell-demo's i18n check (outside Dyno) and in aggregate coverage; the coverage gate printed no per-crate output and a crate Dyno depends on was in it, so that blocked under (b) until the gate was fixed and a full run was green. The failures also skipped the dependency audit and several ui steps, which (a) asks to be cleared.
 
-101. **Local gates never start a VM or a container on a developer's Mac** (user, 2026-11-26). Linux checks run as CI's Linux jobs on the Linux runner, Windows checks on the Windows runner. The pre-push and member gate have no Linux row (`clippy-linux`, `tests-linux`, `--warm-linux` are removed; the register names them CI-owned), and conformance C172 (report-only, review 2026-12-09) flags a docker, podman, nerdctl, orb, orbctl, vmrun or `linux-container.sh` call in local gate code. *Why:* the container rows were the Mac's largest load, and the user decided on 2026-11-26 that no VM runs on the Mac. Status: in force (train o); C172 report-only until its first green run on the real tree (ER-41), review 2026-12-09.
+101. **Local gates never start a VM or a container on a developer's Mac** (user, 2026-11-26). Linux checks run as CI's Linux jobs on the Linux runner, Windows checks on the Windows runner. The pre-push and member gate have no Linux row (`clippy-linux`, `tests-linux`, `--warm-linux` are removed; the register names them CI-owned), and conformance C172 (report-only, review 2026-12-09) flags a docker, podman, nerdctl, orb, orbctl, vmrun or `linux-container.sh` call in local gate code. A builder may run the affected Linux tests as ONE CI trial of its own pushed branch (`./dev ci dispatch ci.yml --trial <branch> --onto origin/main`, never main or `train/*`; the playbook's ER-9 amendment, fb7cbce, user 2026-11-27); locally it runs only the fast static rows. *Why:* the container rows were the Mac's largest load, and the user decided on 2026-11-26 that no VM runs on the Mac. Status: in force (train o); C172 report-only until its first green run on the real tree (ER-41), review 2026-12-09.
 
 ## Git fixtures (user decision 74, 2026-11-26)
 102. **A test that needs a git repository builds it once per machine and recipe through `paddock_testkit::git_fixture`** (ER-20, ER-22,
