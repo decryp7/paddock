@@ -32,6 +32,9 @@ pub enum TestOutcome {
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Judged {
     outcomes: BTreeMap<String, TestOutcome>,
+    /// Why the whole run could not be read (no nextest run in the output, or a log cut short): nothing was judged, every asked package is
+    /// not measured. `None` when the log was read whole.
+    pub unreadable: Option<String>,
 }
 
 impl Judged {
@@ -56,6 +59,7 @@ pub fn judge(log: &str, asked: &[String]) -> Judged {
             .iter()
             .map(|p| (p.clone(), TestOutcome::NotSeen { why: why.clone() }))
             .collect(),
+        unreadable: Some(why),
     };
     match nextest_log::read(log) {
         Err(NextestError::NoRun) => return not_seen_all("no nextest run in the output".into()),
@@ -80,5 +84,5 @@ pub fn judge(log: &str, asked: &[String]) -> Judged {
         };
         outcomes.insert(p.clone(), outcome);
     }
-    Judged { outcomes }
+    Judged { outcomes, unreadable: None }
 }

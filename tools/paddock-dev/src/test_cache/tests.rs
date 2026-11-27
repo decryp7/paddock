@@ -1311,3 +1311,109 @@ fn the_record_steps_carry_their_jobs_name_and_the_leg_filter_as_the_workflow_nam
         );
     }
 }
+
+/// `ci test-cache run` end to end with a stand-in nextest, environment and trust check and a scratch store: the wiring of
+/// `cmd::run_with` (the lookup that guards the write rule, the outcome that sorts the targets, the notices), not only the helpers it
+/// calls (review of train x: the helpers were tested, `run` was not).
+mod run_wiring {
+    use super::super::cmd::{TestCacheArgs, Trust, run_with};
+    use super::*;
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct Wrap {
+        #[command(flatten)]
+        args: TestCacheArgs,
+    }
+
+    fn real_now() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
+    /// The text of one `run` over `cands` on `store` under `env` (a stand-in), where nextest printed `log`.
+    fn go(cands: &[Candidate], store: &dyn Store, env: &[(&str, &str)], log: &str) -> String {
+        let root = tempfile::tempdir().unwrap();
+        let args = Wrap::try_parse_from(["x", "run"]).unwrap().args;
+        let env = |k: &str| env.iter().find(|(n, _)| *n == k).map(|(_, v)| (*v).to_string());
+        let trust: Trust = Box::new(|_| Ok(()));
+        let nextest = |_: &[String], _: bool, _: bool| Ok((log.to_string(), true));
+        let class = RunnerClass::here();
+        run_with(&args, root.path(), &cfg(), cands, store, &class, &env, &trust, &nextest)
+            .unwrap()
+            .text
+    }
+
+    const TAG: &[(&str, &str)] = &[("GITHUB_REF", "refs/tags/v1")];
+
+    /// Reads off (a tag run) must not hide that the store is also down; with reads on, the one notice names the cause once.
+    #[test]
+    fn a_run_that_may_not_read_still_says_the_store_is_down() {
+        let a = cand("nxflaky", "h");
+        let off = go(std::slice::from_ref(&a), &Down, TAG, &clean_log());
+        assert!(off.contains("reuse is off for this run: a tag run"), "{off}");
+        assert!(off.contains("could not be read either: connection refused"), "{off}");
+        let on = go(std::slice::from_ref(&a), &Down, &[], &clean_log());
+        assert!(on.contains("reuse is off for this run: connection refused"), "{on}");
+        assert!(!on.contains("either"), "one cause, said once: {on}");
+    }
+
+    /// A log that cannot be read whole judges nothing: it is "not measured" with the reason, never "outside its filter".
+    #[test]
+    fn an_unreadable_log_is_not_measured_with_its_reason_not_outside_the_filter() {
+        let (_d, s) = scratch();
+        let a = cand("nxflaky", "h");
+        let text = go(std::slice::from_ref(&a), &s, &[], "garbage");
+        assert!(
+            text.contains("not measured: the run's output could not be read whole (no nextest run in the output)"),
+            "{text}"
+        );
+        assert!(!text.contains("outside its filter"), "{text}");
+        // Control: a whole log with no test of the target keeps the filter wording.
+        let b = cand("b", "h");
+        let text = go(&[a, b], &s, &[], &clean_log());
+        assert!(text.contains("outside its filter"), "{text}");
+        assert!(!text.contains("not measured: the run's output"), "{text}");
+    }
+
+    /// The outcome sorts the targets: a matched target the output never saw is not a finding, one that ran and failed is.
+    #[test]
+    fn the_run_sorts_matched_targets_by_the_outcome_not_by_the_lookup_alone() {
+        let (_d, s) = scratch();
+        let class = RunnerClass::here();
+        let (a, b) = (cand("nxflaky", "h"), cand("b", "h"));
+        s.put_many(&[rec(&b, &class, real_now())]).unwrap();
+        let text = go(&[a.clone(), b.clone()], &s, &[], &clean_log());
+        assert!(!text.contains("soundness finding"), "b matched and was never seen: {text}");
+        let failed = [
+            "        FAIL [   0.010s] ( 1/1) b t::broken",
+            "     Summary [   0.050s] 1 tests run: 0 passed, 1 failed, 0 skipped",
+        ];
+        let log = format!("    Starting 1 tests across 1 binaries\n{}\n{}", failed[0], failed[1]);
+        let text = go(&[a, b], &s, &[], &log);
+        assert!(text.contains("soundness finding: rust:b"), "{text}");
+    }
+
+    /// The write rule reads the lookup, not the reads-off decisions: a run that may not read still replaces a record that was too old,
+    /// and never a trusted one.
+    #[test]
+    fn the_write_rule_follows_the_lookup_even_when_reads_are_off() {
+        let (_d, s) = scratch();
+        let class = RunnerClass::here();
+        let (a, b) = (cand("nxflaky", "h"), cand("b", "h"));
+        s.put_many(&[rec(&b, &class, real_now())]).unwrap();
+        let both = [
+            "    Starting 2 tests across 2 binaries",
+            "        PASS [   0.061s] (1/2) nxflaky t::passes",
+            "        PASS [   0.061s] (2/2) b t::ok",
+            "     Summary [   0.061s] 2 tests run: 2 passed, 0 skipped",
+        ]
+        .join("\n");
+        let text = go(&[a.clone(), b.clone()], &s, TAG, &both);
+        // nxflaky had no record (replaceable), b's is trusted (held back): one stored, one held.
+        assert!(text.contains("stored 1 pass(es); 1 held back"), "{text}");
+        let _ = a;
+    }
+}
