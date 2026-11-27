@@ -103,6 +103,23 @@ fn targets(graph: &paddock_repo_graph::Graph, workspace: &str) -> Vec<Target> {
     t
 }
 
+/// The model's blind reads (a plan does not see them) by the Cargo package folder of their referrer, one line each: a package with any is blind
+/// (its key cannot say what it reads, ADR 0116 §2).
+fn blind_reads(
+    cargo: &paddock_repo_graph::Graph,
+    unresolved: Vec<&paddock_repo_graph::model::Unresolved>,
+) -> std::collections::BTreeMap<String, Vec<String>> {
+    let mut out: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+    for u in unresolved {
+        if let Some(dir) = cargo.node_of(&u.referrer) {
+            out.entry(dir.to_string())
+                .or_default()
+                .push(format!("{}: {}", u.referrer, u.reference));
+        }
+    }
+    out
+}
+
 /// The graph and the model of the tree, read once: a plan asks for several workspaces and runner classes.
 pub struct World {
     graph: crate::plan::RepoGraph,
@@ -145,6 +162,7 @@ pub fn candidates_in(root: &Path, w: &World, workspace: &str, os: &str) -> Resul
     };
     let nodes: Vec<String> = ts.iter().map(|t| t.node.clone()).collect();
     let hashes = crate::repo_model::hash::node_hashes(&crate::input_hash::Real, &ctx, root, world, &tree, &nodes)?;
+    let blind = super::spread_blind(&world.model, &blind_reads(&w.graph.cargo, world.model.blind()));
     ts.into_iter()
         .map(|t| {
             let h = hashes.get(&t.node).ok_or_else(|| {
@@ -153,10 +171,15 @@ pub fn candidates_in(root: &Path, w: &World, workspace: &str, os: &str) -> Resul
                     t.node, t.node
                 ))
             })?;
+            let blind_here = blind
+                .get(t.node.strip_prefix("crate:").unwrap_or(&t.node))
+                .cloned()
+                .unwrap_or_default();
             Ok(Candidate {
                 target: t,
                 node_hash: h.hash.clone(),
                 dirty: h.dirty,
+                blind: blind_here,
             })
         })
         .collect()
@@ -330,11 +353,10 @@ fn run(
         let outcome = super::run_outcome(&left, &matched, &judged);
         findings = outcome.shadow.findings.len();
         for t in &outcome.shadow.findings {
-            let why = left
-                .iter()
-                .find(|c| &c.target.id == t)
-                .and_then(|c| judged.not_passed.iter().find(|(q, _)| *q == c.target.package))
-                .map_or("no verdict", |(_, w)| w.as_str());
+            let why = match left.iter().find(|c| &c.target.id == t).map(|c| judged.outcome(&c.target.package)) {
+                Some(super::result::TestOutcome::Failed { why } | super::result::TestOutcome::NotSeen { why }) => why,
+                Some(super::result::TestOutcome::Passed { .. }) | None => "no verdict".to_string(),
+            };
             text.push(format!(
                 "::error::test-cache soundness finding: {t} matched a valid record and then failed ({why}). Next step: find the input its key misses (ADR 0116 §8); the switch stays off."
             ));
@@ -345,29 +367,29 @@ fn run(
         let mut put: Vec<Record> = Vec::new();
         let writes = write_allowed(&env_get);
         for c in &left {
-            let p = &c.target.package;
-            if judged.passed.contains(p) {
-                if !c.dirty && writes.is_ok() {
-                    put.push(Record {
-                        key: super::key_of(c, cfg, class, &filter),
-                        target: c.target.id.clone(),
-                        class: class.clone(),
-                        filter: filter.clone(),
-                        run: format!("local-{}", std::process::id()),
-                        job: String::new(),
-                        attempt: 0,
-                        git_ref: env_get("GITHUB_REF").unwrap_or_default(),
-                        commit: git_text(root, &["rev-parse", "HEAD"]).unwrap_or_default().trim().to_string(),
-                        tests: judged.tests.get(p).copied().unwrap_or(0),
-                        secs: ran_secs,
-                        at: now(),
-                        os_build: os_build(),
-                    });
+            match judged.outcome(&c.target.package) {
+                super::result::TestOutcome::Passed { tests } => {
+                    if !c.dirty && writes.is_ok() {
+                        put.push(Record {
+                            key: super::key_of(c, cfg, class, &filter),
+                            target: c.target.id.clone(),
+                            class: class.clone(),
+                            filter: filter.clone(),
+                            run: format!("local-{}", std::process::id()),
+                            job: String::new(),
+                            attempt: 0,
+                            git_ref: env_get("GITHUB_REF").unwrap_or_default(),
+                            commit: git_text(root, &["rev-parse", "HEAD"]).unwrap_or_default().trim().to_string(),
+                            tests,
+                            secs: ran_secs,
+                            at: now(),
+                            os_build: os_build(),
+                        });
+                    }
                 }
-            } else {
-                // The nightly is the net (§6): a target that ran and failed loses the cached pass under its current key, and the run names
-                // it. One the run never saw (outside its filter, or a log not read whole) keeps its record.
-                if nightly && outcome.ran_and_failed(&c.target.id) {
+                // The nightly is the net (§6): a target that ran and failed loses the cached pass under its current key, and the run
+                // names it. A target the run never saw (outside its filter, or a log not read whole) keeps its record.
+                super::result::TestOutcome::Failed { .. } if nightly => {
                     let ask = Lookup {
                         target: c.target.id.clone(),
                         class: class.clone(),
@@ -383,6 +405,7 @@ fn run(
                         Err(e) => text.push(format!("::warning::test-cache: the nightly could not delete a record: {e}")),
                     }
                 }
+                super::result::TestOutcome::Failed { .. } | super::result::TestOutcome::NotSeen { .. } => {}
             }
         }
         if outcome.not_seen > 0 {

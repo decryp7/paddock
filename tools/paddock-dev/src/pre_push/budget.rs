@@ -84,9 +84,43 @@ fn secs(d: Duration) -> String {
     format!("{}", d.as_secs().max(1))
 }
 
-/// `prefix` (the `throttle run <agent> --` command) with the priority lane and the limits. Only our own `throttle` has them: a
-/// `PADDOCK_THROTTLE` of someone else's, or `heavy.sh`, is returned unchanged.
-pub fn with_throttle_flags(prefix: &[String], priority: bool, queue_stall: Duration, run_max: Duration) -> Vec<String> {
+/// The longest quiet gap of a passed step, in seconds, per long row kind: the `max_gap_secs` of `step-history.jsonl` over every passed
+/// step on record (this Mac, 2026-11-14 to 2026-11-27: clippy 844 steps, clippy-windows 352, conformance-tests 592, member-audits 201,
+/// tests 123). It is the longest time between two progress events, so an upper bound of the time with no output and no CPU that
+/// `throttle --stall` counts. The limit of each kind is [`HANG_LIMITS`].
+pub const HANG_MEASURED_GAP_SECS: [(&str, f64); 5] = [
+    ("clippy", 230.1),
+    ("clippy-windows", 291.0),
+    ("conformance-tests", 294.8),
+    ("member-audits", 113.1),
+    ("tests", 291.5),
+];
+
+/// The time a long row may show no output and use no CPU before `throttle --stall` ends it (exit 81). A hang detector, never a speed
+/// limit (ER-12): at least three times the longest gap measured for the kind ([`HANG_MEASURED_GAP_SECS`]), in whole 5-minute steps, so
+/// a healthy row never gets near it, and a hung one (the local sccache server, 2026-11-27) costs 10 to 15 minutes, not the 60-minute row cap.
+pub const HANG_LIMITS: [(&str, Duration); 5] = [
+    ("clippy", Duration::from_secs(900)),
+    ("clippy-windows", Duration::from_secs(900)),
+    ("conformance-tests", Duration::from_secs(900)),
+    ("member-audits", Duration::from_secs(600)),
+    ("tests", Duration::from_secs(900)),
+];
+
+/// The hang limit of a row kind (the first word of its id), or `None` for a short row or one with no measured gap.
+pub fn hang_limit(kind: &str) -> Option<Duration> {
+    HANG_LIMITS.iter().find(|(k, _)| *k == kind).map(|(_, d)| *d)
+}
+
+/// `prefix` (the `throttle run <agent> --` command) with the priority lane and the limits (`hang`: throttle's `--stall`, for a long row).
+/// Only our own `throttle` has them: a `PADDOCK_THROTTLE` of someone else's, or `heavy.sh`, is returned unchanged.
+pub fn with_throttle_flags(
+    prefix: &[String],
+    priority: bool,
+    queue_stall: Duration,
+    run_max: Duration,
+    hang: Option<Duration>,
+) -> Vec<String> {
     let ours = prefix.len() >= 3 && prefix[1] == "run" && prefix.last().is_some_and(|l| l == "--");
     if !ours {
         return prefix.to_vec();
@@ -96,6 +130,9 @@ pub fn with_throttle_flags(prefix: &[String], priority: bool, queue_stall: Durat
         flags.push("--high".into());
     }
     flags.extend(["--queue-stall".into(), secs(queue_stall), "--run-max".into(), secs(run_max)]);
+    if let Some(h) = hang {
+        flags.extend(["--stall".into(), secs(h)]);
+    }
     let mut out = prefix[..2].to_vec();
     out.extend(flags);
     out.extend_from_slice(&prefix[2..]);
@@ -205,12 +242,35 @@ mod tests {
     #[test]
     fn the_flags_go_into_our_heavy_only() {
         let ours: Vec<String> = ["throttle", "run", "pre-push", "--"].map(String::from).to_vec();
-        let got = with_throttle_flags(&ours, true, Duration::from_secs(1800), Duration::from_secs(900));
+        let got = with_throttle_flags(&ours, true, Duration::from_secs(1800), Duration::from_secs(900), None);
         assert_eq!(got.join(" "), "throttle run --high --queue-stall 1800 --run-max 900 pre-push --");
-        let got = with_throttle_flags(&ours, false, Duration::from_secs(1800), Duration::from_millis(100));
+        let got = with_throttle_flags(&ours, false, Duration::from_secs(1800), Duration::from_millis(100), None);
         assert_eq!(got.join(" "), "throttle run --queue-stall 1800 --run-max 1 pre-push --");
+        let got = with_throttle_flags(&ours, false, Duration::from_secs(1800), Duration::from_secs(900), Some(MIN15));
+        assert_eq!(
+            got.join(" "),
+            "throttle run --queue-stall 1800 --run-max 900 --stall 900 pre-push --"
+        );
         for other in [vec!["heavy.sh".to_string()], vec!["my-throttle".into(), "--x".into()], vec![]] {
-            assert_eq!(with_throttle_flags(&other, true, MIN15, MIN15), other);
+            assert_eq!(with_throttle_flags(&other, true, MIN15, MIN15, Some(MIN15)), other);
+        }
+    }
+
+    /// Every long heavy row kind has a hang limit that is a wide multiple of the longest quiet gap measured for it; a short row has none.
+    #[test]
+    fn the_long_rows_have_a_hang_limit_wider_than_their_measured_gap() {
+        for (kind, longest) in HANG_MEASURED_GAP_SECS {
+            let limit = hang_limit(kind).unwrap_or_else(|| panic!("{kind} has no hang limit"));
+            assert!(
+                limit.as_secs_f64() >= 3.0 * longest,
+                "{kind}: {limit:?} is not a wide margin over {longest} s"
+            );
+        }
+        for kind in ["tests", "clippy", "clippy-windows", "conformance-tests", "member-audits"] {
+            assert!(hang_limit(kind).is_some(), "{kind}");
+        }
+        for kind in ["fmt", "lockfile", "commit-lint", "gates-register", "doctest"] {
+            assert_eq!(hang_limit(kind), None, "{kind} is short or has no measured gap: no hang limit");
         }
     }
 }

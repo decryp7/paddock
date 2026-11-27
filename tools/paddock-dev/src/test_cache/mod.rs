@@ -38,6 +38,9 @@ pub struct Candidate {
     pub node_hash: String,
     /// A file of the node has uncommitted changes: the hash describes HEAD, so the target runs and is not stored.
     pub dirty: bool,
+    /// The reads of its crate the graph cannot resolve (a manifest folder in a variable, `ancestors`, a join with a non-literal, ...),
+    /// one line each: its key cannot say what it reads, so it is never reused (ADR 0116 §2). Recording continues.
+    pub blind: Vec<String>,
 }
 
 /// Why a target runs.
@@ -47,6 +50,8 @@ pub enum Why {
     Never,
     /// Uncommitted changes under its inputs.
     Dirty,
+    /// Its crate reads something the graph cannot resolve, so its key may miss an input: the reasons.
+    Blind(String),
     /// No record under this key.
     Miss,
     /// A record, older than the limit of the paused nightly (decision D7).
@@ -65,6 +70,7 @@ impl Why {
         match self {
             Why::Never => "listed in no_test_cache".into(),
             Why::Dirty => "uncommitted changes under its inputs".into(),
+            Why::Blind(w) => format!("it reads inputs that cannot be resolved ({w})"),
             Why::Miss => "no record under this key".into(),
             Why::TooOld => "its record is older than the limit while the nightly is paused".into(),
             Why::Untrusted(w) => format!("its record failed the trust check: {w}"),
@@ -113,7 +119,7 @@ pub fn decide(
     let mut asks: Vec<Lookup> = Vec::new();
     let mut at: Vec<Option<usize>> = Vec::new();
     for c in cands {
-        if cfg.never_cached(&c.target.node) || c.dirty {
+        if cfg.never_cached(&c.target.node) || c.dirty || !c.blind.is_empty() {
             at.push(None);
         } else {
             at.push(Some(asks.len()));
@@ -135,7 +141,13 @@ pub fn decide(
         .zip(at)
         .map(|(c, i)| {
             let Some(i) = i else {
-                return Decision::Run(if cfg.never_cached(&c.target.node) { Why::Never } else { Why::Dirty });
+                return Decision::Run(if cfg.never_cached(&c.target.node) {
+                    Why::Never
+                } else if !c.blind.is_empty() {
+                    Why::Blind(blind_text(&c.target.id, &c.blind))
+                } else {
+                    Why::Dirty
+                });
             };
             let Some(r) = &found[i] else { return Decision::Run(Why::Miss) };
             if limit.is_some_and(|l: Duration| now.saturating_sub(r.at) > l.as_secs()) {
@@ -149,6 +161,41 @@ pub fn decide(
         })
         .collect();
     (out, None)
+}
+
+/// The blind reads of every crate, spread to its dependents (ADR 0116 §2): a crate's tests run its dependencies' code, whose unhashed reads
+/// its own key cannot see, so a crate that depends (normal, dev or build, transitively, inside the repository) on a blind crate is blind
+/// too, with the reason `blind through <dependency folder>`. `own` is each blind crate's folder and its own reasons.
+pub fn spread_blind(
+    model: &paddock_repo_graph::model::nodes::Model,
+    own: &std::collections::BTreeMap<String, Vec<String>>,
+) -> std::collections::BTreeMap<String, Vec<String>> {
+    let mut out = own.clone();
+    for n in model.nodes() {
+        let Some(dir) = n.id.strip_prefix("crate:") else { continue };
+        for dep in paddock_repo_graph::model::hash::dependencies(model, &n.id) {
+            let Some(dep_dir) = dep.strip_prefix("crate:") else { continue };
+            if own.contains_key(dep_dir) {
+                let r = format!("blind through {dep_dir}");
+                let e = out.entry(dir.to_string()).or_default();
+                if !e.contains(&r) {
+                    e.push(r);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The reasons of a blind target in one line: the target, how many, and the first two (the full list is `./dev plan --explain`).
+fn blind_text(target: &str, reasons: &[String]) -> String {
+    let shown: Vec<&str> = reasons.iter().take(2).map(String::as_str).collect();
+    let more = reasons.len().saturating_sub(shown.len());
+    format!(
+        "{target}: {}{}",
+        shown.join("; "),
+        if more > 0 { format!("; and {more} more") } else { String::new() }
+    )
 }
 
 fn off(cands: &[Candidate], cause: String) -> (Vec<Decision>, Option<String>) {
@@ -250,8 +297,12 @@ pub fn records_from_log(log: &str, cands: &[Candidate], cfg: &Config, class: &Ru
     let judged = result::judge(log, &asked);
     cands
         .iter()
-        .filter(|c| !c.dirty && judged.passed.contains(&c.target.package))
-        .map(|c| Record {
+        .filter_map(|c| match judged.outcome(&c.target.package) {
+            // Uncommitted changes under the inputs: the pass proves nothing about the key.
+            result::TestOutcome::Passed { tests } if !c.dirty => Some((c, tests)),
+            result::TestOutcome::Passed { .. } | result::TestOutcome::Failed { .. } | result::TestOutcome::NotSeen { .. } => None,
+        })
+        .map(|(c, tests)| Record {
             key: key_of(c, cfg, class, filter),
             target: c.target.id.clone(),
             class: class.clone(),
@@ -261,7 +312,7 @@ pub fn records_from_log(log: &str, cands: &[Candidate], cfg: &Config, class: &Ru
             attempt: m.attempt,
             git_ref: m.git_ref.clone(),
             commit: m.commit.clone(),
-            tests: judged.tests.get(&c.target.package).copied().unwrap_or(0),
+            tests,
             secs: 0.0,
             at: m.at,
             os_build: m.os_build.clone(),
@@ -299,13 +350,16 @@ impl Shadow {
 pub fn shadow_outcome(matched: &[&Candidate], judged: &result::Judged) -> Shadow {
     let mut s = Shadow::default();
     for c in matched {
-        let p = &c.target.package;
-        if judged.passed.contains(p) {
-            s.matched += 1;
-            s.passed += 1;
-        } else if judged.failed.contains(p) {
-            s.matched += 1;
-            s.findings.push(c.target.id.clone());
+        match judged.outcome(&c.target.package) {
+            result::TestOutcome::Passed { .. } => {
+                s.matched += 1;
+                s.passed += 1;
+            }
+            result::TestOutcome::Failed { .. } => {
+                s.matched += 1;
+                s.findings.push(c.target.id.clone());
+            }
+            result::TestOutcome::NotSeen { .. } => {}
         }
     }
     s
@@ -325,14 +379,6 @@ pub struct RunOutcome {
     pub not_seen: usize,
 }
 
-impl RunOutcome {
-    /// Whether `target` ran in this run and failed (a finding or not stored): the only targets the nightly may invalidate (§6). A target
-    /// the run never saw proves nothing about its record.
-    pub fn ran_and_failed(&self, target: &str) -> bool {
-        self.shadow.findings.iter().any(|t| t == target) || self.not_stored.iter().any(|(t, _)| t == target)
-    }
-}
-
 /// The [`RunOutcome`] of `ran` (every target the run was asked for) given `matched` (those a valid record covered before it).
 pub fn run_outcome(ran: &[&Candidate], matched: &[&Candidate], judged: &result::Judged) -> RunOutcome {
     let mut out = RunOutcome {
@@ -340,19 +386,12 @@ pub fn run_outcome(ran: &[&Candidate], matched: &[&Candidate], judged: &result::
         ..RunOutcome::default()
     };
     for c in ran {
-        let p = &c.target.package;
-        if judged.passed.contains(p) || out.shadow.findings.contains(&c.target.id) {
-            continue;
-        }
-        if judged.failed.contains(p) {
-            let why = judged
-                .not_passed
-                .iter()
-                .find(|(q, _)| q == p)
-                .map_or("no verdict", |(_, w)| w.as_str());
-            out.not_stored.push((c.target.id.clone(), why.to_string()));
-        } else {
-            out.not_seen += 1;
+        match judged.outcome(&c.target.package) {
+            result::TestOutcome::Passed { .. } => {}
+            // A matched target that failed is already a finding.
+            result::TestOutcome::Failed { .. } if out.shadow.findings.contains(&c.target.id) => {}
+            result::TestOutcome::Failed { why } => out.not_stored.push((c.target.id.clone(), why)),
+            result::TestOutcome::NotSeen { .. } => out.not_seen += 1,
         }
     }
     out

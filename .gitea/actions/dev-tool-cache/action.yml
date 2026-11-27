@@ -1,16 +1,34 @@
 name: dev-tool-cache
-description: "./dev's own binary through the Actions cache (the runners' RustFS S3), Linux only (ADR 0111, 0115): keyed by the launcher's input hash, the OS, the architecture and a cache-version salt (no restore-keys); a restored binary is verified for its hash and rebuilt when it is not; only a verified binary under a key the restore did not find is saved, and the job summary says restored (exact, partial, miss) and saved from actions/cache's own outputs. It must run before the first ./dev call of a job, because a ./dev call builds the tool from source when it is not there and the restore then has nothing to fill (run 8576: 42 of 44 jobs rebuilt it); setup-rust, node-caches and build-jobs use it first. The first use in a job does the work and sets PADDOCK_DEV_TOOL_CACHE_DONE; later uses do nothing. A use before a Rust compiler exists finds no hash and leaves the work to the next use. The logic is conformance/ci/dev-tool-cache.sh (tested by conformance/test/dev-tool-cache.test.mjs); Mac and Windows hosts keep it by its hash in the CI home's tools folder, which the job's first kit step hands to every later step (the kit's tools_home), so a plain ./dev never builds it again in the checkout."
+description: "./dev's own binary on a Linux runner: first from the runner-local store (a folder of the /sccache volume the lanes already mount, /sccache/paddock-dev-tools/<hash>/, copied into the job's own tool folder in under a second, user decision 109), then through the Actions cache (the runners' RustFS S3, ADR 0111, 0115) as the fallback: keyed by the launcher's input hash, the OS, the architecture and a cache-version salt (no restore-keys); a restored binary is verified for its hash and rebuilt when it is not; only a verified binary under a key the restore did not find is saved, and the job summary says restored (exact, partial, miss) and saved from actions/cache's own outputs. It must run before the first ./dev call of a job, because a ./dev call builds the tool from source when it is not there and the restore then has nothing to fill (run 8576: 42 of 44 jobs rebuilt it); setup-rust, node-caches and build-jobs use it first. The plan job (input `producer: true`) is the one writer: it saves to the Actions cache and keeps the runner store (`./dev ci dev-tool-store publish`: atomic, under a lock with an owner note, size-limited and evicted, tools/paddock-dev/src/ci_dev_tool_store.rs). The first use in a job does the work and sets PADDOCK_DEV_TOOL_CACHE_DONE; later uses do nothing. A use before a Rust compiler exists finds no hash and leaves the work to the next use. The logic is conformance/ci/dev-tool-cache.sh (tested by conformance/test/dev-tool-cache.test.mjs); Mac and Windows hosts keep it by its hash in the CI home's tools folder, which the job's first kit step hands to every later step (the kit's tools_home), so a plain ./dev never builds it again in the checkout."
+inputs:
+  producer:
+    description: "'true' only in the plan job, the one producer (user decision 109): it keeps the verified tool in the runner store and saves it to the Actions cache for the jobs after it. Every other job only restores (no save, no confirming lookup: as actions/cache's own guidance has one job save and the rest restore)."
+    default: "false"
 runs:
   using: composite
   steps:
+    # The circuit breaker (user decision 109): one short lookup of the Actions cache service per job, before any actions/cache step. When
+    # it does not answer in time, PADDOCK_ACTIONS_CACHE_DOWN=1 and every actions/cache step of the job (this action's and node-caches') is
+    # skipped with one ::warning::; the job never fails for it. Later uses in the job do not ask again (PADDOCK_ACTIONS_CACHE_PROBED).
+    - name: Probe the Actions cache service
+      id: probe
+      if: runner.os == 'Linux' && env.PADDOCK_DEV_TOOL_CACHE_DONE != '1' && env.PADDOCK_ACTIONS_CACHE_PROBED != '1'
+      shell: bash
+      run: bash "${{ github.action_path }}/../../../conformance/ci/dev-tool-cache.sh" probe
     - name: Key of the tool
       id: key
       if: runner.os == 'Linux' && env.PADDOCK_DEV_TOOL_CACHE_DONE != '1'
       shell: bash
       run: bash "${{ github.action_path }}/../../../conformance/ci/dev-tool-cache.sh" key
+    # The runner-local store first (a folder copy, no network): a hit never calls the Actions cache service.
+    - name: Restore the tool from the runner store
+      id: store
+      if: runner.os == 'Linux' && env.PADDOCK_DEV_TOOL_CACHE_DONE != '1' && steps.key.outputs.usable == 'true'
+      shell: bash
+      run: bash "${{ github.action_path }}/../../../conformance/ci/dev-tool-cache.sh" store-restore "${{ steps.key.outputs.hash }}"
     - name: Restore the tool
       id: restore
-      if: runner.os == 'Linux' && env.PADDOCK_DEV_TOOL_CACHE_DONE != '1' && steps.key.outputs.usable == 'true'
+      if: runner.os == 'Linux' && env.PADDOCK_DEV_TOOL_CACHE_DONE != '1' && steps.key.outputs.usable == 'true' && steps.store.outputs.hit != 'true' && env.PADDOCK_ACTIONS_CACHE_DOWN != '1'
       uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
         path: ${{ steps.key.outputs.path }}
@@ -19,10 +37,19 @@ runs:
       id: verify
       if: runner.os == 'Linux' && env.PADDOCK_DEV_TOOL_CACHE_DONE != '1' && steps.key.outputs.usable == 'true'
       shell: bash
-      run: bash "${{ github.action_path }}/../../../conformance/ci/dev-tool-cache.sh" verify "${{ steps.restore.outputs.cache-hit }}" "${{ steps.restore.outputs.cache-matched-key }}"
+      # A store hit is an exact hit under this key (the store is named by the same hash); verify still runs the copy and checks its hash.
+      run: bash "${{ github.action_path }}/../../../conformance/ci/dev-tool-cache.sh" verify "${{ steps.store.outputs.hit == 'true' && 'true' || steps.restore.outputs.cache-hit }}" "${{ steps.store.outputs.hit == 'true' && steps.key.outputs.key || steps.restore.outputs.cache-matched-key }}"
+    # The one writer of the runner store: the plan job, after verify, for a tool the store did not hold (or a copy verify rejected).
+    - name: Keep the verified tool in the runner store
+      if: runner.os == 'Linux' && env.PADDOCK_DEV_TOOL_CACHE_DONE != '1' && steps.key.outputs.usable == 'true' && inputs.producer == 'true' && (steps.store.outputs.hit != 'true' || steps.verify.outputs.state == 'rejected') && steps.verify.outcome == 'success'
+      continue-on-error: true
+      shell: bash
+      env:
+        REPLACE: ${{ steps.verify.outputs.state == 'rejected' && '--replace' || '' }}
+      run: bash "${{ github.action_path }}/../../../dev" ci dev-tool-store publish --hash "${{ steps.key.outputs.hash }}" --from "${{ steps.key.outputs.path }}" $REPLACE
     - name: Save the verified tool
       id: save
-      if: runner.os == 'Linux' && env.PADDOCK_DEV_TOOL_CACHE_DONE != '1' && steps.key.outputs.usable == 'true' && steps.verify.outputs.save == 'true'
+      if: inputs.producer == 'true' && runner.os == 'Linux' && env.PADDOCK_DEV_TOOL_CACHE_DONE != '1' && steps.key.outputs.usable == 'true' && steps.verify.outputs.save == 'true' && env.PADDOCK_ACTIONS_CACHE_DOWN != '1'
       continue-on-error: true
       uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
@@ -30,7 +57,7 @@ runs:
         key: ${{ steps.key.outputs.key }}
     - name: Confirm the save
       id: confirm
-      if: runner.os == 'Linux' && env.PADDOCK_DEV_TOOL_CACHE_DONE != '1' && steps.key.outputs.usable == 'true' && steps.verify.outputs.save == 'true'
+      if: inputs.producer == 'true' && runner.os == 'Linux' && env.PADDOCK_DEV_TOOL_CACHE_DONE != '1' && steps.key.outputs.usable == 'true' && steps.verify.outputs.save == 'true' && env.PADDOCK_ACTIONS_CACHE_DOWN != '1'
       continue-on-error: true
       # A failed save is only a warning in the save step; looking the key up again is the proof it is there.
       uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -43,7 +70,9 @@ runs:
       shell: bash
       env:
         KEY: ${{ steps.key.outputs.key }}
+        SOURCE: ${{ steps.store.outputs.hit == 'true' && 'store' || '' }}
+        SAVES: ${{ inputs.producer }}
       run: |
-        bash "${{ github.action_path }}/../../../conformance/ci/dev-tool-cache.sh" summary "${{ steps.verify.outputs.state || 'not run' }}" "${{ steps.verify.outputs.save }}" "${{ steps.confirm.outputs.cache-hit }}" "${{ steps.restore.outputs.cache-hit }}" "${{ steps.restore.outputs.cache-matched-key }}"
+        bash "${{ github.action_path }}/../../../conformance/ci/dev-tool-cache.sh" summary "${{ steps.verify.outputs.state || 'not run' }}" "${{ steps.verify.outputs.save }}" "${{ steps.confirm.outputs.cache-hit }}" "${{ steps.store.outputs.hit == 'true' && 'true' || steps.restore.outputs.cache-hit }}" "${{ steps.store.outputs.hit == 'true' && steps.key.outputs.key || steps.restore.outputs.cache-matched-key }}"
         # Set last, after the save and the confirm above: a use later in the job then does nothing (it would find the tool built).
         echo "PADDOCK_DEV_TOOL_CACHE_DONE=1" >> "$GITHUB_ENV"

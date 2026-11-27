@@ -170,13 +170,43 @@ pub fn partition_linux_legs(legs: Vec<Value>, packages: &[String], parts: usize)
                 .map(String::as_str)
                 .collect();
             p["test_packages"] = json!(mine.join(" "));
-            p["part"] = json!(format!("{}/{parts}", k + 1));
-            p["part_label"] = json!(format!(", {}/{parts}", k + 1));
-            p["part_extra"] = json!(if k == 0 { "true" } else { "false" });
+            label_partition(&mut p, k, parts);
             // A partition with no package has nothing to test (said, never an empty list, which means everything).
             if mine.is_empty() {
                 p["test_skip"] = json!("true");
             }
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// Labels leg `p` as partition `k` (0-based) of `parts`: `part`, `part_label` (the job name suffix) and `part_extra` (the once-only
+/// steps run on the first partition alone).
+fn label_partition(p: &mut Value, k: usize, parts: usize) {
+    p["part"] = json!(format!("{}/{parts}", k + 1));
+    p["part_label"] = json!(format!(", {}/{parts}", k + 1));
+    p["part_extra"] = json!(if k == 0 { "true" } else { "false" });
+}
+
+/// Splits each whole Linux leg of a workspace with one package (`paddock-dev`) into `parts` legs that differ only by label; the test
+/// step reads the partition from `part_label` and runs nextest's own `--partition hash:k/n` (a hash of the test, stable when tests are
+/// added; ci.yml). `partition_linux_legs` splits by package, which a one-package workspace cannot. A leg with packages, a filter or a skip,
+/// and every non-Linux leg, is left whole (Windows and macOS are single runners).
+pub fn partition_nextest_legs(legs: Vec<Value>, parts: usize) -> Vec<Value> {
+    let mut out = Vec::new();
+    for leg in legs {
+        let whole = leg["os"].as_str() == Some(LINUX)
+            && leg["test_packages"].as_str().unwrap_or("").is_empty()
+            && leg["test_filter"].as_str().unwrap_or("").is_empty()
+            && leg["test_skip"].as_str().unwrap_or("").is_empty();
+        if !whole || parts < 2 {
+            out.push(leg);
+            continue;
+        }
+        for k in 0..parts {
+            let mut p = leg.clone();
+            label_partition(&mut p, k, parts);
             out.push(p);
         }
     }
@@ -1499,5 +1529,50 @@ mod partition_tests {
         member["test_filter"] = json!("package(=a)");
         assert_eq!(partition_linux_legs(vec![member], &pkgs(), 3).len(), 1);
         assert_eq!(partition_linux_legs(vec![leg("ubuntu-latest")], &pkgs()[..2], 3).len(), 1);
+    }
+
+    #[test]
+    fn a_single_package_workspaces_linux_leg_splits_into_nextest_partitions_that_keep_one_label_scheme() {
+        // paddock-dev is one package: its Linux tests are split by nextest's own hash partition, not by package lists.
+        let legs = partition_nextest_legs(
+            vec![leg("ubuntu-latest"), leg("windows-latest"), leg("macos-latest")],
+            LINUX_PARTITIONS,
+        );
+        let linux: Vec<&Value> = legs.iter().filter(|l| l["os"] == "ubuntu-latest").collect();
+        assert_eq!(linux.len(), 3);
+        assert_eq!(
+            linux.iter().map(|l| l["part_label"].as_str().unwrap()).collect::<Vec<_>>(),
+            [", 1/3", ", 2/3", ", 3/3"]
+        );
+        assert_eq!(
+            linux.iter().map(|l| l["part_extra"].as_str().unwrap()).collect::<Vec<_>>(),
+            ["true", "false", "false"],
+            "the once-only steps (lockfile, format, clippy, deny) stay on partition 1"
+        );
+        assert!(
+            linux.iter().all(|l| l["test_packages"] == ""),
+            "no package list: the partition is nextest's"
+        );
+        assert_eq!(
+            legs.iter().filter(|l| l["os"] != "ubuntu-latest").count(),
+            2,
+            "Windows and macOS stay one leg each"
+        );
+        assert_eq!(
+            legs.iter().find(|l| l["os"] == "windows-latest").unwrap(),
+            &leg("windows-latest"),
+            "an unsplit leg gets no new keys"
+        );
+    }
+
+    #[test]
+    fn a_narrowed_nextest_leg_is_not_split() {
+        let mut member = leg("ubuntu-latest");
+        member["test_filter"] = json!("package(=a)");
+        assert_eq!(partition_nextest_legs(vec![member], 3).len(), 1);
+        let mut skipped = leg("ubuntu-latest");
+        skipped["test_skip"] = json!("true");
+        assert_eq!(partition_nextest_legs(vec![skipped], 3).len(), 1);
+        assert_eq!(partition_nextest_legs(vec![leg("ubuntu-latest")], 1).len(), 1);
     }
 }

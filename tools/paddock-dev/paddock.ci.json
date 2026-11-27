@@ -1,5 +1,5 @@
 {
-  "$comment": "paddock-dev's contract holds only its repository-graph declarations (ADR 0117 \u00a73): the `paddock-dev` job of ci.yml runs its own steps, so there are no phases here. `graph.smoke` is what a plumbing-only change runs (docs/repo-graph.toml declares which actions are setup-only); its Rust tests come from cargo metadata. Which tests the Windows and macOS legs of the paddock-dev job run (OS-scoped tests, docs/research/2026-11-22-os-scoped-tests.md; ADR 0117 section 7; src/host_tests.rs; conformance C155). paddock-dev is one crate, so the placement is by test-name prefix (module). It is derived from the code (src/os_placement.rs: an OS cfg, an OS-API crate, an entry point of the portable layer, build.rs, env::consts::OS, an OS-behaviour dependency, and the import edge from a host module to the module it calls); only the exceptions, each with a reason, are declared here. `add` is free: code the derivation cannot see (host-runner production code with no OS signal of its own). `only` and `skip` take a host away and need the user (C155 compares them with the merge base): the agent tools of the dev Mac stay macOS-only. Everything else (the planner and its recorded answers, the conformance checks, the gate register, the CI run readers) is portable and tested on Linux only.",
+  "$comment": "paddock-dev's contract holds only its repository-graph declarations (ADR 0117 \u00a73): the `paddock-dev` job of ci.yml runs its own steps, so there are no phases here. `graph.smoke` is what a plumbing-only change runs (docs/repo-graph.toml declares which actions are setup-only); its Rust tests come from cargo metadata. Which tests the Windows and macOS legs of the paddock-dev job run (OS-scoped tests, docs/research/2026-11-22-os-scoped-tests.md; ADR 0117 section 7; src/host_tests.rs; conformance C155). paddock-dev is one crate, so the placement is by test-name prefix (module). It is derived from the code (src/os_placement.rs: an OS cfg, an OS-API crate, an entry point of the portable layer, build.rs, env::consts::OS, an OS-behaviour dependency, and the import edge from a host module to the module it calls); only the exceptions, each with a reason, are declared here. `add` is free: code the derivation cannot see (host-runner production code with no OS signal of its own). `only` and `skip` take a host away and need the user (C155 compares them with the merge base): the agent tools of the dev Mac stay macOS-only, and the OS-independent areas (the merge check, the CI run readers, the planner's model and readers) are `skip`ped from both hosts and run on Linux only (decision 114, 2026-11-27); the module of such an area that holds OS code itself is `add`ed back. Everything else (the planner and its recorded answers, the conformance checks, the gate register, the CI run readers) is portable and tested on Linux only.",
   "graph": {
     "smoke": {
       "nextest": "binary_id(paddock-dev::it) & test(/^contracts::/)"
@@ -14,6 +14,10 @@
       {
         "name": "ci_build_env::",
         "reason": "host-runner production code of the CI kit: it runs on every runner, and no OS signal in the module says so (docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "name": "ci_runs::dispatch_guards::",
+        "reason": "holds OS behaviour itself (it spawns a process), so its tests stay on every host although its area is skipped (decision 114)"
       },
       {
         "name": "ci_rust_pin::",
@@ -38,6 +42,10 @@
       {
         "name": "hostile::",
         "reason": "host-runner production code of the CI kit: it runs on every runner, and no OS signal in the module says so (docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "name": "merge_check::git::",
+        "reason": "holds OS behaviour itself (it spawns git), so its tests stay on every host although its area is skipped (decision 114)"
       },
       {
         "name": "pre_push::exec::",
@@ -78,6 +86,72 @@
       {
         "name": "worktree::procs::",
         "reason": "called by host-runner production code (ci_run, ci_setup_rust) inside a folder that is otherwise dev-Mac only, so it is tested on every host (docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      }
+    ],
+    "skip": [
+      {
+        "name": "merge_check::",
+        "reason": "pure logic of merge_check::, no OS behaviour of its own: Linux only (decision 114, user 2026-11-27, ER-52: the Windows and macOS legs run only OS-specific tests; Windows spent 545 s of 1,191 s of test time in merge_check and 228 s in ci_runs and ci_run, run 9212)"
+      },
+      {
+        "name": "ci_runs::",
+        "reason": "pure logic of ci_runs::, no OS behaviour of its own: Linux only (decision 114, user 2026-11-27, ER-52: the Windows and macOS legs run only OS-specific tests; Windows spent 545 s of 1,191 s of test time in merge_check and 228 s in ci_runs and ci_run, run 9212)"
+      },
+      {
+        "name": "ci_run::",
+        "reason": "pure logic of ci_run::, no OS behaviour of its own: Linux only (decision 114, user 2026-11-27, ER-52: the Windows and macOS legs run only OS-specific tests; Windows spent 545 s of 1,191 s of test time in merge_check and 228 s in ci_runs and ci_run, run 9212)"
+      },
+      {
+        "name": "plan_graph::",
+        "reason": "pure logic of plan_graph::, no OS behaviour of its own: Linux only (decision 114, user 2026-11-27, ER-52: the Windows and macOS legs run only OS-specific tests; Windows spent 545 s of 1,191 s of test time in merge_check and 228 s in ci_runs and ci_run, run 9212)"
+      },
+      {
+        "name": "plan_repo::",
+        "reason": "pure logic of plan_repo::, no OS behaviour of its own: Linux only (decision 114, user 2026-11-27, ER-52: the Windows and macOS legs run only OS-specific tests; Windows spent 545 s of 1,191 s of test time in merge_check and 228 s in ci_runs and ci_run, run 9212)"
+      },
+      {
+        "name": "plan_since::",
+        "reason": "pure logic of plan_since::, no OS behaviour of its own: Linux only (decision 114, user 2026-11-27, ER-52: the Windows and macOS legs run only OS-specific tests; Windows spent 545 s of 1,191 s of test time in merge_check and 228 s in ci_runs and ci_run, run 9212)"
+      },
+      {
+        "name": "plan_gitea::",
+        "reason": "pure logic of plan_gitea::, no OS behaviour of its own: Linux only (decision 114, user 2026-11-27, ER-52: the Windows and macOS legs run only OS-specific tests; Windows spent 545 s of 1,191 s of test time in merge_check and 228 s in ci_runs and ci_run, run 9212)"
+      },
+      {
+        "name": "run_scope::",
+        "reason": "pure logic of run_scope::, no OS behaviour of its own: Linux only (decision 114, user 2026-11-27, ER-52: the Windows and macOS legs run only OS-specific tests; Windows spent 545 s of 1,191 s of test time in merge_check and 228 s in ci_runs and ci_run, run 9212)"
+      },
+      {
+        "name": "nextest_log::",
+        "reason": "pure logic of nextest_log::, no OS behaviour of its own: Linux only (decision 114, user 2026-11-27, ER-52: the Windows and macOS legs run only OS-specific tests; Windows spent 545 s of 1,191 s of test time in merge_check and 228 s in ci_runs and ci_run, run 9212)"
+      },
+      {
+        "name": "log_text::",
+        "reason": "pure logic of log_text::, no OS behaviour of its own: Linux only (decision 114, user 2026-11-27, ER-52: the Windows and macOS legs run only OS-specific tests; Windows spent 545 s of 1,191 s of test time in merge_check and 228 s in ci_runs and ci_run, run 9212)"
+      },
+      {
+        "name": "job_outcome::",
+        "reason": "pure logic of job_outcome::, no OS behaviour of its own: Linux only (decision 114, user 2026-11-27, ER-52: the Windows and macOS legs run only OS-specific tests; Windows spent 545 s of 1,191 s of test time in merge_check and 228 s in ci_runs and ci_run, run 9212)"
+      },
+      {
+        "name": "active_apps::",
+        "reason": "pure logic of active_apps::, no OS behaviour of its own: Linux only (decision 114, user 2026-11-27, ER-52: the Windows and macOS legs run only OS-specific tests; Windows spent 545 s of 1,191 s of test time in merge_check and 228 s in ci_runs and ci_run, run 9212)"
+      },
+      {
+        "name": "test_cost::",
+        "reason": "pure logic of test_cost::, no OS behaviour of its own: Linux only (decision 114, user 2026-11-27, ER-52: the Windows and macOS legs run only OS-specific tests; Windows spent 545 s of 1,191 s of test time in merge_check and 228 s in ci_runs and ci_run, run 9212)"
+      },
+      {
+        "name": "os_placement::",
+        "reason": "pure logic of os_placement::, no OS behaviour of its own: Linux only (decision 114, user 2026-11-27, ER-52: the Windows and macOS legs run only OS-specific tests; Windows spent 545 s of 1,191 s of test time in merge_check and 228 s in ci_runs and ci_run, run 9212)"
+      },
+      {
+        "name": "repo_model::hash::",
+        "reason": "pure logic of repo_model::hash::, no OS behaviour of its own: Linux only (decision 114, user 2026-11-27, ER-52: the Windows and macOS legs run only OS-specific tests; Windows spent 545 s of 1,191 s of test time in merge_check and 228 s in ci_runs and ci_run, run 9212)"
+      },
+      {
+        "name": "repo_model::replay::",
+        "reason": "pure logic of repo_model::replay::, no OS behaviour of its own: Linux only (decision 114, user 2026-11-27, ER-52: the Windows and macOS legs run only OS-specific tests; Windows spent 545 s of 1,191 s of test time in merge_check and 228 s in ci_runs and ci_run, run 9212)"
       }
     ],
     "only": [
