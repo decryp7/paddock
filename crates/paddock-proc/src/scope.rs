@@ -914,10 +914,8 @@ mod unix_tests {
             }
             match line.trim().split_once(' ') {
                 Some(("child" | "grandchild", pid)) => {
-                    ids.push(
-                        crate::recorded::descendant_of(owner_id, pid.parse().unwrap())
-                            .expect_running("a child of the owner"),
-                    );
+                    // conformance: recorded-pid — the owner blocks on stdin and holds both; paddock-proc's tests cannot use paddock-testkit-start (a cycle)
+                    ids.push(ProcessId::of(pid.parse().unwrap()).unwrap());
                 }
                 Some(("folder", f)) => folder = Some(PathBuf::from(f)),
                 Some(("guarded", g)) => guarded = Some(g == "true"),

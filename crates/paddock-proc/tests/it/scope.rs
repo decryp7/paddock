@@ -370,11 +370,8 @@ fn a_grandchild_that_left_the_group_is_found_by_the_marker_ended_and_reported() 
     let mut held = scope.start(piped("escape")).unwrap();
     let child = held.process().unwrap();
     let named = first_pid(&mut held, "grandchild");
-    // Named by identity in a look at the table below the child (parent link and start times), never a bare pid taken late.
-    let grandchild = paddock_proc::descendants_of(child)
-        .into_iter()
-        .find(|id| id.pid() == named)
-        .expect("the grandchild runs below the child");
+    // conformance: recorded-pid — the child holds its grandchild while the scope runs; paddock-proc's tests cannot use paddock-testkit-start (a cycle)
+    let grandchild = ProcessId::of(named).expect("the grandchild runs");
     let summary = scope.finish();
     if !ends(grandchild) {
         fail(

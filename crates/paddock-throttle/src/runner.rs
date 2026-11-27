@@ -851,10 +851,6 @@ fn exec(
                         h.log.warn("throttle.hang", msg, &[]);
                     }
                 }
-                #[expect(
-                    clippy::disallowed_methods,
-                    reason = "a production read after the event that settles it: the hang verdict means the whole --stall window passed with no output and no CPU, and a stop lasts until the command is resumed, so the read follows the window instead of racing a change; it only excuses a paused command (App Tamer) and any other state ends it, as before"
-                )]
                 Verdict::Hung(quiet) => {
                     if run_state(id) == RunState::Stopped {
                         // Paused by a signal or the OS (App Tamer): not stuck, it goes on when resumed.

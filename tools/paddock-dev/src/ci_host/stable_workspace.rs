@@ -20,7 +20,7 @@
 //! phase, and each phase logs its duration (ER-27). Any other problem only costs cache hits and never fails the job.
 
 use super::links::{Links, OsLinks};
-use super::phase::{ClockMark, Held, Phase, bounded_marked};
+use super::phase::{ClockMark, Held, Phase, bounded, bounded_marked};
 use super::{Step, folder_name, isolation_full, tail_flat};
 use crate::ci_isolation::home;
 use crate::ci_tool::ToolCall;
@@ -167,10 +167,9 @@ pub fn run(env: &HashMap<String, String>, windows: bool, args: &Args, out: &mut 
     run_with(env, windows, args, ops, limit, None, out)
 }
 
-/// The command over explicit operations (tests). `mark` (tests only, ADR 0103 "Hang-point signal"): every phase is bounded by the mark's
-/// `wait` until the test's hanging stand-in writes that file, and the limit counts from the moment it does, so neither a stand-in that
-/// is slow to start under load nor the real work of an earlier phase (the slot's folder, made on disk) can meet a short limit before the
-/// hang is reached.
+/// The command over explicit operations (tests). `mark` (tests only, ADR 0103 "Hang-point signal"): the clone phase's limit counts from
+/// the moment the test's hanging stand-in writes that file, not from the phase's start, so a stand-in that is slow to start under load
+/// cannot meet a short limit before it reaches its hang.
 pub fn run_with(
     env: &HashMap<String, String>,
     windows: bool,
@@ -186,8 +185,6 @@ pub fn run_with(
         windows,
         name: "stable-workspace",
     };
-    // The line names the phase's limit, or the mark's wait when the phase ended before its clock mark (as `Flow::phase`).
-    let shown = |before_mark: bool| if before_mark { mark.map_or(limit, |m| m.wait) } else { limit };
     let Some(os) = step.var("RUNNER_OS").map(str::to_string) else {
         return step.fail("RUNNER_OS is not set.", "run this step in a runner job.");
     };
@@ -219,13 +216,12 @@ pub fn run_with(
     let resolved = {
         let (env2, win) = (env.clone(), windows);
         let folder = folder.clone();
-        bounded_marked(&mut step, "resolve the job slot's kept folder", limit, None, mark, move |_| {
+        bounded(&mut step, "resolve the job slot's kept folder", limit, move |_| {
             let (code, o, e) = isolation_full(&env2, win, &["path", "src", &folder]);
             // The isolation's messages (a migration notice, an error) go to the log either way.
             if code == 0 { Ok((o, e)) } else { Err(e) }
         })
     };
-    let (resolved, before_mark) = resolved;
     let stable_text = match resolved {
         Ok((path, notes)) => {
             if !notes.is_empty() {
@@ -233,9 +229,7 @@ pub fn run_with(
             }
             path
         }
-        Err(Phase::Timeout) => {
-            return timeout_error(&mut step, "resolve the job slot's kept folder", shown(before_mark), &ws_text, "");
-        }
+        Err(Phase::Timeout) => return timeout_error(&mut step, "resolve the job slot's kept folder", limit, &ws_text, ""),
         Err(Phase::Failed(why)) => {
             step.say(why);
             step.warn("no kept folder of this job's slot (see the message above); building from the work folder.");
@@ -264,12 +258,10 @@ pub fn run_with(
     // unknown, never "the same": two empty answers must not let the move run.
     let same = {
         let (ops, ws, root) = (ops.clone(), ws.clone(), root.clone());
-        bounded_marked(
+        bounded(
             &mut step,
             &format!("compare the volumes of {ws_text} and {root_text}"),
             limit,
-            None,
-            mark,
             move |_| {
                 ops.create_dir_all(&root)
                     .map_err(|e| format!("cannot create {}: {e}", root.display()))?;
@@ -281,12 +273,11 @@ pub fn run_with(
             },
         )
     };
-    let (same, before_mark) = same;
     match same {
         Ok(()) => {}
         Err(Phase::Timeout) => {
             let label = format!("compare the volumes of {ws_text} and {root_text}");
-            return timeout_error(&mut step, &label, shown(before_mark), &ws_text, "");
+            return timeout_error(&mut step, &label, limit, &ws_text, "");
         }
         Err(Phase::Failed(why)) => {
             step.warn(format!(
@@ -299,27 +290,20 @@ pub fn run_with(
 
     // An unusable move must never fail the job: it only costs the cache hits of the workspace crates (a hang does: it ends the
     // step with the error above).
+    let mark_wait = mark.as_ref().map(|m| m.wait);
     let moved = {
         let (ops, ws, stable, root) = (ops.clone(), ws.clone(), stable.clone(), root.clone());
-        bounded_marked(
-            &mut step,
-            &format!("move the checkout to {stable_text}"),
-            limit,
-            None,
-            mark,
-            move |_| {
-                ops.create_dir_all(&root).map_err(|e| e.to_string())?;
-                ops.remove(&root, &stable)?;
-                ops.rename(&ws, &stable).map_err(|e| e.to_string())
-            },
-        )
+        bounded(&mut step, &format!("move the checkout to {stable_text}"), limit, move |_| {
+            ops.create_dir_all(&root).map_err(|e| e.to_string())?;
+            ops.remove(&root, &stable)?;
+            ops.rename(&ws, &stable).map_err(|e| e.to_string())
+        })
     };
-    let (moved, before_mark) = moved;
     match moved {
         Ok(()) => {}
         Err(Phase::Timeout) => {
             let label = format!("move the checkout to {stable_text}");
-            return timeout_error(&mut step, &label, shown(before_mark), &ws_text, "");
+            return timeout_error(&mut step, &label, limit, &ws_text, "");
         }
         Err(Phase::Failed(why)) => {
             // Under act on Windows the runner keeps a handle on the work folder, so it cannot move. Keep a clone at the stable
@@ -346,8 +330,10 @@ pub fn run_with(
                     ));
                     use_folder(&mut step, &stable);
                 }
+                // The line names the phase's limit, or the mark's wait when the phase ended before its clock mark (as `Flow::phase`).
                 Err(Phase::Timeout) => {
-                    return timeout_error(&mut step, &label, shown(before_mark), &ws_text, &why);
+                    let shown = if before_mark { mark_wait.unwrap_or(limit) } else { limit };
+                    return timeout_error(&mut step, &label, shown, &ws_text, &why);
                 }
                 Err(Phase::Failed(clone_why)) => {
                     let why = if why.is_empty() { "no message".to_string() } else { why };
@@ -363,21 +349,15 @@ pub fn run_with(
     // A link (a junction on Windows: Git bash's `ln -s` copies there) resolves the old path to the stable folder.
     let linked = {
         let (ops, ws, stable) = (ops.clone(), ws.clone(), stable.clone());
-        bounded_marked(
-            &mut step,
-            &format!("link {ws_text} to {stable_text}"),
-            limit,
-            None,
-            mark,
-            move |_| ops.link_dir(&stable, &ws),
-        )
+        bounded(&mut step, &format!("link {ws_text} to {stable_text}"), limit, move |_| {
+            ops.link_dir(&stable, &ws)
+        })
     };
-    let (linked, before_mark) = linked;
     match linked {
         Ok(()) => {}
         Err(Phase::Timeout) => {
             let label = format!("link {ws_text} to {stable_text}");
-            return timeout_error(&mut step, &label, shown(before_mark), &ws_text, "");
+            return timeout_error(&mut step, &label, limit, &ws_text, "");
         }
         Err(Phase::Failed(_)) => {
             // Put the checkout back where the runner expects it.
@@ -469,8 +449,6 @@ mod tests {
         link_fails: bool,
         /// While set, `create_dir_all` blocks until the gate is opened: a phase that hangs.
         stall: Option<Arc<(Mutex<bool>, std::sync::Condvar)>>,
-        /// The file `create_dir_all` writes when it enters the stall: the hang's clock mark (ADR 0103).
-        stall_mark: Option<PathBuf>,
         links: RecordingLinks,
     }
 
@@ -494,9 +472,6 @@ mod tests {
         }
         fn create_dir_all(&self, p: &Path) -> io::Result<()> {
             if let Some(gate) = &self.stall {
-                if let Some(mark) = &self.stall_mark {
-                    std::fs::write(mark, "hang").unwrap();
-                }
                 let (open, cv) = &**gate;
                 let mut guard = open.lock().unwrap();
                 while !*guard {
@@ -563,9 +538,8 @@ mod tests {
         Scene { dir, env }
     }
 
-    /// The command over `ops`, with every phase bounded by the general limit until `mark_file` appears and by `limit` counted from
-    /// the mark (ADR 0103): the real work of an earlier phase (the slot's folder, made on disk) cannot meet a short limit under load.
-    fn run_in(sc: &Scene, win: bool, ops: Arc<dyn Ops>, mark_file: &Path, limit: u64) -> (i32, String) {
+    fn go(sc: &Scene, win: bool, fake: Arc<Fake>, limit: u64) -> (i32, String) {
+        // conformance: no-clock-mark - the operations are fakes: no program starts, so nothing is slow to start under load
         let mut out = Vec::new();
         let code = run_with(
             &sc.env,
@@ -573,25 +547,12 @@ mod tests {
             &Args {
                 name: "decryp7/paddock-crate".into(),
             },
-            ops,
+            fake,
             Duration::from_secs(limit),
-            Some(ClockMark {
-                file: mark_file,
-                wait: crate::ci_host::phase::HUNG_TEST_GENERAL_LIMIT,
-            }),
+            None,
             &mut out,
         );
         (code, String::from_utf8(out).unwrap())
-    }
-
-    /// A run in which nothing hangs: no mark is ever written, so each phase is bounded by the general limit.
-    fn go(sc: &Scene, win: bool, fake: Arc<Fake>, limit: u64) -> (i32, String) {
-        run_in(sc, win, fake, &sc.dir.path().join("no-hang-mark"), limit)
-    }
-
-    /// [`go`] for a fake that writes `mark_file` when it enters its hang: `limit` counts from that moment.
-    fn go_marked(sc: &Scene, fake: Arc<Fake>, mark_file: &Path, limit: u64) -> (i32, String) {
-        run_in(sc, false, fake, mark_file, limit)
     }
 
     fn written(sc: &Scene) -> String {
@@ -834,6 +795,7 @@ mod tests {
 
     #[test]
     fn a_clone_that_fetched_another_commit_than_the_checkouts_is_an_error_never_a_silent_wrong_tree() {
+        // conformance: no-clock-mark - the operations are fakes: no program starts, so nothing is slow to start under load
         struct Skewed(Fake);
         impl Ops for Skewed {
             fn is_symlink(&self, p: &Path) -> bool {
@@ -870,11 +832,21 @@ mod tests {
             }
         }
         let sc = scene("Windows");
+        let mut out = Vec::new();
         let ops: Arc<dyn Ops> = Arc::new(Skewed(Fake {
             rename_fails: true,
             ..Fake::default()
         }));
-        let (code, out) = run_in(&sc, true, ops, &sc.dir.path().join("no-hang-mark"), 5);
+        let code = run_with(
+            &sc.env,
+            true,
+            &Args { name: "n".into() },
+            ops,
+            Duration::from_secs(5),
+            None,
+            &mut out,
+        );
+        let out = String::from_utf8(out).unwrap();
         assert_eq!(code, 0);
         assert!(out.contains("nor clone it there (the clone fetched def456, not abc123)"), "{out}");
         assert!(written(&sc).is_empty());
@@ -915,15 +887,11 @@ mod tests {
     fn a_hung_phase_ends_in_one_error_line_that_names_it() {
         let sc = scene("macOS");
         let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
-        let mark_file = sc.dir.path().join("hang-mark");
         let f = Arc::new(Fake {
             stall: Some(gate.clone()),
-            stall_mark: Some(mark_file.clone()),
             ..Fake::default()
         });
-        // The 1 s limit counts from the hang's mark: the phase before it resolves the slot's folder on disk for real, which a loaded
-        // machine can take longer than 1 s (CI runs 9237 and 9238, Linux partition 1).
-        let (code, out) = go_marked(&sc, f, &mark_file, 1);
+        let (code, out) = go(&sc, false, f, 1);
         // Let the hung phase end, so no thread is left waiting.
         *gate.0.lock().unwrap() = true;
         gate.1.notify_all();

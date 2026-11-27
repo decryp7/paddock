@@ -249,10 +249,9 @@ fn a_stopped_program_is_waited_for_until_the_guard_and_then_called_a_hang() {
     let mut child = spawn(&dir, "stop-self");
     let pid = child.child().id().to_string();
     let id = child.pid().expect("the child's identity");
-    assert!(
-        crate::wait_state(id, HANG_GUARD, |s| s == RunState::Stopped),
-        "the child never stopped itself"
-    );
+    paddock_testkit::wait_until("the child to stop itself", || {
+        paddock_proc::run_state(id) == RunState::Stopped
+    });
     let hang = wait_on(&mut child, "the stopped child", HANG_GUARD, &fake(), || {
         None::<()>
     })

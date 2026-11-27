@@ -67,8 +67,6 @@ mod login;
 pub mod own;
 mod owner;
 pub mod queue_stall;
-#[cfg(any(test, feature = "test-support"))]
-pub mod recorded;
 mod run;
 mod runstate;
 pub mod scope;
@@ -76,8 +74,6 @@ pub mod self_test;
 mod session;
 mod stall;
 mod start;
-#[cfg(any(test, feature = "test-support"))]
-pub mod statewait;
 mod supervised;
 mod sys;
 mod tree;
