@@ -53,6 +53,8 @@ pub enum Why {
     TooOld,
     /// A record that failed the trust check, and what it said.
     Untrusted(String),
+    /// A record whose trust check could not answer (the API failed, no token): it runs, and its record is not replaced.
+    Undecided(String),
     /// The store did not answer, or reuse is off for this run (the cause): everything runs.
     Off(String),
 }
@@ -66,6 +68,7 @@ impl Why {
             Why::Miss => "no record under this key".into(),
             Why::TooOld => "its record is older than the limit while the nightly is paused".into(),
             Why::Untrusted(w) => format!("its record failed the trust check: {w}"),
+            Why::Undecided(w) => format!("its record's trust could not be decided: {w}"),
             Why::Off(w) => format!("reuse is off: {w}"),
         }
     }
@@ -105,7 +108,7 @@ pub fn decide(
     filter: &str,
     store: &dyn Store,
     now: u64,
-    trust: &dyn Fn(&Record) -> Result<(), String>,
+    trust: &dyn Fn(&Record) -> Result<(), trust::Distrust>,
 ) -> (Vec<Decision>, Option<String>) {
     let mut asks: Vec<Lookup> = Vec::new();
     let mut at: Vec<Option<usize>> = Vec::new();
@@ -140,7 +143,8 @@ pub fn decide(
             }
             match trust(r) {
                 Ok(()) => Decision::Reuse(Box::new(r.clone())),
-                Err(w) => Decision::Run(Why::Untrusted(w)),
+                Err(trust::Distrust::Refused(w)) => Decision::Run(Why::Untrusted(w)),
+                Err(trust::Distrust::Unknown(w)) => Decision::Run(Why::Undecided(w)),
             }
         })
         .collect();
@@ -354,42 +358,44 @@ pub fn run_outcome(ran: &[&Candidate], matched: &[&Candidate], judged: &result::
     out
 }
 
-/// The records a run stores: `put` without those whose target already holds a trusted record under the same key ([`Decision::Reuse`] in
-/// `decisions`, one per candidate of `cands`): write-once while trusted, as remote build caches do. A record from a red run's leg or a
-/// local run never replaces a trusted one, so it cannot make every later lookup untrusted (run 9209 replaced run 9180's records). A
-/// missing, untrusted or too-old record is replaced. The second answer is how many trusted records were kept.
+/// The records a run stores: `put` (one per passed target) limited to the targets whose record the lookup proved replaceable: no record,
+/// one too old, or one the trust check refused. Write-once while trusted, as remote build caches do: a trusted record ([`Decision::Reuse`])
+/// is never replaced, so a red run's leg or a local run cannot make every later lookup untrusted (run 9209 replaced run 9180's records).
+/// Nothing is replaced on an answer that is not definite either: a trust check that could not answer ([`Why::Undecided`]) or a lookup
+/// that did not run or failed ([`Why::Off`]). The second answer is how many records were held back.
 pub fn not_overwriting_trusted(put: Vec<Record>, cands: &[Candidate], decisions: &[Decision]) -> (Vec<Record>, usize) {
-    let trusted: std::collections::BTreeSet<(&str, &str)> = cands
+    let replaceable: std::collections::BTreeSet<&str> = cands
         .iter()
         .zip(decisions)
-        .filter_map(|(c, d)| match d {
-            Decision::Reuse(r) => Some((c.target.id.as_str(), r.key.as_str())),
-            Decision::Run(_) => None,
-        })
+        .filter(|(_, d)| matches!(d, Decision::Run(Why::Miss | Why::TooOld | Why::Untrusted(_))))
+        .map(|(c, _)| c.target.id.as_str())
         .collect();
     let before = put.len();
-    let kept: Vec<Record> = put
-        .into_iter()
-        .filter(|r| !trusted.contains(&(r.target.as_str(), r.key.as_str())))
-        .collect();
+    let kept: Vec<Record> = put.into_iter().filter(|r| replaceable.contains(r.target.as_str())).collect();
     let n = before - kept.len();
     (kept, n)
 }
 
-/// The records a lookup found but did not trust, counted by why: `untrusted 57 (record of run 9209: the run is not a success)`, so a
-/// `matched 0` never hides records that are there. `None` when there were none.
+/// The records a lookup found but did not trust, counted by why: `untrusted 57 (57: job ... did not end success)`, and those whose trust
+/// could not be decided (`undecided 3 (...)`), so a `matched 0` never hides records that are there. `None` when there were none.
 pub fn untrusted_summary(decisions: &[Decision]) -> Option<String> {
-    let mut by: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
-    for d in decisions {
-        if let Decision::Run(Why::Untrusted(w)) = d {
-            *by.entry(w.as_str()).or_default() += 1;
+    let mut parts: Vec<String> = Vec::new();
+    for (word, pick) in [("untrusted", true), ("undecided", false)] {
+        let mut by: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+        for d in decisions {
+            match d {
+                Decision::Run(Why::Untrusted(w)) if pick => *by.entry(w.as_str()).or_default() += 1,
+                Decision::Run(Why::Undecided(w)) if !pick => *by.entry(w.as_str()).or_default() += 1,
+                _ => {}
+            }
+        }
+        let n: usize = by.values().sum();
+        if n > 0 {
+            let why: Vec<String> = by.iter().map(|(w, k)| format!("{k}: {w}")).collect();
+            parts.push(format!("{word} {n} ({})", why.join("; ")));
         }
     }
-    let n: usize = by.values().sum();
-    (n > 0).then(|| {
-        let why: Vec<String> = by.iter().map(|(w, k)| format!("{k}: {w}")).collect();
-        format!("untrusted {n} ({})", why.join("; "))
-    })
+    (!parts.is_empty()).then(|| parts.join(", "))
 }
 
 /// The shadow lines of job logs, summed: how many lines were read, and the totals. `None` when no log has a line (nothing measured).

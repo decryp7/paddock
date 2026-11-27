@@ -234,7 +234,7 @@ fn scratch() -> (tempfile::TempDir, FsStore) {
 }
 
 const NOW: u64 = 1_800_000_000;
-const OK: &dyn Fn(&Record) -> Result<(), String> = &|_| Ok(());
+const OK: &dyn Fn(&Record) -> Result<(), super::trust::Distrust> = &|_| Ok(());
 
 #[test]
 fn an_unchanged_target_reuses_and_a_changed_one_runs() {
@@ -258,42 +258,71 @@ fn an_unchanged_target_reuses_and_a_changed_one_runs() {
 }
 
 #[test]
-fn a_trusted_record_is_never_replaced_and_an_untrusted_one_is() {
+fn the_record_step_never_replaces_a_trusted_or_undecided_record_and_names_the_untrusted() {
     // Run 9209 (red) re-stored the records run 9180 (green) had written under the same keys; every later lookup then refused them.
     let (_d, s) = scratch();
     let class = RunnerClass::here();
-    let (a, b) = (cand("crates/a", "h1"), cand("crates/b", "h2"));
-    let good = rec(&a, &class, NOW - 60);
-    s.put_many(&[good.clone(), rec(&b, &class, NOW - 60)]).unwrap();
-    // The trust check accepts run 8635 for a and refuses b's record (a failing job): a is trusted, b is not.
-    let trust = |r: &Record| {
-        if r.target == "rust:crates/b" {
-            Err("the job failed".to_string())
-        } else {
-            Ok(())
+    let (a, b, c, n) = (cand("a", "h1"), cand("b", "h2"), cand("c", "h3"), cand("n", "h4"));
+    s.put_many(&[rec(&a, &class, NOW - 60), rec(&b, &class, NOW - 60), rec(&c, &class, NOW - 60)])
+        .unwrap();
+    // a's record is trusted, b's refused (its job failed), c's undecided (the API did not answer); n has none.
+    let trust = |r: &Record| -> Result<(), super::trust::Distrust> {
+        match r.target.as_str() {
+            "rust:b" => Err("job `crate (linux)` of run 8635 attempt 1 did not end success".into()),
+            "rust:c" => Err(super::trust::Distrust::Unknown("run 8635 could not be read: 502".into())),
+            _ => Ok(()),
         }
     };
-    let (d, _) = decide(&[a.clone(), b.clone()], &cfg(), &class, "", &s, NOW, &trust);
-    assert!(matches!(d[0], Decision::Reuse(_)));
-    assert_eq!(d[1], Decision::Run(Why::Untrusted("the job failed".into())));
-    let red = |c: &Candidate| Record {
+    let meta = RunMeta {
         run: "9209".into(),
         job: "crate (ubuntu-latest, 2/3)".into(),
-        ..rec(c, &class, NOW)
+        attempt: 1,
+        git_ref: "refs/heads/main".into(),
+        commit: "c0ffee".into(),
+        at: NOW,
+        os_build: String::new(),
     };
-    let (put, kept) = super::not_overwriting_trusted(vec![red(&a), red(&b)], &[a.clone(), b.clone()], &d);
-    assert_eq!(kept, 1);
-    s.put_many(&put).unwrap();
+    let log = [
+        "    Starting 4 tests across 4 binaries",
+        "        PASS [   0.010s] ( 1/4) a t::ok",
+        "        PASS [   0.010s] ( 2/4) b t::ok",
+        "        PASS [   0.010s] ( 3/4) c t::ok",
+        "        PASS [   0.010s] ( 4/4) n t::ok",
+        "     Summary [   0.050s] 4 tests run: 4 passed, 0 failed, 0 skipped",
+    ]
+    .join("\n");
+    let cands = [a.clone(), b.clone(), c.clone(), n.clone()];
+    let (lines, stored) = super::cmd::record_with(&log, &cands, &cfg(), &class, "", &meta, &s, &trust);
+    assert_eq!(stored, 2, "b (refused) and n (missing) are replaced or written: {lines:?}");
     let key = |c: &Candidate| Lookup {
         target: c.target.id.clone(),
         class: class.clone(),
         key: key_of(c, &cfg(), &class, ""),
     };
-    let back = s.get_many(&[key(&a), key(&b)]).unwrap();
-    assert_eq!(back[0].as_ref().unwrap().run, "8635", "the trusted record stays");
-    assert_eq!(back[1].as_ref().unwrap().run, "9209", "an untrusted record is replaced");
-    assert_eq!(super::untrusted_summary(&d).as_deref(), Some("untrusted 1 (1: the job failed)"));
-    assert_eq!(super::untrusted_summary(&d[..1]), None);
+    let back: Vec<String> = s
+        .get_many(&[key(&a), key(&b), key(&c), key(&n)])
+        .unwrap()
+        .into_iter()
+        .map(|r| r.unwrap().run)
+        .collect();
+    assert_eq!(
+        back,
+        ["8635", "9209", "8635", "9209"],
+        "a trusted and c undecided stay; b and n are this run's"
+    );
+    let shadow = lines.iter().find(|l| l.starts_with("test-cache shadow:")).expect("a shadow line");
+    assert_eq!(
+        shadow,
+        "test-cache shadow: matched 1, passed 1, findings 0, untrusted 1 (1: job `crate (linux)` of run 8635 attempt 1 did not end \
+         success), undecided 1 (1: run 8635 could not be read: 502)"
+    );
+    // The reader of the shadow lines reads the counts of the longer line.
+    let (k, sum) = read_shadow(std::slice::from_ref(shadow)).unwrap();
+    assert_eq!((k, sum.matched, sum.passed, sum.findings.len()), (1, 1, 1, 0));
+    assert!(lines.iter().any(|l| l.contains("2 held back")), "{lines:?}");
+    // A store that cannot answer the lookup: nothing is replaced, because nothing is known.
+    let (lines, stored) = super::cmd::record_with(&log, &cands, &cfg(), &class, "", &meta, &Down, &trust);
+    assert_eq!(stored, 0, "{lines:?}");
 }
 
 #[test]
@@ -331,7 +360,7 @@ fn never_cached_dirty_old_and_untrusted_records_run() {
         decide(std::slice::from_ref(&a), &running, &class, "", &s, old, OK).0[0],
         Decision::Reuse(_)
     ));
-    let deny: &dyn Fn(&Record) -> Result<(), String> = &|_| Err("run 8635 is on a branch".into());
+    let deny: &dyn Fn(&Record) -> Result<(), super::trust::Distrust> = &|_| Err("run 8635 is on a branch".into());
     assert!(matches!(
         decide(&[a], &cfg(), &class, "", &s, NOW, deny).0[0],
         Decision::Run(Why::Untrusted(_))
@@ -590,38 +619,56 @@ fn a_record_counts_only_when_its_run_is_a_main_or_train_run_and_its_own_job_succ
     assert!(
         p.check(&ci_rec("8637", "crate (linux)", 1))
             .unwrap_err()
+            .reason()
             .contains("not main or a train"),
         "a branch run"
     );
     assert!(
         p.check(&ci_rec("8638", "crate (linux)", 1))
             .unwrap_err()
+            .reason()
             .contains("did not end success"),
         "a failed job"
     );
     assert!(
         p.check(&ci_rec("8639", "crate (linux)", 1))
             .unwrap_err()
+            .reason()
             .contains("could not be read"),
         "an unreadable run refuses"
     );
-    assert!(p.check(&ci_rec("9999", "crate (linux)", 1)).unwrap_err().contains("does not exist"));
+    assert!(
+        p.check(&ci_rec("9999", "crate (linux)", 1))
+            .unwrap_err()
+            .reason()
+            .contains("does not exist")
+    );
     assert!(
         p.check(&ci_rec("8635", "crate (macos-latest)", 1))
             .unwrap_err()
+            .reason()
             .contains("has no job"),
         "a job the run lacks"
     );
     assert!(
-        p.check(&ci_rec("8635", "crate (linux)", 2)).unwrap_err().contains("does not exist"),
+        p.check(&ci_rec("8635", "crate (linux)", 2))
+            .unwrap_err()
+            .reason()
+            .contains("does not exist"),
         "an attempt the server does not have"
     );
     assert!(
-        p.check(&ci_rec("8640", "crate (linux)", 1)).unwrap_err().contains("several jobs"),
+        p.check(&ci_rec("8640", "crate (linux)", 1))
+            .unwrap_err()
+            .reason()
+            .contains("several jobs"),
         "two jobs of one name are ambiguous, so untrusted"
     );
     assert!(
-        p.check(&ci_rec("local-12", "", 0)).unwrap_err().contains("not a CI run id"),
+        p.check(&ci_rec("local-12", "", 0))
+            .unwrap_err()
+            .reason()
+            .contains("not a CI run id"),
         "a local record in CI"
     );
 }
@@ -648,6 +695,7 @@ fn a_passing_jobs_records_are_trusted_in_a_run_where_another_job_is_red_and_a_fa
     assert!(
         p.check(&ci_rec("8800", "crate (macos-latest)", 1))
             .unwrap_err()
+            .reason()
             .contains("did not end success"),
         "the failed job's own records"
     );
@@ -658,10 +706,15 @@ fn a_record_that_names_no_job_or_no_attempt_is_untrusted() {
     use super::trust::Provenance;
     let p = Provenance::new(|_, _| Ok(Some(run_facts("refs/heads/main", &[("crate (linux)", true)]))));
     assert!(
-        p.check(&ci_rec("8635", "", 1)).unwrap_err().contains("names no job"),
+        p.check(&ci_rec("8635", "", 1)).unwrap_err().reason().contains("names no job"),
         "an unknown job counts as untrusted"
     );
-    assert!(p.check(&ci_rec("8635", "crate (linux)", 0)).unwrap_err().contains("names no job"));
+    assert!(
+        p.check(&ci_rec("8635", "crate (linux)", 0))
+            .unwrap_err()
+            .reason()
+            .contains("names no job")
+    );
 }
 
 #[test]

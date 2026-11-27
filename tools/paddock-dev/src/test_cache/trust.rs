@@ -69,16 +69,15 @@ impl<'a> Provenance<'a> {
         }
     }
 
-    /// `Ok` when the record rests on a successful job of a main or train run.
-    pub fn check(&self, r: &Record) -> Result<(), String> {
+    /// `Ok` when the record rests on a successful job of a main or train run. [`Distrust::Unknown`] when the run's facts could not be
+    /// read (the API failed, no token): nothing is known, so the record is neither trusted nor replaced.
+    pub fn check(&self, r: &Record) -> Result<(), Distrust> {
         let run: u64 = r
             .run
             .parse()
-            .map_err(|_| format!("run `{}` is not a CI run id (a local run's record)", r.run))?;
+            .map_err(|_| Distrust::from(format!("run `{}` is not a CI run id (a local run's record)", r.run)))?;
         if r.job.is_empty() || r.attempt == 0 {
-            return Err(format!(
-                "the record of run {run} names no job or no attempt, so no job's result can vouch for it"
-            ));
+            return Err(format!("the record of run {run} names no job or no attempt, so no job's result can vouch for it").into());
         }
         let facts = self
             .seen
@@ -87,17 +86,47 @@ impl<'a> Provenance<'a> {
             .or_insert_with(|| (self.fetch.borrow_mut())(run, r.attempt))
             .clone();
         let facts = facts
-            .map_err(|e| format!("run {run} could not be read: {e}"))?
-            .ok_or_else(|| format!("run {run} does not exist"))?;
+            .map_err(|e| Distrust::Unknown(format!("run {run} could not be read: {e}")))?
+            .ok_or_else(|| Distrust::from(format!("run {run} does not exist")))?;
         if !(facts.git_ref == "refs/heads/main" || facts.git_ref.starts_with("refs/heads/train/")) {
-            return Err(format!("run {run} is on `{}`, not main or a train", facts.git_ref));
+            return Err(format!("run {run} is on `{}`, not main or a train", facts.git_ref).into());
         }
         let mut named = facts.jobs.iter().filter(|(name, _)| *name == r.job);
         match (named.next(), named.next()) {
             (Some((_, true)), None) => Ok(()),
-            (Some((_, false)), None) => Err(format!("job `{}` of run {run} attempt {} did not end success", r.job, r.attempt)),
-            (None, _) => Err(format!("run {run} attempt {} has no job `{}`", r.attempt, r.job)),
-            (Some(_), Some(_)) => Err(format!("run {run} attempt {} has several jobs named `{}`", r.attempt, r.job)),
+            (Some((_, false)), None) => Err(format!("job `{}` of run {run} attempt {} did not end success", r.job, r.attempt).into()),
+            (None, _) => Err(format!("run {run} attempt {} has no job `{}`", r.attempt, r.job).into()),
+            (Some(_), Some(_)) => Err(format!("run {run} attempt {} has several jobs named `{}`", r.attempt, r.job).into()),
         }
+    }
+}
+
+/// Why a record is not trusted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Distrust {
+    /// The check answered no (another branch, a job that did not end success, no such job or run): the record may be replaced.
+    Refused(String),
+    /// The check could not answer (the API failed, no token): the record is neither trusted nor replaced.
+    Unknown(String),
+}
+
+impl Distrust {
+    /// The words of the reason.
+    pub fn reason(&self) -> &str {
+        match self {
+            Distrust::Refused(w) | Distrust::Unknown(w) => w,
+        }
+    }
+}
+
+impl From<String> for Distrust {
+    fn from(w: String) -> Distrust {
+        Distrust::Refused(w)
+    }
+}
+
+impl From<&str> for Distrust {
+    fn from(w: &str) -> Distrust {
+        Distrust::Refused(w.to_string())
     }
 }

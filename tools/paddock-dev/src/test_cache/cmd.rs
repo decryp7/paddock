@@ -396,7 +396,7 @@ fn run(
             text.push(format!("::warning::test-cache: records not stored: {e}"));
         } else {
             text.push(format!(
-                "test-cache: stored {} pass(es); {kept} trusted record(s) kept, not replaced",
+                "test-cache: stored {} pass(es); {kept} held back (a trusted record, or no definite answer, is not replaced)",
                 put.len()
             ));
         }
@@ -575,7 +575,7 @@ fn os_of(c: &RunnerClass) -> &'static str {
 }
 
 /// A record's reader-side check.
-type Trust = Box<dyn Fn(&Record) -> Result<(), String>>;
+type Trust = Box<dyn Fn(&Record) -> Result<(), super::trust::Distrust>>;
 
 /// The reader-side trust check (§7): in CI every record's run is asked of the Gitea API; a local run reads its own store as is. With no
 /// token the check refuses every record (never trusts what it cannot verify).
@@ -625,7 +625,6 @@ fn record(
             path.display()
         ))
     })?;
-    let asked: Vec<String> = cands.iter().map(|c| c.target.package.clone()).collect();
     let meta = super::RunMeta {
         run: env_get("GITHUB_RUN_ID").unwrap_or_else(|| format!("local-{}", std::process::id())),
         // The job's display name and the run's attempt, which the CI step passes from its matrix (the reader finds the job by them,
@@ -637,11 +636,29 @@ fn record(
         at: now(),
         os_build: os_build(),
     };
+    let filter = filter_of(a);
+    let (lines, stored) = record_with(&log, cands, cfg, class, &filter, &meta, store, &trust_check());
+    Ok(Report::new(serde_json::json!({"stored": stored}), lines.join("\n")))
+}
+
+/// The record step over its ports (the log's text, the store and the trust check), for [`record`] and its tests: the shadow line, then
+/// the passes stored under the write-once rule ([`super::not_overwriting_trusted`]). Returns the lines and how many records were stored.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn record_with(
+    log: &str,
+    cands: &[Candidate],
+    cfg: &Config,
+    class: &RunnerClass,
+    filter: &str,
+    meta: &super::RunMeta,
+    store: &dyn Store,
+    trust: &dyn Fn(&Record) -> Result<(), super::trust::Distrust>,
+) -> (Vec<String>, usize) {
+    let asked: Vec<String> = cands.iter().map(|c| c.target.package.clone()).collect();
     // The shadow phase (ER-41): of the targets a valid record already covered, how many ran here and passed, and which ran and failed (a
     // soundness finding: the key missed an input). Read before this run's own records are stored, and only when the lookup answered.
     let mut lines: Vec<String> = Vec::new();
-    let filter = filter_of(a);
-    let (decisions, notice) = decide(cands, cfg, class, &filter, store, now(), &trust_check());
+    let (decisions, notice) = decide(cands, cfg, class, filter, store, meta.at, trust);
     if notice.is_none() {
         let matched: Vec<&Candidate> = cands
             .iter()
@@ -649,7 +666,7 @@ fn record(
             .filter(|(_, d)| matches!(d, Decision::Reuse(_)))
             .map(|(c, _)| c)
             .collect();
-        let shadow = super::shadow_outcome(&matched, &super::result::judge(&log, &asked));
+        let shadow = super::shadow_outcome(&matched, &super::result::judge(log, &asked));
         lines.extend(shadow.findings.iter().map(|t| {
             format!("::error::test-cache soundness finding: {t} matched a valid record and then failed in this run. Next step: find the input its key misses (ADR 0116 section 8); the switch stays off.")
         }));
@@ -659,16 +676,22 @@ fn record(
             None => shadow.line(),
         });
     }
-    let (put, kept) = super::not_overwriting_trusted(super::records_from_log(&log, cands, cfg, class, &filter, &meta), cands, &decisions);
-    lines.push(match store.put_many(&put) {
-        Ok(()) => format!(
-            "test-cache: recorded {} packages ({} in the log; {kept} trusted record(s) kept, not replaced)",
-            put.len(),
-            asked.len()
-        ),
-        Err(e) => format!("::warning::test-cache: records not stored: {e}"),
-    });
-    Ok(Report::new(serde_json::json!({"stored": put.len()}), lines.join("\n")))
+    let (put, kept) = super::not_overwriting_trusted(super::records_from_log(log, cands, cfg, class, filter, meta), cands, &decisions);
+    let stored = match store.put_many(&put) {
+        Ok(()) => {
+            lines.push(format!(
+                "test-cache: recorded {} packages ({} in the log; {kept} held back: a trusted record, or no definite answer, is not replaced)",
+                put.len(),
+                asked.len()
+            ));
+            put.len()
+        }
+        Err(e) => {
+            lines.push(format!("::warning::test-cache: records not stored: {e}"));
+            0
+        }
+    };
+    (lines, stored)
 }
 
 /// The filters the legs of `workspace` on `class` carry, normalized and without repeats: the whole package, and the filterset of a host
