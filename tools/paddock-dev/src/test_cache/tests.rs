@@ -1300,7 +1300,7 @@ fn a_crate_that_depends_on_a_blind_crate_is_blind_through_it_and_an_independent_
     let mut m = Model::new();
     for d in ["a", "b", "c", "d"] {
         m.add_node(ModelNode::new(
-            &format!("crate:crates/{d}"),
+            format!("crate:crates/{d}"),
             NodeKind::Project,
             &[&format!("crates/{d}/")],
         ));
