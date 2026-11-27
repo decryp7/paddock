@@ -10,7 +10,7 @@ use paddock_throttle::clock::{Clock, SystemClock};
 use paddock_throttle::exit::{self, describe_exit};
 use paddock_throttle::gate::step_env;
 use paddock_throttle::hang::{HangWatch, Verdict};
-use paddock_throttle::lock::{Request, Throttle};
+use paddock_throttle::lock::{Request, Throttle, WaitNote};
 use paddock_throttle::procs::OsProcs;
 use paddock_throttle::runner::{HELD_VAR, RunOpts, Stop, admit, held_by_procs};
 use std::ffi::{OsStr, OsString};
@@ -49,6 +49,14 @@ fn off(get: &dyn Fn(&str) -> Option<String>) -> bool {
             "off" | "0" | "false" | "no"
         )
     })
+}
+
+/// What the shim says on standard error when a run waits for a slot: its own sentence, built from the typed note.
+pub fn wait_line(tool: &str, w: &WaitNote) -> String {
+    format!(
+        "{tool} is waiting for a slot ({} s so far): {}",
+        w.secs, w.cause
+    )
 }
 
 /// What the run does about the shim itself.
@@ -145,13 +153,13 @@ fn supervised(
         cfg.runs = dev_targets.map(|d| d.join("runs"));
     }
     let runs = cfg.runs_dir();
-    // The shim is silent while the run is admitted at once: the tool's own output is all the user sees. It speaks only about a wait.
-    let say: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(|m: &str| {
-        if m.contains(" waiting ") {
-            eprintln!("paddock-shim: {m}");
-        }
-    });
-    let h: Throttle = boot::throttle_with(cfg, &warnings, &run_id, say);
+    // The shim is silent while the run is admitted at once: the tool's own output is all the user sees. It speaks only about a wait,
+    // from the typed note, never from the wording of throttle's line (ER-42).
+    let say: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(|_: &str| {});
+    let mut h: Throttle = boot::throttle_with(cfg, &warnings, &run_id, say);
+    h.wait_hook = Some(Arc::new(|w: &WaitNote| {
+        eprintln!("paddock-shim: {}", wait_line(tool, w))
+    }));
     let train = env_get("THROTTLE_PRIORITY").is_some_and(|v| v.eq_ignore_ascii_case("train"));
     // The record names the tool and the project, never the arguments (ER-27).
     let req = Request {
@@ -361,6 +369,19 @@ mod tests {
         assert_eq!(
             stall_limit(&|_| Some("x".into())),
             Some(Duration::from_secs(600))
+        );
+    }
+
+    #[test]
+    fn the_wait_line_is_built_from_the_note_and_not_from_throttles_wording() {
+        let w = WaitNote {
+            who: "cargo".into(),
+            secs: 7,
+            cause: "held by someone".into(),
+        };
+        assert_eq!(
+            wait_line("cargo", &w),
+            "cargo is waiting for a slot (7 s so far): held by someone"
         );
     }
 

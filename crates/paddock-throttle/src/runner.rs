@@ -307,8 +307,7 @@ pub fn admit<'a>(
             }
             if h.now().saturating_sub(gate_said) as f64 >= h.cfg.wait_log.as_secs_f64() {
                 let w = h.now().saturating_sub(acq.t0());
-                (h.say)(&format!("{name} waiting {w}s: {msg}"));
-                h.alog(&format!("{name} waiting {w}s: {msg}"));
+                h.note_wait(&name, w, &msg);
                 h.log.info(
                     "throttle.gate",
                     &format!("still waiting: {msg}"),

@@ -87,6 +87,22 @@ fn take_one(c: &AtomicU32) -> bool {
         .is_ok()
 }
 
+/// A wait of a run that has no slot yet, as a value: who waits, for how long and why. The wait line a person reads is made from it
+/// ([`Throttle::note_wait`]); a participant that speaks for itself (the shim) takes it from [`Throttle::wait_hook`] and never reads the
+/// line's wording (ER-42).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WaitNote {
+    /// The waiting run's name.
+    pub who: String,
+    /// Whole seconds waited so far.
+    pub secs: u64,
+    /// Why: who holds the slot, the load gate's reading, the train work it is behind.
+    pub cause: String,
+}
+
+/// What [`Throttle::wait_hook`] holds.
+pub type WaitHook = Arc<dyn Fn(&WaitNote) + Send + Sync>;
+
 /// One participant: its settings, ports, identity and log.
 pub struct Throttle {
     /// Settings.
@@ -103,6 +119,8 @@ pub struct Throttle {
     pub pid: u32,
     /// Where human-readable lines go (stderr in the program).
     pub say: Arc<dyn Fn(&str) + Send + Sync>,
+    /// Told of every wait that is said (see [`WaitNote`]); `None` in the program and in most tests.
+    pub wait_hook: Option<WaitHook>,
     /// Injected failures.
     pub faults: Faults,
     /// Which file system a folder is on (the OS in the program; a test puts a network one here).
@@ -216,9 +234,25 @@ impl Throttle {
             log,
             pid,
             say,
+            wait_hook: None,
             faults: Faults::default(),
             fs_kind: Arc::new(fsinfo::of),
             seq: AtomicU64::new(0),
+        }
+    }
+
+    /// Says that `who` has waited `secs` seconds for `cause`: the wait line (to `say` and the activity log) and the typed [`WaitNote`] to
+    /// [`Throttle::wait_hook`]. The one place a wait is said, so the line and the note cannot differ.
+    pub fn note_wait(&self, who: &str, secs: u64, cause: &str) {
+        let line = format!("{who} waiting {secs}s: {cause}");
+        (self.say)(&line);
+        self.alog(&line);
+        if let Some(hook) = &self.wait_hook {
+            hook(&WaitNote {
+                who: who.to_string(),
+                secs,
+                cause: cause.to_string(),
+            });
         }
     }
 
@@ -1072,8 +1106,7 @@ impl<'a> Acquirer<'a> {
         }
         if self.due() {
             let t = h.now();
-            (h.say)(&format!("{} waiting {waited}s: {msg}", self.req.name));
-            h.alog(&format!("{} waiting {waited}s: {msg}", self.req.name));
+            h.note_wait(&self.req.name, waited, msg);
             let mut p: Vec<(&str, Value)> = vec![("WaitedSeconds", json!(waited))];
             p.extend(props.iter().map(|(k, v)| (*k, v.clone())));
             h.log
