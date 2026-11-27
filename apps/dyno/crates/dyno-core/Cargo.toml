@@ -51,3 +51,11 @@ objc2 = "0.6"
 
 [lints]
 workspace = true
+
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `tests/wire/main.rs` reads the wire fixtures of the app's core folder.
+[package.metadata.paddock]
+test-reads = [
+    "apps/dyno/app/src/app/core/*.wire.json",
+]
