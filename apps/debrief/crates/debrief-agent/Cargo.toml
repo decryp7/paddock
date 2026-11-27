@@ -49,3 +49,9 @@ windows-service = "0.8.1"
 tempfile.workspace = true
 # Waiting on a condition instead of a guessed time (ADR 0041 §3).
 paddock-testkit = { path = "../../../../crates/paddock-testkit" }
+
+[package.metadata.paddock]
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `src/disk.rs`: `existing_ancestor` walks up a caller's output folder (a machine path).
+test-reads = []

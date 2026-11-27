@@ -383,6 +383,7 @@ mod tests {
             smoke: Default::default(),
             decls: Default::default(),
             errors: Vec::new(),
+            test_reads: Default::default(),
         }
     }
 
