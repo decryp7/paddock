@@ -114,7 +114,7 @@ pub fn standing(ctx: &Ctx, check: &str, added: &[String]) -> Standing {
     };
     Standing::Stands {
         detail,
-        ask: format!("Or the user adds to {REGISTER}: {} (ER-46).", approval_line(check, added)),
+        ask: format!("The user records it in {REGISTER}: {} (ER-46).", approval_line(check, added)),
     }
 }
 

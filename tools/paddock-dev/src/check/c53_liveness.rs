@@ -402,7 +402,7 @@ pub fn liveness_findings(ctx: &Ctx) -> LivenessRun {
                             if added == 1 { "y is" } else { "ies are" },
                             &base[..base.len().min(9)]
                         ),
-                        format!("Remove the entries and fix the sites through a ProcessId. {ask}"),
+                        format!("Remove the entries and fix the sites through a ProcessId. Growing the baseline needs the user's approval. {ask}"),
                     ));
                 }
             }

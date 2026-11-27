@@ -312,7 +312,7 @@ impl AllowList {
                             if added == 1 { "y is" } else { "ies are" },
                             &base[..base.len().min(9)]
                         ),
-                        format!("Remove the added entries or lower the raised counts and fix the sites. {ask}"),
+                        format!("Remove the added entries or lower the raised counts and fix the sites. Growing the list needs the user's approval. {ask}"),
                     )
                     .unwaivable(),
                 ]

@@ -92,7 +92,7 @@ pub fn js_findings(findings: &Value) -> Value {
     for f in findings.as_array_mut().into_iter().flatten() {
         if let Some(fix) = f["fix"]
             .as_str()
-            .and_then(|t| t.split(" Or the user adds to docs/gates.toml:").next())
+            .and_then(|t| t.split(" The user records it in docs/gates.toml:").next())
         {
             f["fix"] = json!(fix);
         }
