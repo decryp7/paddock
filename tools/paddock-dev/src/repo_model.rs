@@ -253,6 +253,8 @@ pub struct World {
     pub decls: BTreeMap<String, decl::ProjectDecl>,
     /// An adapter that could not read a file (the plan fails closed on them).
     pub errors: Vec<ExtractError>,
+    /// What each crate declares its tests read (`[package.metadata.paddock] test-reads`), against the tracked files, by crate folder.
+    pub test_reads: BTreeMap<String, test_reads::Declared>,
 }
 
 /// The model of the tree at `head_rev` (a revision, or the working tree for `None`).
@@ -340,7 +342,17 @@ pub fn build_world_with(
     for u in more.model.unresolved() {
         model.add_unresolved(u.clone());
     }
+    for u in more.model.blind() {
+        model.add_blind(u.clone());
+    }
     errors.extend(more.errors);
+    // The files each crate declares its tests read (ADR 0116 §2): a node per crate the crate reads, so its hash holds them.
+    let mut declared: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for json in graph.metadata.values() {
+        declared.extend(paddock_repo_graph::parse_test_reads(json, &graph.root_text).map_err(|e| e.to_string())?);
+    }
+    let test_reads = test_reads::resolve(&files, &declared);
+    test_reads::add_to_model(&mut model, &test_reads);
     let world = World {
         inputs,
         files,
@@ -348,6 +360,7 @@ pub fn build_world_with(
         smoke: decl::smoke_declared(&decls),
         decls,
         errors,
+        test_reads,
     };
     Ok((world, spawned.get()))
 }
@@ -796,6 +809,7 @@ pub mod decl;
 pub mod hash;
 pub mod reads;
 pub mod replay;
+pub mod test_reads;
 pub mod ts;
 
 #[cfg(test)]

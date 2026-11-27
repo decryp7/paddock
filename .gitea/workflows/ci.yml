@@ -1446,14 +1446,17 @@ jobs:
         working-directory: .
         run: |
           # bash -e -o pipefail: every command that may legitimately fail is handled by hand. grep exits 1 when it finds nothing,
-          # which is the success case here. The probe matches a here-string: `echo | grep -q` fails under pipefail when grep leaves early (C180, run 9247).
+          # which is the success case here.
           rc=0
           for tool in throttle; do
             tree=$(cd "tools/$tool" && cargo tree --locked --target x86_64-unknown-linux-gnu -e normal,build --prefix none) || {
               echo "::error::cargo tree failed for tools/$tool (see the lines above). Run it in tools/$tool with the same arguments."
               rc=1; continue; }
             # ER-33: the probe must be able to see the thing. The tool links paddock-proc, where the hack's GTK crates arrived.
-            grep -q '^paddock-proc ' <<<"$tree" || {
+            # A here-string, not a pipe into `grep -q` (which stops at its first match and, under `pipefail`, can turn the writer's SIGPIPE into a
+            # failure); on a miss the first lines of the graph are printed, so a broken probe says what it saw (ER-27).
+            grep '^paddock-proc ' <<<"$tree" >/dev/null || {
+              sed -n '1,5p' <<<"$tree" >&2
               echo "::error::check broken: the dependency graph of tools/$tool has no paddock-proc, so a GTK crate there would not be seen."
               rc=1; continue; }
             hits=$(echo "$tree" | grep -E '^(gtk|gdk|gio|glib|gobject|pango|cairo|atk|gdk-pixbuf|soup|webkit2gtk|javascriptcore-rs)[a-z0-9-]*-(sys|sys-rs) ' | sort -u || true)

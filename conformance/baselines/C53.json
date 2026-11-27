@@ -242,7 +242,7 @@
    "hash": "ee768c80f322b855"
   },
   {
-   "file": "tools/throttle/src/probe.rs",
+   "file": "crates/paddock-throttle/src/probe.rs",
    "line": 17,
    "hash": "39d9704acaf0a279"
   }

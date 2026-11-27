@@ -103,6 +103,77 @@ fn targets(graph: &paddock_repo_graph::Graph, workspace: &str) -> Vec<Target> {
     t
 }
 
+/// The model's blind reads (a plan does not see them) by the Cargo package folder of their referrer, one line each: a package with any is blind
+/// (its key cannot say what it reads, ADR 0116 §2).
+fn blind_reads(
+    cargo: &paddock_repo_graph::Graph,
+    unresolved: Vec<&paddock_repo_graph::model::Unresolved>,
+) -> std::collections::BTreeMap<String, Vec<String>> {
+    let mut out: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+    for u in unresolved {
+        if let Some(dir) = cargo.node_of(&u.referrer) {
+            out.entry(dir.to_string())
+                .or_default()
+                .push(format!("{}: {}", u.referrer, u.reference));
+        }
+    }
+    out
+}
+
+/// `blind`: every blind read of the workspace's crates, each with the `test-reads` declaration that covers it, or why the crate stays
+/// `Never` (ADR 0116 §2, user decision 122). Report-only: nothing is skipped or stored.
+fn blind_sites(root: &Path, workspace: &str) -> Result<Report, CliError> {
+    let w = world(root)?;
+    let in_workspace = |dir: &str| w.graph.cargo.get(dir).is_some_and(|n| n.workspace == workspace);
+    let mut own = blind_reads(&w.graph.cargo, w.world.model.blind());
+    own.retain(|dir, _| in_workspace(dir));
+    let all = own.clone();
+    let cov = super::cover_blind(own, &w.world.test_reads);
+    let sites: usize = all.values().map(Vec::len).sum();
+    let mut text: Vec<String> = Vec::new();
+    for (dir, list) in &all {
+        let problems = w.world.test_reads.get(dir).map(|d| d.problems()).unwrap_or_default();
+        let head = match (cov.covered.contains_key(dir), w.world.test_reads.get(dir)) {
+            (true, Some(d)) => format!(
+                "{dir}: {} blind site(s) covered by `test-reads` {:?} ({} tracked file(s) in its key)",
+                list.len(),
+                d.globs,
+                d.matched.len()
+            ),
+            (_, Some(_)) => format!(
+                "{dir}: {} blind site(s), NOT covered: its declaration does not hold ({}); it stays Never",
+                list.len(),
+                problems.join("; ")
+            ),
+            (_, None) => format!(
+                "{dir}: {} blind site(s), NOT covered: no `[package.metadata.paddock] test-reads`; it stays Never",
+                list.len()
+            ),
+        };
+        text.push(head);
+        text.extend(list.iter().map(|s| format!("    {s}")));
+    }
+    // A declaration with a problem and no blind site of its own is a finding as well.
+    for (dir, d) in &w.world.test_reads {
+        if in_workspace(dir) && !all.contains_key(dir) && !d.problems().is_empty() {
+            text.push(format!(
+                "{dir}: its `test-reads` declaration does not hold ({}); it stays Never",
+                d.problems().join("; ")
+            ));
+        }
+    }
+    text.push(format!(
+        "test-cache: {sites} blind site(s) in {} crate(s) of `{workspace}`: {} covered by a declaration, {} not covered",
+        all.len(),
+        cov.covered.len(),
+        cov.open.len()
+    ));
+    Ok(Report::new(
+        serde_json::json!({"sites": sites, "crates": all.len(), "covered": cov.covered.len(), "open": cov.open.len()}),
+        text.join("\n"),
+    ))
+}
+
 /// The graph and the model of the tree, read once: a plan asks for several workspaces and runner classes.
 pub struct World {
     graph: crate::plan::RepoGraph,
@@ -145,6 +216,8 @@ pub fn candidates_in(root: &Path, w: &World, workspace: &str, os: &str) -> Resul
     };
     let nodes: Vec<String> = ts.iter().map(|t| t.node.clone()).collect();
     let hashes = crate::repo_model::hash::node_hashes(&crate::input_hash::Real, &ctx, root, world, &tree, &nodes)?;
+    let covered = super::cover_blind(blind_reads(&w.graph.cargo, world.model.blind()), &world.test_reads);
+    let blind = super::spread_blind(&world.model, &covered.open);
     ts.into_iter()
         .map(|t| {
             let h = hashes.get(&t.node).ok_or_else(|| {
@@ -153,10 +226,15 @@ pub fn candidates_in(root: &Path, w: &World, workspace: &str, os: &str) -> Resul
                     t.node, t.node
                 ))
             })?;
+            let blind_here = blind
+                .get(t.node.strip_prefix("crate:").unwrap_or(&t.node))
+                .cloned()
+                .unwrap_or_default();
             Ok(Candidate {
                 target: t,
                 node_hash: h.hash.clone(),
                 dirty: h.dirty,
+                blind: blind_here,
             })
         })
         .collect()
@@ -208,6 +286,7 @@ pub fn command(a: &TestCacheArgs) -> Result<Report, CliError> {
             None => audit(&local),
         }),
         "selfcheck" => selfcheck(shared.as_ref()),
+        "blind" => blind_sites(&root, &a.workspace),
         "plan" => plan(a, &root, store),
         "shadow-run" => shadow_run(a, &root),
         "lookup" | "run" | "forget" | "record" => {
@@ -230,7 +309,8 @@ pub fn command(a: &TestCacheArgs) -> Result<Report, CliError> {
             if a.action == "record" {
                 return record(a, &root, &cfg, &cands, store, &class);
             }
-            run(a, &root, &cfg, &cands, store, &class)
+            let ask = |asked: &[String], whole: bool, reused_any: bool| nextest(a, &root, &cfg, asked, whole, reused_any);
+            run_with(a, &root, &cfg, &cands, store, &class, &env_get, &trust_check(), &ask)
         }
         other => Err(fail(format!(
             "::error::ci test-cache: unknown action `{other}`. Next step: use `run`, `lookup` or `audit`."
@@ -254,32 +334,46 @@ fn audit(store: &FsStore) -> Report {
     )
 }
 
-fn run(
+/// One nextest run of the asked packages (every package when `whole`): its output and whether it succeeded. Real: [`nextest`].
+type NextestRun<'a> = &'a dyn Fn(&[String], bool, bool) -> Result<(String, bool), CliError>;
+
+/// `ci test-cache run` with the environment, the trust check and the nextest run given (the tests hand stand-ins).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn run_with(
     a: &TestCacheArgs,
     root: &Path,
     cfg: &Config,
     cands: &[Candidate],
     store: &dyn Store,
     class: &RunnerClass,
+    env: &dyn Fn(&str) -> Option<String>,
+    trust: &Trust,
+    nextest_run: NextestRun<'_>,
 ) -> Result<Report, CliError> {
     let started = std::time::Instant::now();
     let filter = filter_of(a);
     let mut text: Vec<String> = Vec::new();
-    // Whether this run may read at all, and what the lookup said.
     // Whether this run may read, and what the lookup said. A run that may not reuse still looks the records up for the write rule
     // ([`super::not_overwriting_trusted`]), so it seeds and refreshes records; only its reuse is off.
-    let looked = decide(cands, cfg, class, &filter, store, now(), &trust_check());
-    let (decisions, notice) = match read_allowed(&env_get) {
+    let looked = decide(cands, cfg, class, &filter, store, now(), trust);
+    let read = read_allowed(env);
+    let (decisions, notice) = match &read {
         Err(why) => (
             cands.iter().map(|_| Decision::Run(super::Why::Off(why.clone()))).collect(),
-            Some(why),
+            Some(why.clone()),
         ),
         Ok(()) => looked.clone(),
     };
     if let Some(n) = notice {
         text.push(format!("::notice::test-cache: reuse is off for this run: {n}. Every target runs."));
     }
-    let nightly = super::is_nightly(&env_get);
+    // A run that may not read still looked the store up: a store that is down is told too, not hidden behind the other cause.
+    if read.is_err()
+        && let Some(down) = &looked.1
+    {
+        text.push(format!("::notice::test-cache: the store could not be read either: {down}."));
+    }
+    let nightly = super::is_nightly(env);
     let skip = cfg.mode() == Mode::On || a.reuse;
     let mut reused = 0;
     let mut why_run: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
@@ -322,7 +416,7 @@ fn run(
     if !left.is_empty() {
         let asked: Vec<String> = left.iter().map(|c| c.target.package.clone()).collect();
         let t0 = std::time::Instant::now();
-        let out = nextest(a, root, cfg, &asked, left.len() == cands.len() && a.only.is_none(), reused > 0)?;
+        let out = nextest_run(&asked, left.len() == cands.len() && a.only.is_none(), reused > 0)?;
         ran_secs = t0.elapsed().as_secs_f64();
         let judged = super::result::judge(&out.0, &asked);
         // One rule with the CI record step (`shadow_outcome`): a finding is a matched target that ran and failed, never one the filter
@@ -342,7 +436,7 @@ fn run(
             text.push(format!("test-cache: not stored target={t} ({why})"));
         }
         let mut put: Vec<Record> = Vec::new();
-        let writes = write_allowed(&env_get);
+        let writes = write_allowed(env);
         for c in &left {
             match judged.outcome(&c.target.package) {
                 super::result::TestOutcome::Passed { tests } => {
@@ -355,7 +449,7 @@ fn run(
                             run: format!("local-{}", std::process::id()),
                             job: String::new(),
                             attempt: 0,
-                            git_ref: env_get("GITHUB_REF").unwrap_or_default(),
+                            git_ref: env("GITHUB_REF").unwrap_or_default(),
                             commit: git_text(root, &["rev-parse", "HEAD"]).unwrap_or_default().trim().to_string(),
                             tests,
                             secs: ran_secs,
@@ -385,7 +479,12 @@ fn run(
                 super::result::TestOutcome::Failed { .. } | super::result::TestOutcome::NotSeen { .. } => {}
             }
         }
-        if outcome.not_seen > 0 {
+        if let Some(why) = &judged.unreadable {
+            // Not "outside its filter": nothing of this run was judged, so nothing is known about any target (ER-33).
+            text.push(format!(
+                "test-cache: not measured: the run's output could not be read whole ({why}); nothing was judged, so nothing is stored"
+            ));
+        } else if outcome.not_seen > 0 {
             text.push(format!(
                 "test-cache: {} target(s) had no test in this run's output (outside its filter, or without tests): not stored",
                 outcome.not_seen
@@ -427,7 +526,6 @@ fn run(
     Ok(Report::new(data, text.join("\n")).with_exit(exit))
 }
 
-/// The runner's OS build as observed (`uname -sr`): reported in each record, never keyed (decision D5).
 /// The runner's OS build as observed (`uname -sr`): reported in each record, never keyed (decision D5).
 fn os_build() -> String {
     let mut cmd = paddock_proc::command("uname");
@@ -578,7 +676,7 @@ fn os_of(c: &RunnerClass) -> &'static str {
 }
 
 /// A record's reader-side check.
-type Trust = Box<dyn Fn(&Record) -> Result<(), super::trust::Distrust>>;
+pub(super) type Trust = Box<dyn Fn(&Record) -> Result<(), super::trust::Distrust>>;
 
 /// The reader-side trust check (§7): in CI every record's run is asked of the Gitea API; a local run reads its own store as is. With no
 /// token nothing can be verified: every record is undecided (never trusted, and never replaced).
