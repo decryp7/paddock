@@ -3,7 +3,7 @@
 
 use super::config::{Config, Mode, removed};
 use super::key::{KeyParts, RunnerClass, Target, key};
-use super::result::judge;
+use super::result::{Judged, TestOutcome, judge};
 use super::store::{FsStore, Lookup, Record, Store, StoreError};
 use super::*;
 use crate::job_outcome::JobOutcome;
@@ -214,8 +214,7 @@ fn clean_log() -> String {
 #[test]
 fn a_whole_clean_run_passes_its_package() {
     let j = judge(&clean_log(), &names(&["nxflaky"]));
-    assert!(j.passed.contains("nxflaky"), "{j:?}");
-    assert!(j.tests["nxflaky"] >= 1);
+    assert!(matches!(j.outcome("nxflaky"), TestOutcome::Passed { tests } if tests >= 1), "{j:?}");
 }
 
 #[test]
@@ -223,27 +222,27 @@ fn a_failed_or_retried_or_flaky_test_never_makes_a_pass() {
     // TRY 1 FAIL ... FLKY-FL (flaky-result = "fail"), and an always-failing test.
     for f in ["nextest-r1-fail.log", "nextest-r0-fail.log"] {
         let j = judge(&fixture(f), &names(&["nxflaky"]));
-        assert!(j.passed.is_empty(), "{f}: {j:?}");
-        assert_eq!(j.not_passed.len(), 1);
+        assert!(matches!(j.outcome("nxflaky"), TestOutcome::Failed { .. }), "{f}: {j:?}");
     }
     // A flaky test of a big run (run 8610): its package is not a pass, the others are.
     let log = fixture("nextest-run8610-crate-flaky-only.log");
     let f = crate::nextest_log::read(&log).unwrap();
     let flaky_pkg = super::result::package_of(&f.flaky.iter().next().expect("a flaky test in the fixture").0).to_string();
     let j = judge(&log, &names(&[&flaky_pkg, "paddock-diag"]));
-    assert!(!j.passed.contains(&flaky_pkg), "{flaky_pkg} was flaky");
+    assert!(matches!(j.outcome(&flaky_pkg), TestOutcome::Failed { .. }), "{flaky_pkg} was flaky");
 }
 
 #[test]
 fn a_run_cut_short_or_without_the_package_is_not_a_pass() {
     let log = clean_log();
     let cut: String = log.lines().filter(|l| !l.contains("Summary")).collect::<Vec<_>>().join("\n");
+    let not_seen = |j: Judged, p: &str| matches!(j.outcome(p), TestOutcome::NotSeen { .. });
     assert!(
-        judge(&cut, &names(&["nxflaky"])).passed.is_empty(),
+        not_seen(judge(&cut, &names(&["nxflaky"])), "nxflaky"),
         "no summary: crashed or stopped"
     );
-    assert!(judge(&log, &names(&["other"])).passed.is_empty(), "a package the log never ran");
-    assert!(judge("nothing here", &names(&["nxflaky"])).passed.is_empty());
+    assert!(not_seen(judge(&log, &names(&["other"])), "other"), "a package the log never ran");
+    assert!(not_seen(judge("nothing here", &names(&["nxflaky"])), "nxflaky"));
 }
 
 struct Down;
@@ -617,8 +616,10 @@ fn one_failing_binary_makes_its_whole_package_not_a_pass() {
     ]
     .join("\n");
     let j = judge(&log, &names(&["pk"]));
-    assert!(j.passed.is_empty(), "{j:?}");
-    assert!(j.not_passed[0].1.contains("failed"), "{j:?}");
+    assert!(
+        matches!(j.outcome("pk"), TestOutcome::Failed { why } if why.contains("failed")),
+        "{j:?}"
+    );
 }
 
 /// A test that failed once and passed on its retry (`TRY 1 FAIL` then `PASS`) is a flake, which `ran_binaries` alone catches: the
@@ -1069,13 +1070,50 @@ fn a_filtered_local_run_reports_matched_targets_it_never_ran_as_not_seen_never_a
     assert_eq!((out.shadow.matched, out.shadow.passed), (1, 1));
     assert_eq!(out.not_seen, 2, "b and c are not seen");
     assert_eq!(out.not_stored.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), vec!["rust:d"]);
-    // The nightly invalidates only what ran and failed: d, never b or c (not seen) or a (passed).
-    assert!(out.ran_and_failed("rust:d"));
-    assert!(!out.ran_and_failed("rust:a") && !out.ran_and_failed("rust:b") && !out.ran_and_failed("rust:c"));
     // A matched target that ran and failed is still the finding.
     let red = super::run_outcome(&[&a, &d], &[&a, &d], &judged);
     assert_eq!(red.shadow.findings, vec!["rust:d".to_string()]);
-    assert!(red.not_stored.is_empty() && red.not_seen == 0 && red.ran_and_failed("rust:d"));
+    assert!(red.not_stored.is_empty() && red.not_seen == 0);
+}
+
+/// User decision 106: one outcome type, matched by every reader. A log where `a` passed, `b` failed and `c` is not in it gives each
+/// reader each case, and not seen is never read as failed.
+#[test]
+fn every_reader_of_the_test_outcome_handles_passed_failed_and_not_seen() {
+    let (a, b, c) = (cand("a", "h"), cand("b", "h"), cand("c", "h"));
+    let log = [
+        "    Starting 2 tests across 2 binaries",
+        "        PASS [   0.010s] ( 1/2) a t::ok",
+        "        FAIL [   0.010s] ( 2/2) b t::broken",
+        "     Summary [   0.050s] 2 tests run: 1 passed, 1 failed, 0 skipped",
+        "        FAIL [   0.010s] ( 2/2) b t::broken",
+    ]
+    .join("\n");
+    let asked = names(&["a", "b", "c"]);
+    let judged = judge(&log, &asked);
+    assert!(matches!(judged.outcome("a"), TestOutcome::Passed { tests: 1 }));
+    assert!(matches!(judged.outcome("b"), TestOutcome::Failed { .. }));
+    assert!(matches!(judged.outcome("c"), TestOutcome::NotSeen { .. }));
+    assert!(matches!(judged.outcome("never-asked"), TestOutcome::NotSeen { .. }));
+    // The shadow summary: passed counts, failed is a finding, not seen is neither.
+    let s = shadow_outcome(&[&a, &b, &c], &judged);
+    assert_eq!((s.matched, s.passed, s.findings), (2, 1, vec!["rust:b".to_string()]));
+    // The run finding: failed without a record is not stored, not seen is counted apart.
+    let out = super::run_outcome(&[&a, &b, &c], &[&a], &judged);
+    assert_eq!(out.not_stored.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), vec!["rust:b"]);
+    assert_eq!((out.not_seen, out.shadow.findings.len()), (1, 0));
+    // The record: only the pass is stored.
+    let meta = RunMeta {
+        run: "1".into(),
+        job: String::new(),
+        attempt: 0,
+        git_ref: "refs/heads/main".into(),
+        commit: "c0ffee".into(),
+        at: NOW,
+        os_build: String::new(),
+    };
+    let recs = records_from_log(&log, &[a, b, c], &cfg(), &RunnerClass::here(), "", &meta);
+    assert_eq!(recs.iter().map(|r| r.target.as_str()).collect::<Vec<_>>(), vec!["rust:a"]);
 }
 
 #[test]
