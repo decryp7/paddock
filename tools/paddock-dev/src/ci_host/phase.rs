@@ -188,6 +188,7 @@ pub fn bounded_hung<T: Send + 'static>(
 
 /// A clock mark (ADR 0103, "Hang-point signal"; for tests): the phase's limit counts from the moment `file` appears, and until then the
 /// phase is bounded by `wait`. The port of `bounded.sh`'s `clock_mark` and `clock_wait`.
+#[derive(Clone, Copy)]
 pub struct ClockMark<'a> {
     /// The file the test's stand-in writes when it enters its hang (removed when the phase starts).
     pub file: &'a std::path::Path,
