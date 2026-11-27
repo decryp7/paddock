@@ -1714,16 +1714,13 @@ fn an_agent_of_the_file_on_disk_is_used_whatever_version_it_reports() {
 }
 
 #[test]
-#[allow(
-    clippy::disallowed_methods,
-    reason = "a test builds its scratch path from the OS temp folder and removes it"
-)]
 fn an_unreadable_agent_program_is_logged_once_per_reason_with_the_reason() {
     let _ = crate::logging::testlog::lines(); // installs the capture before anything is logged
     let marker = format!("unique-{}", std::process::id());
     let why = marker.clone();
     let no_program = super::ports::wanted_key_source("1.1.0", move || Err(format!("{why} is missing")));
-    let gone = std::env::temp_dir().join(format!("{marker}-gone"));
+    let scratch = paddock_testkit::canonical_tempdir();
+    let gone = scratch.join("gone");
     let g = gone.clone();
     let no_file = super::ports::wanted_key_source("1.1.0", move || Ok(g.clone()));
     for _ in 0..3 {
