@@ -1,7 +1,7 @@
 //! Controls of ADR 0116 §8 for the cache core: the key changes with each part it names, a flake is never a pass, a failing or unreachable
 //! store makes everything run, trust and the never-read list hold. Scratch folders only (ER-14).
 
-use super::config::{Config, Mode, removed};
+use super::config::{Config, Mode};
 use super::key::{KeyParts, RunnerClass, Target, key};
 use super::result::{Judged, TestOutcome, judge};
 use super::store::{FsStore, Lookup, Record, Store, StoreError};
@@ -181,20 +181,6 @@ fn a_config_with_no_green_run_is_in_shadow_and_two_distinct_green_runs_switch_it
     assert_eq!(on.mode(), Mode::On);
     assert!(Config::parse("epoch = 1\nbogus = 2\n").is_err(), "an unknown key is an error");
     assert!(Config::parse(&CFG.replace("max_age_hours = 48", "max_age_hours = 0")).is_err());
-}
-
-#[test]
-fn removing_a_never_cached_entry_is_found_and_adding_one_is_not() {
-    let with = |l: &str| CFG.replace("no_test_cache = []", &format!("no_test_cache = [{l}]"));
-    assert_eq!(
-        removed(&with("\"crate:a\", \"crate:b\""), &with("\"crate:a\"")).unwrap(),
-        vec!["crate:b".to_string()]
-    );
-    assert!(removed(&with("\"crate:a\""), &with("\"crate:a\", \"crate:b\"")).unwrap().is_empty());
-    assert!(
-        removed(&with("\"crate:a\""), "not toml [").is_err(),
-        "a broken file is never a pass"
-    );
 }
 
 fn names(v: &[&str]) -> Vec<String> {
@@ -397,8 +383,8 @@ fn an_unreachable_store_makes_everything_run() {
 /// Decision 113 (user, 2026-11-27): paddock-dev's whole-repository tests (tree_*, graph_*, live_*) read the whole tree, which its node
 /// key does not cover, so `docs/test-cache.toml` lists it in `no_test_cache` and it is never offered for reuse even when a record of
 /// the same key exists. The settings are the tests' copy with that entry: the shipped file's list is not asserted (see [`CFG`]), only
-/// that each of its crate entries names a real crate ([`the_shipped_file_parses_and_holds_its_invariants`]). Nothing runs
-/// `config::removed` against the merge base yet, so taking the entry out of the shipped file is not caught by a gate today.
+/// that each of its crate entries names a real crate ([`the_shipped_file_parses_and_holds_its_invariants`]). No check compares the
+/// list with the merge base (the removal guard ADR 0116 §3 names was never called and was deleted); a removal is the user's approval.
 #[test]
 fn a_never_cached_paddock_dev_is_not_offered_for_reuse_but_other_targets_still_are() {
     let (_d, s) = scratch();

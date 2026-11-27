@@ -13,8 +13,9 @@ max_age_hours = 48
 profile = "ci"
 
 # Targets that are never cached, by model node id (ADR 0116 §3, the `noTestCache` list). An entry makes CI stricter: adding one
-# needs no approval; removing one is a weakening and needs the user's approval in the change (ER-46 read in its own direction;
-# `test_cache::config::removed` compares this list with the merge base's).
+# needs no approval; removing one is a weakening and needs the user's approval in the change (ER-46 read in its own direction).
+# No check compares this list with the merge base: the guard ADR 0116 §3 names was never called and was deleted (train y,
+# 2026-11-27; amendment docs/adr/amendments/0116-no-test-cache-removal-guard-2026-11-27.md).
 #
 # crate:tools/paddock-dev (decision 113, user 2026-11-27): its whole-repository tests (tree_*, graph_*, live_*) read the whole tree,
 # and its node key (the crate's own inputs) does not cover that, so a pass of the same key proves nothing about them. It runs every
