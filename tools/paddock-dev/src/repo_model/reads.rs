@@ -491,6 +491,16 @@ impl<'ast> Visit<'ast> for Finder<'_> {
             && c.args.first().is_some_and(|a| !resolved(a) && !self.owned_expr(a))
         {
             self.blind("an `fs` read of a path that is not a resolved literal chain");
+        } else if let Expr::Path(p) = &*c.func
+            && is_fs_read(&p.path)
+            && let Some(rel) = c.args.first().and_then(lit_str)
+            && !rel.starts_with('/')
+            && !rel.contains(':')
+        {
+            // A relative literal is read from the folder the test starts in: the crate's own (cargo test), so the file is a read of
+            // the crate.
+            let crate_dir = self.crate_dir.to_string();
+            self.add(&crate_dir, &rel, How::ManifestDir);
         }
         syn::visit::visit_expr_call(self, c);
     }

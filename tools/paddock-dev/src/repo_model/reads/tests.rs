@@ -265,3 +265,13 @@ fn a_temp_folder_through_a_parameter_a_walk_out_a_rebinding_or_a_copy_source_is_
     let ok = "fn t() { let d = tempfile::tempdir().unwrap(); std::fs::copy(std::path::Path::new(env!(\"CARGO_MANIFEST_DIR\")).join(\"tests/f\"), d.path().join(\"f\")).unwrap(); }";
     assert!(blind(ok).is_empty(), "{:?}", blind(ok));
 }
+
+/// A relative literal path read with `fs` is read from the crate's folder: a read of the crate (cargo test starts there).
+#[test]
+fn an_fs_read_of_a_relative_literal_is_a_read_of_the_crate_folder() {
+    let src = r#"fn t() { let _ = std::fs::read_to_string("../../docs/x.toml"); let _ = std::fs::read("/abs/x"); }"#;
+    assert_eq!(
+        paths(rust_reads("crates/a/tests/it.rs", src, "crates/a")),
+        [("docs/x.toml".to_string(), How::ManifestDir)]
+    );
+}
