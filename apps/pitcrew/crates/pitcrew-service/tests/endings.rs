@@ -122,12 +122,9 @@ fn scenario(s: Scenario) -> Result<(Observed, Expect), &'static str> {
     ) {
         return Err("this scenario is not driven by the service rig; if it does not apply, declare it in [[not_applicable]]");
     }
-    let data = std::env::temp_dir().join(format!(
-        "pe-{}-{}",
-        std::process::id(),
-        Scenario::ALL.iter().position(|x| *x == s).unwrap_or(0)
-    ));
-    let _ = std::fs::remove_dir_all(&data);
+    // A short path: the service's Unix socket lives in this folder (the length limit of a socket path).
+    let scratch = paddock_testkit::canonical_tempdir();
+    let data = scratch.join("pe");
     std::fs::create_dir_all(&data).unwrap();
     std::fs::write(data.join("pitcrew.toml"), "schema_version = 1\n").unwrap();
     let gate = Arc::new(QueueGate::new(paddock_ipc::testing::endings::raw::READ_GUARD));
@@ -185,7 +182,6 @@ fn scenario(s: Scenario) -> Result<(Observed, Expect), &'static str> {
     if let Some(host) = host {
         host.stop();
     }
-    let _ = std::fs::remove_dir_all(&data);
     result
 }
 
@@ -212,8 +208,8 @@ fn the_act_gate_sees_a_client_that_wrote_nothing_and_one_that_wrote_its_hello() 
     use paddock_ipc::testing::endings::{conclude, Evidence, PreconditionVerdict};
     use std::io::Write;
     for writes_first in [false, true] {
-        let data = std::env::temp_dir().join(format!("pe-{}-gate-{writes_first}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&data);
+        let scratch = paddock_testkit::canonical_tempdir();
+        let data = scratch.join("pe");
         std::fs::create_dir_all(&data).unwrap();
         std::fs::write(data.join("pitcrew.toml"), "schema_version = 1\n").unwrap();
         let gate = Arc::new(QueueGate::new(Duration::from_millis(200)));
@@ -226,7 +222,6 @@ fn the_act_gate_sees_a_client_that_wrote_nothing_and_one_that_wrote_its_hello() 
         let evidence = gate.evidence(GUARD);
         drop(c);
         host.stop();
-        let _ = std::fs::remove_dir_all(&data);
         if writes_first {
             assert!(evidence.is_held(), "{evidence}");
             continue;

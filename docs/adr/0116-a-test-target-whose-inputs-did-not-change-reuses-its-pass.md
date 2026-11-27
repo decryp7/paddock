@@ -372,6 +372,46 @@ base ref, the day), so a `Class::Declared` would add a second key with no extra 
 one can review (ER-37, common practice: Bazel and ccache do it with sandboxes the build system owns). Not built. What remains open: adding
 `member-audits` to the whole-tree class of `reuse::class_of` for an exact-tree repeat (a one-line change in the gate owner's file).
 
+## Amendment 2026-11-27: the filter is part of the key, and trust is per job
+
+User decision 97 (2026-11-27). Two findings of the first shadow runs: the record step ran only where `test_filter` is empty, so the macOS
+and Windows host legs (which test only the code with OS-specific behaviour, a nextest filterset from `hostTests`) never recorded or
+reused; and trust was per whole run (§7: a record counted only if its run ended `success`), so one red or flaky job took the records of
+every passing job with it. Evidence head read: `origin/main` = `696f472f4`.
+
+**1. The key.** `test_cache::key::key` is still the one definition. It is a `digest` of, in this order: the cache name, the schema (now 2),
+the epoch, the runner class, the nextest profile, **the normalized filter**, the target id and the node hash. The filter is the nextest
+filterset the run was narrowed to, the leg's `test_filter` (a member run's reached packages ANDed with the host scope), with whitespace runs
+collapsed and the ends trimmed (`key::normalize_filter`, called by the plan side and the record side alike); empty for a whole-package run.
+`test_packages` (the `-p` list) is not in the key: it only chooses which packages run, and each runs whole under the filter. A record
+under filter `F` is a pass of the tests `F` selects, so it counts only for a lookup under the same `F`: a filtered pass never stands in
+for a whole-package run, a whole-package pass never for a filtered one, and another filter is a miss. The record also stores the filter
+(audit; the key is what decides).
+
+- Record side: `ci test-cache record --filter "$LEG_FILTER"`; the record step no longer requires an empty `test_filter`. A leg still
+  does not record when `matrix.filter` is set (a rerun's failed tests, a smoke or affected selection).
+- Plan side: the plan file is by runner class, then filter, then package. `ci test-cache plan` asks once per filter a leg of that class can
+  carry: the whole package, and the host scope's filter read through the planner's own leg builder (`plan_ci::workspace_legs`). `apply`
+  looks up each leg by its own normalized `test_filter`; a filter the plan was not asked about (a member run's own, ANDed in) has no entry,
+  so that leg runs everything. For a leg with a filter, the Tests step ANDs `test_cache_exclude` with it; the declared filter is never
+  changed, so the run's scope stays as declared.
+- Old records: the schema is bumped, so every schema-1 record is a miss (refused, not migrated: no backward compatibility before v1).
+  The epoch is not bumped; schema 1 records are simply never read.
+
+**2. Trust per job.** A record carries the job's display name (`crate (macos-latest)`, passed by the step from its matrix as
+`PADDOCK_JOB_NAME`; a test compares it with the job's own `name:`) and the run's attempt (`PADDOCK_RUN_ATTEMPT`). The reader asks the Gitea API
+for that attempt's jobs and counts the record when the run is on main or a `train/*` branch and **its own job ended `success`**; the run's
+other jobs do not matter. Fail closed: a record without a job or an attempt, a job the attempt does not have, two jobs of one name, a run
+or attempt the server does not know, or an unreadable answer is untrusted. The earlier "no job named, so the whole run must have
+succeeded" fallback is removed (it was the poisoning path). One API call per distinct run attempt.
+
+**3. Shadow accounting** is unchanged: `shadow-run` still requires a green `ci.yml` train run, sums the shadow lines of all record steps
+(host legs now print them too), and calls the run clean when findings are 0 and matched is above 0. A filtered target that matched a
+record and failed is a soundness finding like any other.
+
+Not measured: the added reuse on the host legs (no CI run has recorded under a filter yet); no number is quoted. Named costs: a few more
+bulk lookups per plan (one per class, workspace and filter), and no host-leg reuse in a member run whose own filter differs.
+
 ## Consequences
 
 - A change to shared CI configuration, docs or another app no longer reruns an app's unchanged tests; a change to a shared crate reruns

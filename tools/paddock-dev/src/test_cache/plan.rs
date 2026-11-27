@@ -7,14 +7,17 @@
 //!   step ANDs with its own filter; a leg with a `-p` package list (hostTests) loses the reused packages from it;
 //! - `test_filter` is never touched, so the plan's `whole` stays true (reuse narrows nothing the run declares: the reused targets are
 //!   covered by their exact-key pass, named in the declared scope's `reused` map and in the verdict);
-//! - a leg whose tests are narrowed by `test_filter` (a hostTests module filter or a member run's filter) is left alone: its run is
-//!   not a whole-package run, so a pass of the whole package cannot stand in for it;
+//! - a leg narrowed by `test_filter` (a hostTests module filter or a member run's filter) reuses only a pass recorded under that same
+//!   filter (the filter is part of the key, ADR 0116 amendment, user decision 97), so the plan is by runner class, then filter, then
+//!   package; a filter the plan was not asked about (a member run's own) has no entry, so its leg runs everything;
+//! - a leg whose package list a filter also narrows keeps the filter: only the packages left in the list run, under the same filter;
 //! - the Linux leg of the `crate` job runs no tests there (the coverage job runs them whole, decision D4), so it is left alone.
 //!
 //! A job is never switched off in phase 1: every leg also runs clippy (and fmt), which are phase 2 targets (decision D2). The declared
 //! scope's `reused` map ([`crate::run_scope::Declared::with_reused`]) holds the reused targets per leg, and `complete()` already counts
 //! a job as covered when it ran or was reused, so the day a leg's only work is cached it can be dropped here without touching the reader.
 
+use super::key::normalize_filter;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
@@ -30,12 +33,13 @@ pub fn class_of_runner(os: &str) -> &'static str {
     }
 }
 
-/// The packages each runner class may skip, with the note that names the pass each rests on: class, then package, then note
+/// The packages each runner class may skip under each filter, with the note that names the pass each rests on: class, then filter
+/// (normalized, [`super::key::normalize_filter`]; empty for a whole-package run), then package, then note
 /// (`rust:crates/a@Windows-X64 from run 8635`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReusePlan {
-    /// By runner class, then package name.
-    pub by_class: BTreeMap<String, BTreeMap<String, String>>,
+    /// By runner class, then filter, then package name.
+    pub by_class: BTreeMap<String, BTreeMap<String, BTreeMap<String, String>>>,
 }
 
 impl ReusePlan {
@@ -44,24 +48,31 @@ impl ReusePlan {
         json!(self.by_class)
     }
 
-    /// The plan out of the file's text; anything that is not a class-to-package-to-note map is an error, never "no reuse" read as a plan.
+    /// The plan out of the file's text; anything that is not a class-to-filter-to-package-to-note map is an error, never "no reuse" read as a plan.
     pub fn parse(text: &str) -> Result<ReusePlan, String> {
         let v: Value = serde_json::from_str(text).map_err(|e| format!("the test-cache plan is not JSON: {e}"))?;
         let classes = v.as_object().ok_or("the test-cache plan is not an object")?;
         let mut by_class = BTreeMap::new();
-        for (class, pk) in classes {
-            let pk = pk
+        for (class, filters) in classes {
+            let filters = filters
                 .as_object()
                 .ok_or_else(|| format!("the test-cache plan's {class} is not an object"))?;
-            let mut m = BTreeMap::new();
-            for (package, note) in pk {
-                let note = note
-                    .as_str()
-                    .filter(|n| !n.is_empty())
-                    .ok_or_else(|| format!("the test-cache plan's {class}/{package} has no note"))?;
-                m.insert(package.clone(), note.to_string());
+            let mut by_filter = BTreeMap::new();
+            for (filter, pk) in filters {
+                let pk = pk
+                    .as_object()
+                    .ok_or_else(|| format!("the test-cache plan's {class}/{filter:?} is not an object"))?;
+                let mut m = BTreeMap::new();
+                for (package, note) in pk {
+                    let note = note
+                        .as_str()
+                        .filter(|n| !n.is_empty())
+                        .ok_or_else(|| format!("the test-cache plan's {class}/{filter:?}/{package} has no note"))?;
+                    m.insert(package.clone(), note.to_string());
+                }
+                by_filter.insert(filter.clone(), m);
             }
-            by_class.insert(class.clone(), m);
+            by_class.insert(class.clone(), by_filter);
         }
         Ok(ReusePlan { by_class })
     }
@@ -92,11 +103,11 @@ pub fn apply(legs: Vec<Value>, job: &str, plan: &ReusePlan, linux_tests: bool) -
         .map(|mut leg| {
             let os = leg["os"].as_str().unwrap_or("").to_string();
             let class = class_of_runner(&os);
-            let narrowed = !leg["test_filter"].as_str().unwrap_or("").is_empty() || leg["test_skip"].as_str() == Some("true");
-            if narrowed || (class == "Linux-X64" && !linux_tests) {
+            if leg["test_skip"].as_str() == Some("true") || (class == "Linux-X64" && !linux_tests) {
                 return leg;
             }
-            let Some(skip) = plan.by_class.get(class).filter(|m| !m.is_empty()) else {
+            let filter = normalize_filter(leg["test_filter"].as_str().unwrap_or(""));
+            let Some(skip) = plan.by_class.get(class).and_then(|f| f.get(&filter)).filter(|m| !m.is_empty()) else {
                 return leg;
             };
             let packages: Vec<String> = leg["test_packages"]
@@ -108,6 +119,7 @@ pub fn apply(legs: Vec<Value>, job: &str, plan: &ReusePlan, linux_tests: bool) -
             let notes: Vec<String> = if packages.is_empty() {
                 // The whole workspace: leave the reused packages out by a filterset the step ANDs with its own.
                 let names: Vec<&String> = skip.keys().collect();
+                // The step ANDs this with the leg's `test_filter` when it has one.
                 leg["test_cache_exclude"] = json!(exclude(&names));
                 skip.values().cloned().collect()
             } else {

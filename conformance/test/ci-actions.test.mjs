@@ -1142,7 +1142,12 @@ test('hostTests (OS-scoped tests): a host leg builds and tests only its packages
   assert.match(ci, /host-packages: \$\{\{ matrix\.host_packages \}\}/, 'ci.yml hands the packages to app-gates');
   assert.match(ci, /host-filter: \$\{\{ matrix\.host_filter \}\}/, 'ci.yml hands the filterset to app-gates');
   assert.match(ci, /TEST_PACKAGES: \$\{\{ matrix\.test_packages \}\}/, 'the crate leg reads its packages from the plan');
-  assert.equal((ci.match(/TEST_FILTER: \$\{\{ matrix\.test_filter \}\}/g) ?? []).length, 2, 'the crate and paddock-dev legs read their filterset from the plan');
+  // ER-42: read through the workflow parser, not by counting text: the test step of each of the two jobs reads its filterset from the plan.
+  const ciWorkflow = loadWorkflow('ci.yml');
+  for (const id of ['crate', 'paddock-dev']) {
+    const testSteps = stepsOf(workflowJob(ciWorkflow, id)).filter((st) => st.env?.TEST_FILTER === '${{ matrix.test_filter }}');
+    assert.equal(testSteps.length, 1, `the ${id} leg reads its filterset from the plan, in one step`);
+  }
   assert.match(ci, /PLAN_FULL_OS: /, 'the plan knows when a run is a full every-OS run');
   assert.match(read(join(WORKFLOWS, 'nightly.yml')), /os_full: true/, 'the nightly asks for every package on every OS');
   assert.doesNotMatch(read(join(WORKFLOWS, 'ci.yml')), /tools-macos/, 'the VM tooling job is gone');

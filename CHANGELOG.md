@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### throttle: train priority by name (user decision 91, 2026-11-26)
+- `./dev check --pre-push` and `./dev gen check` take `--priority train` (`tools/paddock-dev/src/priority.rs`): the heavy steps run as
+  `throttle run --high`, so they take the next free slot before every normal waiter. `./dev merge check --gates` passes it to its member
+  gate and generator steps; the train flow prints it for `--member-gate` and `--set slow`. A normal waiter now says
+  `waiting behind train work: <name> (pid <pid>)`. AGENTS.md: agents no longer pause on load, the queue orders the work.
+
 ### `paddock-ci-config`: the CI job model (ADR 0123, WP-1)
 - New shared crate `crates/paddock-ci-config` (pure core, `publish = false`): `jobs::model` builds ci.yml's jobs, matrices, `needs` and
   the projects each job runs for from the workflow text; `jobs::render` evaluates a job's `name:` for one leg. `gates/yaml.rs`,

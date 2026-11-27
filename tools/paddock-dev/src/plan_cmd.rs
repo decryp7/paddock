@@ -735,12 +735,12 @@ fn graph_reach(
 }
 
 /// The contract that declares the `hostTests` of the shared crates.
-const CRATES_CONTRACT: &str = "crates/paddock.ci.json";
+pub(crate) const CRATES_CONTRACT: &str = "crates/paddock.ci.json";
 /// The contract that declares the `hostTests` of paddock-dev (a one-crate workspace: test-name prefixes).
-const PADDOCK_DEV_CONTRACT: &str = "tools/paddock-dev/paddock.ci.json";
+pub(crate) const PADDOCK_DEV_CONTRACT: &str = "tools/paddock-dev/paddock.ci.json";
 
 /// The `hostTests` of the contract at `path` (from the repository root); `None` when the file or the field is absent.
-fn read_host_tests(root: &Path, path: &str, derived: &crate::host_tests::Derived) -> Result<Option<HostTests>, String> {
+pub(crate) fn read_host_tests(root: &Path, path: &str, derived: &crate::host_tests::Derived) -> Result<Option<HostTests>, String> {
     let Ok(text) = std::fs::read_to_string(root.join(path)) else {
         return Ok(None);
     };

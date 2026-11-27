@@ -8,6 +8,11 @@ disallowed-methods = [
     # allow-invalid: a crate that does not depend on paddock-ipc cannot resolve the paths.
     { path = "paddock_ipc::link::server::LinkServer::refused", allow-invalid = true, reason = "a snapshot that can trail what the client saw: wait with LinkServer::wait_refused (ADR 0124), or justify the site with #[expect]" },
     { path = "paddock_ipc::link::server::LinkServer::peers", allow-invalid = true, reason = "a snapshot that can trail what the client saw: wait with LinkServer::wait_peers (ADR 0124), or justify the site with #[expect]" },
+    # User decision 98 (2026-11-27; CI runs 6603, 7448 and 9168): a parent pid is only a number and on Windows outlives its process, so the raw
+    # listing can hold the orphans of an earlier holder of the pid. ProcessSource::children keeps the children by identity (the tree walk's
+    # rule); only its own default body calls the raw one. Positive control: paddock-proc's `usage::tests::a_raw_listing_is_what_the_clippy_ban_catches`.
+    # allow-invalid: a crate that does not depend on paddock-proc cannot resolve the path.
+    { path = "paddock_proc::usage::ProcessSource::listed_children", allow-invalid = true, reason = "the raw listing can hold strangers under a reused parent pid: use ProcessSource::children, which keeps the children by identity (ADR 0033), or justify the site with #[expect]" },
     # Bulk-API redesign G3: every start is made by the one constructor, so a budget test's count (paddock_env::starts) sees it.
     { path = "std::process::Command::new", reason = "build it with paddock_env::command::command (paddock_proc::command), or attached_command for a child that shares this console: no console window on Windows, and counted for budget tests (paddock_env::starts)" },
     { path = "tokio::process::Command::new", allow-invalid = true, reason = "build a std Command with paddock_env::command::command and convert it (tokio::process::Command::from): counted for budget tests" },
