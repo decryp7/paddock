@@ -3865,8 +3865,12 @@ first and records the second (`ci fix-items`) is part of the queued green-main w
   - Train 2026-11-25-a's landing run ci.yml 8976 (plan job 48889) could not save the escape monitor's selection record:
     `::warning::the selection record of this plan was not saved (git push origin refs/paddock/plan-records/*:refs/paddock/plan-records/*:
     fatal: could not read Username for 'http://172.16.1.220:7400': No such device or address); the next nightly counts this commit as
-    not measured`. The plan job pushes the refs with no credentials over the http remote; likely fix: push with the job token, the way
-    checkout authenticates (to be fixed with the dispatch guards, train c).
+    not measured`. The plan job pushed the refs with no credentials over the http remote. A token for it was the wrong fix: train y's
+    push, with the token, was refused too ("User permission denied for writing"), because ci.yml is read-only by design
+    (`permissions: contents: read`; no job writes to the repository). **Resolved (user, 2026-11-27):** the record is an Actions artifact
+    `plan-record` of the plan job's own run (14 days), read by the nightly through the Actions API; the refs, the push and the prune are
+    deleted (ADR 0117 amendment `0117-plan-records-artifact-2026-11-27.md`). Class: a mechanism that needs a write path in a workflow
+    that is read-only on purpose; check that a new store fits the workflow's permissions before wiring it.
   - The same plan printed its `::notice::inactive:` glued to the end of that warning: `eprintln!` writes a line's text and its newline
     as two writes, and the runner merged the notice from standard output between them. Fixed in this train (`log_text::write_line`,
     one write per line, for the plan and the eleven `|l| eprintln!("{l}")` log closures). Still open: the other `eprintln!` calls with

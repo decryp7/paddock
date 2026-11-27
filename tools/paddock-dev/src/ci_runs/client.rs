@@ -171,6 +171,17 @@ fn is_not_found(e: &str) -> bool {
     e.contains("error: 404") || e.contains("HTTP 404")
 }
 
+/// One artifact of a run (`GET .../runs/<id>/artifacts`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactInfo {
+    /// The artifact's id (for [`Client::artifact_zip`]).
+    pub id: u64,
+    /// The name the upload step gave it.
+    pub name: String,
+    /// Whether the server's retention has removed it.
+    pub expired: bool,
+}
+
 /// The Gitea Actions API of one repository. The token travels in a header only (the [`Http`] contract).
 pub struct Client<'a> {
     http: &'a mut dyn Http,
@@ -256,6 +267,32 @@ impl<'a> Client<'a> {
                 .unwrap_or_default(),
             total: body["total_count"].as_u64().unwrap_or(0),
         })
+    }
+
+    /// The artifacts of a run named `name`; `Ok(None)` when the server has no such run (404).
+    pub fn run_artifacts(&mut self, run: u64, name: &str) -> Result<Option<Vec<ArtifactInfo>>, String> {
+        let url = format!("{}/runs/{run}/artifacts?name={}", self.api(), encode_path(name));
+        let body = self.retry(|c| c.http.get_json(&url, &c.token))?;
+        Ok(body.map(|b| {
+            b["artifacts"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .map(|x| ArtifactInfo {
+                            id: x["id"].as_u64().unwrap_or(0),
+                            name: x["name"].as_str().unwrap_or("").to_string(),
+                            expired: x["expired"].as_bool().unwrap_or(false),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        }))
+    }
+
+    /// The zip of an artifact, at most `max_bytes`; `Ok(None)` when the server has none (404, or an expired one).
+    pub fn artifact_zip(&mut self, id: u64, max_bytes: u64) -> Result<Option<Vec<u8>>, String> {
+        let url = format!("{}/artifacts/{id}/zip", self.api());
+        self.retry(|c| c.http.get_bytes(&url, &c.token, max_bytes))
     }
 
     /// The jobs of a run's last attempt with their times (up to four pages of 50); `None` when the server has no job list (404).

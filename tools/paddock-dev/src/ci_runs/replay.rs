@@ -247,6 +247,27 @@ const SHAPES: &[Shape] = &[
     },
 ];
 
+/// A recorded artifact reader shape: what the real server answered for a run's artifacts (the list, the redirect of the download, the
+/// zip), replayed through the escape monitor's store (`escape::artifact::ArtifactStore`, ADR 0117 amendment D13).
+struct ArtifactShape {
+    /// The folder below `tests/fixtures/runs`.
+    name: &'static str,
+    /// The run whose `plan-record` artifact is read.
+    run: u64,
+    /// The artifact's id in the recording.
+    artifact: u64,
+    /// Why: one line.
+    why: &'static str,
+}
+
+/// The artifact shapes. Add one when the reader of an Actions API endpoint other than runs and jobs changes.
+const ARTIFACT_SHAPES: &[ArtifactShape] = &[ArtifactShape {
+    name: "plan-record-artifact",
+    run: 9272,
+    artifact: 94252,
+    why: "Gitea 28.4, trial of fix/plan-records-artifact: the plan job's v4 upload is listed by the REST API and its zip download answers 302 to a signed /zip/raw URL (a v3 upload was not listed: docs/research/2026-11-ci-artifacts-v4.md)",
+}];
+
 fn dir_of(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/runs").join(name)
 }
@@ -382,13 +403,58 @@ fn every_recorded_folder_has_a_shape_and_every_shape_a_folder() {
         .map(|e| e.unwrap().file_name().into_string().unwrap())
         .collect();
     folders.sort();
-    let mut named: Vec<String> = SHAPES.iter().map(|s| s.name.to_string()).collect();
+    let mut named: Vec<String> = SHAPES
+        .iter()
+        .map(|s| s.name.to_string())
+        .chain(ARTIFACT_SHAPES.iter().map(|s| s.name.to_string()))
+        .collect();
     named.sort();
     named.dedup();
     assert_eq!(
         folders, named,
         "a recording with no row in SHAPES is never replayed; a row with no recording replays nothing"
     );
+}
+
+#[test]
+fn a_recorded_plan_record_artifact_is_read_back_through_the_store() {
+    use crate::escape::artifact::{ARTIFACT_NAME, ArtifactStore};
+    use crate::escape::{Load, Store};
+    for a in ARTIFACT_SHAPES {
+        let head = run_json(a.name, a.run)["head_sha"].as_str().unwrap().to_string();
+        let mut f = serve(a.name);
+        // The list the real server answered names the artifact the reader looks for, and it is not expired.
+        let list = client(&mut f).run_artifacts(a.run, ARTIFACT_NAME).unwrap().unwrap();
+        assert_eq!(
+            list.iter().map(|x| (x.id, x.name.as_str(), x.expired)).collect::<Vec<_>>(),
+            vec![(a.artifact, ARTIFACT_NAME, false)],
+            "{}: {}",
+            a.name,
+            a.why
+        );
+        // The download answered a redirect to the same artifact's /zip/raw (the recorder keeps the path, not the signature).
+        let redirect = std::fs::read_to_string(dir_of(a.name).join(format!("artifact-{}.redirect.txt", a.artifact))).unwrap();
+        assert_eq!(
+            redirect.trim(),
+            format!(
+                "https://gitea.invalid/api/v1/repos/example/paddock/actions/artifacts/{}/zip/raw",
+                a.artifact
+            ),
+            "{}: the redirect the real server sent",
+            a.name
+        );
+        // The store reads the real zip back to the record of that commit.
+        let store = ArtifactStore::new(client(&mut f));
+        match store.get(&head) {
+            Load::Ok(r) => {
+                assert_eq!(r.commit, head, "{}", a.name);
+                assert!(!r.selected.is_empty() && !r.reach.is_empty(), "{}: a record of a real plan", a.name);
+            }
+            other => panic!("{}: {other:?}", a.name),
+        }
+        // Control: a commit the server has no run for is Missing, never a record.
+        assert_eq!(store.get(&"0".repeat(40)), Load::Missing, "{}", a.name);
+    }
 }
 
 #[test]

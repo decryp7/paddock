@@ -466,6 +466,17 @@ pub trait Http {
         let _ = (url, token);
         Err("this reader fetches JSON only".into())
     }
+    /// Fetches `url` as bytes, at most `max_bytes` (an artifact's zip); errors are texts without the token.
+    fn get_bytes(&mut self, url: &str, token: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
+        let _ = (url, token, max_bytes);
+        Err("this reader fetches JSON only".into())
+    }
+    /// The `Location` a GET of `url` answers with, `None` for an answer that is no redirect (the recorder of an artifact download
+    /// keeps it); errors are texts without the token.
+    fn get_redirect(&mut self, url: &str, token: &str) -> Result<Option<String>, String> {
+        let _ = (url, token);
+        Err("this reader fetches JSON only".into())
+    }
     /// Sends `body` (or nothing) with `method` (`POST`, `PUT`, `PATCH`, `DELETE`) and returns the JSON answer (`null` for an
     /// empty one); errors are texts without the token. Only writers (`./dev pr`) use it.
     fn send_json(&mut self, method: &str, url: &str, token: &str, body: Option<&Value>) -> Result<Value, String> {
@@ -523,6 +534,9 @@ impl Probe for CiRunProbe<'_> {
     }
 }
 
+/// The `Accept` value of an artifact download, the one request that follows redirects.
+const ACCEPT_ZIP: &str = "application/zip";
+
 /// The real HTTP: `curl`, with the URL and the Authorization header on standard input (`-K -`) so the token is in no argument list.
 pub struct CurlHttp;
 
@@ -576,6 +590,10 @@ impl CurlHttp {
                 format!("header = \"Authorization: token {token}\"\n")
             };
             let _ = write!(stdin, "url = \"{url}\"\n{auth}header = \"Accept: {accept}\"\n");
+            // An artifact download answers 302 to a signed URL on the same server (Gitea 28.4): follow it, a few hops at most.
+            if accept == ACCEPT_ZIP {
+                let _ = writeln!(stdin, "location\nmax-redirs = 3");
+            }
             if method != "GET" {
                 let _ = writeln!(stdin, "request = \"{method}\"");
             }
@@ -618,6 +636,55 @@ impl Http for CurlHttp {
         // A job log is a few MB; 64 MiB bounds a runaway one.
         let body = CurlHttp::get(url, token, "text/plain", 64 << 20, 120)?;
         Ok(String::from_utf8_lossy(&body).into_owned())
+    }
+
+    fn get_bytes(&mut self, url: &str, token: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
+        CurlHttp::get(url, token, ACCEPT_ZIP, max_bytes, 120)
+    }
+
+    fn get_redirect(&mut self, url: &str, token: &str) -> Result<Option<String>, String> {
+        use std::process::Stdio;
+        if url.contains(['"', '\n', '\\']) || token.contains(['"', '\n', '\\']) {
+            return Err("the URL or the token has a character that cannot be sent".into());
+        }
+        // The same shape as `request`: the URL and the header on standard input, so the token is in no argument list.
+        let mut child = paddock_proc::command("curl")
+            .args([
+                "-q",
+                "-sS",
+                "--max-time",
+                "20",
+                "-o",
+                "/dev/null",
+                "-w",
+                "%{http_code} %{redirect_url}",
+                "-K",
+                "-",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("cannot start curl: {e}"))?;
+        if let Some(mut stdin) = child.stdin.take() {
+            let auth = if token.is_empty() {
+                String::new()
+            } else {
+                format!("header = \"Authorization: token {token}\"\n")
+            };
+            let _ = write!(stdin, "url = \"{url}\"\n{auth}");
+        }
+        let out = child.wait_with_output().map_err(|e| format!("curl failed: {e}"))?;
+        if !out.status.success() {
+            return Err(format!(
+                "curl exited with {}: {}",
+                out.status,
+                truncate(String::from_utf8_lossy(&out.stderr).trim(), 200)
+            ));
+        }
+        let text = String::from_utf8_lossy(&out.stdout).into_owned();
+        let (code, location) = text.split_once(' ').unwrap_or((text.as_str(), ""));
+        Ok((code.starts_with('3') && !location.is_empty()).then(|| location.to_string()))
     }
 
     fn send_json(&mut self, method: &str, url: &str, token: &str, body: Option<&Value>) -> Result<Value, String> {
@@ -1188,6 +1255,31 @@ mod tests {
             "{o:?}"
         );
         assert!(log.contains("has exited"), "{log}");
+    }
+
+    /// The v4 artifact download answers 302 to a signed URL (Gitea 28.4, trial run 9272): get_bytes follows it, and a JSON GET does not.
+    #[test]
+    fn get_bytes_follows_the_redirect_of_an_artifact_download() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut c, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 2048];
+                let n = c.read(&mut buf).unwrap();
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let reply = if req.starts_with("GET /zip ") {
+                    format!("HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{port}/raw\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                } else {
+                    "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nPK!".to_string()
+                };
+                c.write_all(reply.as_bytes()).unwrap();
+            }
+        });
+        let got = CurlHttp.get_bytes(&format!("http://127.0.0.1:{port}/zip"), "", 1024).unwrap();
+        assert_eq!(got, b"PK!");
+        server.join().unwrap();
     }
 
     #[test]

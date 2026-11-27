@@ -12,6 +12,7 @@ pub struct Fake {
     logs: HashMap<u64, Result<String, String>>,
     urls: Vec<String>,
     errors: HashMap<String, String>,
+    bytes: HashMap<String, Vec<u8>>,
 }
 
 impl Fake {
@@ -57,6 +58,14 @@ impl Fake {
                     &format!("https://gitea.invalid/api/v1/repos/{repo}/git/commits/{sha}"),
                     serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap(),
                 );
+            } else if let Some(id) = n.strip_prefix("artifacts-").and_then(|r| r.strip_suffix(".json")) {
+                // The list of a run's artifacts, served whether the reader asks for all or by name.
+                let body: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+                f.json(&format!("{api}/runs/{id}/artifacts"), body.clone());
+                f.json(&format!("{api}/runs/{id}/artifacts?name=plan-record"), body);
+            } else if let Some(id) = n.strip_prefix("artifact-").and_then(|r| r.strip_suffix(".zip.hex")) {
+                let zip = crate::ci_runs::record::unhex(&std::fs::read_to_string(&path).unwrap()).unwrap();
+                f.bytes.insert(format!("{api}/artifacts/{id}/zip"), zip);
             } else if let Some(id) = n.strip_prefix("log-").and_then(|r| r.strip_suffix(".txt")) {
                 f.log(id.parse().unwrap(), &std::fs::read_to_string(&path).unwrap());
             }
@@ -127,6 +136,17 @@ impl Http for Fake {
             .get(url)
             .cloned()
             .ok_or_else(|| format!("curl exited with 22: The requested URL returned error: 404 ({url})"))
+    }
+
+    fn get_bytes(&mut self, url: &str, token: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
+        assert!(!token.is_empty(), "the client must send its token");
+        self.urls.push(url.to_string());
+        let b = self
+            .bytes
+            .get(url)
+            .ok_or_else(|| format!("curl exited with 22: The requested URL returned error: 404 ({url})"))?;
+        assert!(b.len() as u64 <= max_bytes, "the client bounds an artifact download");
+        Ok(b.clone())
     }
 
     fn get_text(&mut self, url: &str, _token: &str) -> Result<String, String> {
