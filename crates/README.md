@@ -140,6 +140,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-ci-config` | the CI job model: ci.yml's jobs, matrices, `needs` and the projects each job runs for, built once from the workflow text (`jobs::model`, `jobs::render`); the one CI YAML reader (`yaml`) and expression evaluator (`expr`); a pure core with no file or process I/O (ADR 0123) | yes (`paddock-dev`); built |
 | `paddock-slots` | numbered slots over OS file locks the kernel releases when the holder dies, a holder protocol and a typed API: no stale reclaim, so no reclaim race (ADR 0022, the CI kit's job isolation) | yes (`paddock-dev ci slot`); built |
 | `paddock-throttle` | the throttle core: one heavy step at a time per machine; slots as kernel file locks, a FIFO queue, load rules, the priority lane, the CLEF troubleshooting log and per-run logs, and the stall detector; ports for clock, process table and load. The `throttle` program (`tools/throttle`) is the thin binary over it (user decision 77) | yes (`tools/throttle`; `paddock-shim` next); built, moved from the tool |
+| `paddock-shim` | interception and monitoring of heavy tools (cargo, npm, npx, node, playwright, ng) by the name a program is called as: the real tool further along PATH, a throttle slot, the same arguments, streams and exit code, an event stream with sinks (run log line, stall report); install of the links (user decision 77) | yes (`tools/throttle`, as `throttle shims install`); built |
 | `paddock-siblings` | hand-off between the family's apps: the apps and what each accepts (`docs/ecosystem.md`), a typed `Handoff` (open, import files, show an item), discovery of an installed sibling per OS, starting it detached with paths or a deep link, plain "not installed" and "needs update" answers, the receiving side's parsers (plan X45; from Pitcrew's `debrief_link.rs` and `handoff.rs`) | yes (Pitcrew, Dyno, Debrief, Spotter); built |
 | `paddock-names` | identifier search (rule 20): word segmentation, name normalisation (`Path` and `Text` styles), grouping of spellings, ranked and explained matching of parts, joins, separators, case, plurals, filler words, word order and typos, clarifying question on a true tie (plan X18; from Debrief `names/` and Dyno's counter search) | yes (Debrief, Dyno; Pitwall, Spotter, Pacenotes later); built |
 | `paddock-channels` | outbound notification channels: webhook, ntfy and e-mail (STARTTLS, TLS, none), secrets from `paddock-secrets` (scope `channel:<id>`), bounded payloads, retries with the family's back-off on an injected clock, test send before and after saving; ports `HttpPoster`/`MailSender` with real adapters and in-process fakes (plan X17) | yes (Pitcrew, Spotter; Dyno, Debrief later); built |
@@ -2130,6 +2131,26 @@ the same code. Library name `paddock_throttle`; modules as in the tool's README 
 `slotfile` the kernel locks, `gate` load, `runner` the run, `hang` and `waitfor` the stall and queue detectors, `log` and `capture` the
 logs, `cli` the argument parser). The binary and its real-process tests stay in `tools/throttle`; the crate's tests run on a fake
 clock, fake process table and fake load. No Tauri, no feature flags.
+
+## `paddock-shim` (user decision 77, 2026-11-26)
+
+`throttle` called as `cargo`, `npm`, `npx`, `node`, `playwright` or `ng` is that tool's shim, selected by the name it was called as
+(the rustup way). `throttle shims install <dir>` writes the links (Windows: copies) and never replaces a file it did not write; nothing
+installs them on a PATH by itself: put `<dir>` first on PATH to use them, or take it off to stop.
+
+- `resolve::find_real`: the first runnable file of that name on PATH that is not the shim (not its folder, not the same file).
+- `shim::run`: plain pass-through (`exec` on Unix) when `PADDOCK_SHIM=off`, when a `.paddock-shim-off` file is in the project folder
+  or above it up to the `.git` root, or when `THROTTLE_HELD` names a live holder (nested: no second slot, ER-43); otherwise it takes
+  a slot through `paddock_throttle::runner::admit` (normal priority, the train lane when `THROTTLE_PRIORITY=train`), runs the real
+  tool with inherited stdin, stdout and stderr and its exit code, and hands it `THROTTLE_HELD` and the thread share of its slot.
+  Where no slot can be taken (an unwritable lock folder) the tool still runs and the cause is logged.
+- `event`: the stream (`Started`, `Stalled`, `Ended`) and the `Sink` trait. Built now: `sinks::RunLogSink` (one line per run in
+  `<dev-targets>/runs/shim/<day>.log`: tool, project, start, duration, exit code, never the command line, ER-27; mirrored into
+  throttle's troubleshooting log) and `sinks::StallReport` (standard error plus the log). Output capture and Pitcrew are later sinks.
+- Stall detection is `paddock_throttle::hang::HangWatch`, observe-by-default: no CPU in the tool's process tree for
+  `PADDOCK_SHIM_STALL` seconds (default 600, 0 turns it off) is reported and logged, and the tool is ended only with
+  `PADDOCK_SHIM_STALL_ACTION=end`. The tool's streams are its own (not piped), so output cannot show life: CPU time alone is read.
+- The shim says nothing of its own on standard error unless the run waits for a slot.
 
 ## `paddock-repo-files`, `paddock-repo-graph` and `paddock-slots` (ADR 0022 R0)
 

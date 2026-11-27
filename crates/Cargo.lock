@@ -4769,6 +4769,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-shim"
+version = "0.1.0"
+dependencies = [
+ "paddock-env",
+ "paddock-proc",
+ "paddock-testkit",
+ "paddock-throttle",
+ "paddock-workspace-hack",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "paddock-siblings"
 version = "0.1.0"
 dependencies = [
