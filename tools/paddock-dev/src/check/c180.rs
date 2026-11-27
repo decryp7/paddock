@@ -494,7 +494,7 @@ mod tests {
 
     #[test]
     fn expressions_are_masked_to_words_of_the_same_length() {
-        assert_eq!(mask_expressions("a ${{ x }} b\nc ${{ y\n}} d"), "a XXXXXXXX b\nc XXXXXX\nXX d");
+        assert_eq!(mask_expressions("a ${{ x }} b\nc ${{ y\n}} d"), "a XXXXXXXX b\nc XXXXX\nXX d");
         assert_eq!(mask_expressions("open ${{ never"), "open ${{ never");
     }
 
