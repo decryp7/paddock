@@ -837,7 +837,7 @@
       "count": 2
     },
     {
-      "path": "tools/throttle/tests/it/priority.rs",
+      "path": "crates/paddock-throttle/tests/it/priority.rs",
       "site": "assert!(t.elapsed() < Duration::from_secs(20));",
       "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
     },

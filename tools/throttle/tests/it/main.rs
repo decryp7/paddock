@@ -1,15 +1,8 @@
-//! Integration tests of throttle. Every wait is bounded: the fake world never sleeps, and real processes run under a deadline.
+//! Integration tests of the `throttle` binary: real processes under a deadline, through the program's own command line.
+//! The core (the fake world: admission, slots, priority, logging) is tested in `crates/paddock-throttle/tests/it`.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
-mod admission;
 mod capture;
 mod filelock;
-mod helpers;
-mod logging;
 mod places;
-mod ported;
-mod priority;
 mod procutil;
-mod props;
 mod real;
-mod share;
-mod slots;

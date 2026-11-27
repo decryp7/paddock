@@ -58,6 +58,7 @@ members = [
     "paddock-testkit",
     "paddock-testkit-start",
     "paddock-testplan",
+    "paddock-throttle",
     "paddock-updater",
     "paddock-view",
     "paddock-watch",
@@ -138,6 +139,7 @@ paddock-startup = { path = "paddock-startup", version = "0.2.0", registry = "dec
 paddock-testkit = { path = "paddock-testkit", version = "0.1.0", registry = "decryp7" }
 paddock-testkit-start = { path = "paddock-testkit-start", version = "0.1.0", registry = "decryp7" }
 paddock-testplan = { path = "paddock-testplan", version = "0.1.0", registry = "decryp7" }
+paddock-throttle = { path = "paddock-throttle", version = "0.1.0", registry = "decryp7" }
 paddock-updater = { path = "paddock-updater", version = "0.2.0", registry = "decryp7" }
 paddock-view = { path = "paddock-view", version = "0.1.0", registry = "decryp7" }
 paddock-watch = { path = "paddock-watch", version = "0.1.0", registry = "decryp7" }

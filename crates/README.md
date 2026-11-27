@@ -139,6 +139,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-repo-graph` | the project graph: Cargo and npm projects and edges (Tauri `frontendDist`, tsconfig, angular.json, ESLint config references), file to project, the affected closure, lockfile differences and a `History` port; git and `cargo metadata` adapters behind features (ADR 0022 §6) | yes (`paddock-dev`; Pacenotes later); built |
 | `paddock-ci-config` | the CI job model: ci.yml's jobs, matrices, `needs` and the projects each job runs for, built once from the workflow text (`jobs::model`, `jobs::render`); the one CI YAML reader (`yaml`) and expression evaluator (`expr`); a pure core with no file or process I/O (ADR 0123) | yes (`paddock-dev`); built |
 | `paddock-slots` | numbered slots over OS file locks the kernel releases when the holder dies, a holder protocol and a typed API: no stale reclaim, so no reclaim race (ADR 0022, the CI kit's job isolation) | yes (`paddock-dev ci slot`); built |
+| `paddock-throttle` | the throttle core: one heavy step at a time per machine; slots as kernel file locks, a FIFO queue, load rules, the priority lane, the CLEF troubleshooting log and per-run logs, and the stall detector; ports for clock, process table and load. The `throttle` program (`tools/throttle`) is the thin binary over it (user decision 77) | yes (`tools/throttle`; `paddock-shim` next); built, moved from the tool |
 | `paddock-siblings` | hand-off between the family's apps: the apps and what each accepts (`docs/ecosystem.md`), a typed `Handoff` (open, import files, show an item), discovery of an installed sibling per OS, starting it detached with paths or a deep link, plain "not installed" and "needs update" answers, the receiving side's parsers (plan X45; from Pitcrew's `debrief_link.rs` and `handoff.rs`) | yes (Pitcrew, Dyno, Debrief, Spotter); built |
 | `paddock-names` | identifier search (rule 20): word segmentation, name normalisation (`Path` and `Text` styles), grouping of spellings, ranked and explained matching of parts, joins, separators, case, plurals, filler words, word order and typos, clarifying question on a true tie (plan X18; from Debrief `names/` and Dyno's counter search) | yes (Debrief, Dyno; Pitwall, Spotter, Pacenotes later); built |
 | `paddock-channels` | outbound notification channels: webhook, ntfy and e-mail (STARTTLS, TLS, none), secrets from `paddock-secrets` (scope `channel:<id>`), bounded payloads, retries with the family's back-off on an injected clock, test send before and after saving; ports `HttpPoster`/`MailSender` with real adapters and in-process fakes (plan X17) | yes (Pitcrew, Spotter; Dyno, Debrief later); built |
@@ -2121,6 +2122,14 @@ declared data are passed in; no file or process I/O), `publish = false`.
   for one leg.
 - Used by `paddock-dev` (`gates`, `repo_model`, `plan_ci`; `tests/it/job_model.rs` keeps the model equal to `plan_gitea::CI_JOBS`
   until ADR 0117 D12). WP-2 onward moves the run readers onto it.
+
+## `paddock-throttle` (user decision 77, 2026-11-26)
+
+The core of `throttle`, moved out of `tools/throttle` with every behaviour intact so that a second program can take a slot through
+the same code. Library name `paddock_throttle`; modules as in the tool's README (`lock` and `core` admission and the pure slot rule,
+`slotfile` the kernel locks, `gate` load, `runner` the run, `hang` and `waitfor` the stall and queue detectors, `log` and `capture` the
+logs, `cli` the argument parser). The binary and its real-process tests stay in `tools/throttle`; the crate's tests run on a fake
+clock, fake process table and fake load. No Tauri, no feature flags.
 
 ## `paddock-repo-files`, `paddock-repo-graph` and `paddock-slots` (ADR 0022 R0)
 
