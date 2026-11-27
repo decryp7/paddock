@@ -112,20 +112,13 @@ mod tests {
 
     const MARKED: &str = "__PITCREW_PATH_BEGIN__/plain/bin__PITCREW_PATH_END__";
 
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
-    fn tmp(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("pitcrew-it-loginenv-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
+    fn tmp() -> paddock_testkit::CanonicalTempDir {
+        paddock_testkit::canonical_tempdir()
     }
 
     #[test]
     fn the_shells_path_is_taken_and_its_noise_ignored() {
-        let d = tmp("ok");
+        let d = tmp();
         // Like a login shell: prints a banner, then the script's markers with its own PATH.
         let sh = fake(
             &d,
@@ -138,12 +131,11 @@ mod tests {
             ask_shell(&sh, Duration::from_secs(10)).unwrap(),
             "/home/u/.nvm/bin:/opt/homebrew/bin"
         );
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
     fn an_interactive_failure_falls_back_to_a_plain_login_shell() {
-        let d = tmp("flags");
+        let d = tmp();
         let sh = paddock_testkit::StandIn::new(&d, "fakesh")
             .answers(paddock_testkit::Actions::new().stdout(MARKED))
             .when(&paddock_testkit::Case::new().has_arg("-i"), paddock_testkit::Actions::new().exit(1))
@@ -152,12 +144,11 @@ mod tests {
             .program()
             .to_path_buf();
         assert_eq!(ask_shell(&sh, Duration::from_secs(10)).unwrap(), "/plain/bin");
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
     fn a_hanging_or_silent_or_missing_shell_gives_none() {
-        let d = tmp("bad");
+        let d = tmp();
         let hang = fake(&d, "hang", paddock_testkit::Actions::new().sleeps(Duration::from_secs(30)));
         let started = Instant::now();
         assert_eq!(ask_shell(&hang, Duration::from_millis(300)), None);
@@ -165,7 +156,6 @@ mod tests {
         let silent = fake(&d, "silent", paddock_testkit::Actions::new().stdout("hello"));
         assert_eq!(ask_shell(&silent, Duration::from_secs(10)), None);
         assert_eq!(ask_shell(&d.join("missing"), Duration::from_secs(1)), None);
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

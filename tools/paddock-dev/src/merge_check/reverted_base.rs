@@ -14,6 +14,7 @@
 //! branch, with the next step.
 
 use super::git::{Git, short};
+use super::trailers::{self, TRAILERS_FORMAT, merge_member};
 use super::{Merge, generator_step::Step};
 use paddock_cli::Exit;
 use serde_json::json;
@@ -91,52 +92,13 @@ fn live_reverts(edges: &[(String, String)]) -> Vec<(String, String)> {
     out
 }
 
-/// The branch a merge commit's subject names: `Merge branch 'x'`, `... merge x into train N`, `Merge x (hex) into trial of y`;
-/// a trailing `(hex)` is dropped; else the subject itself.
-pub(super) fn branch_of(subject: &str) -> String {
-    let subject = strip_hex_suffix(subject.trim());
-    if let Some(rest) = subject.split("Merge branch '").nth(1)
-        && let Some((name, _)) = rest.split_once('\'')
-    {
-        return name.to_string();
-    }
-    let named = subject
-        .split(": merge ")
-        .nth(1)
-        .or_else(|| subject.strip_prefix("Merge ").filter(|r| r.contains(" into ")));
-    match named {
-        Some(rest) => strip_hex_suffix(rest.split(" into ").next().unwrap_or(rest).trim()).to_string(),
-        None => subject.to_string(),
-    }
-}
-
-/// `name (abc1234)` becomes `name`; so does `name (abc1234, synced as sync/m/abc123456)`, the integrator's merge subject: the
-/// parenthesis opens with the member's commit and may go on after a comma.
-fn strip_hex_suffix(s: &str) -> &str {
-    if let Some(body) = s.strip_suffix(')')
-        && let Some((head, inside)) = body.rsplit_once(" (")
-    {
-        let hex = inside.split_once(',').map_or(inside, |(h, _)| h).trim();
-        if hex.len() >= 7 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
-            return head.trim_end();
-        }
-    }
-    s
-}
-
-/// The sync ref a merge subject names, `Merge <member> (<sha>, synced as sync/<member>/<short sha>) into <train>`: the text after
-/// `synced as ` up to the closing parenthesis. `None` when the subject names none.
-pub(super) fn synced_ref(subject: &str) -> Option<String> {
-    let rest = subject.split("synced as ").nth(1)?;
-    let name = rest.split([')', ' ', ',']).next()?.trim();
-    (!name.is_empty()).then(|| name.to_string())
-}
-
 /// One commit of `member..target`, newest first.
 struct Commit {
     sha: String,
     is_merge: bool,
     message: String,
+    /// The trailer block git read from the message ([`TRAILERS_FORMAT`]).
+    trailers: String,
 }
 
 /// A reverted merge the member holds.
@@ -175,8 +137,14 @@ fn by_subject(git: &Git, from: &str, subject: &str) -> Result<Option<String>, St
         .map(|(sha, _)| sha.to_string()))
 }
 
-fn subject_of(git: &Git, sha: &str) -> Result<String, String> {
-    git.text(&["show", "-s", "--format=%s", sha]).map(|s| s.trim().to_string())
+/// A commit's subject and the member its trailers (or, for a merge made by hand, its subject) name: one read, one reader
+/// ([`merge_member`]).
+fn subject_and_member(git: &Git, sha: &str) -> Result<(String, trailers::MergeMember), String> {
+    let out = git.text(&["show", "-s", &format!("--format=%s%x00{TRAILERS_FORMAT}"), sha])?;
+    let (subject, block) = out.split_once('\0').unwrap_or((out.as_str(), ""));
+    let subject = subject.trim().to_string();
+    let member = merge_member(&subject, block);
+    Ok((subject, member))
 }
 
 /// Whether `member` holds `merge` or any commit it brought in (the commits reachable from it and not from its first parent).
@@ -202,7 +170,12 @@ pub(super) fn live_for_member(git: &Git, target: &str, member: &str) -> Result<V
     let found = find(git, target, member)?;
     let mut out = Vec::new();
     for r in found.reverted.iter().rev() {
-        out.push((r.merge.clone(), r.revert.clone(), subject_of(git, &r.merge)?, r.branch.clone()));
+        out.push((
+            r.merge.clone(),
+            r.revert.clone(),
+            subject_and_member(git, &r.merge)?.0,
+            r.branch.clone(),
+        ));
     }
     Ok(out)
 }
@@ -211,16 +184,21 @@ fn find(git: &Git, target: &str, member: &str) -> Result<Found, String> {
     if git.is_shallow()? {
         return Err("this clone is shallow, so the history that shows a revert may be missing (run `git fetch --unshallow`)".into());
     }
-    let log = git.text(&["log", "--format=%H%x00%P%x00%B%x01", &format!("{member}..{target}")])?;
+    let log = git.text(&[
+        "log",
+        &format!("--format=%H%x00%P%x00{TRAILERS_FORMAT}%x00%B%x01"),
+        &format!("{member}..{target}"),
+    ])?;
     let commits: Vec<Commit> = log
         .split('\u{1}')
         .filter_map(|rec| {
-            let mut f = rec.trim_start().splitn(3, '\0');
-            let (sha, parents, body) = (f.next()?, f.next()?, f.next()?);
+            let mut f = rec.trim_start().splitn(4, '\0');
+            let (sha, parents, block, body) = (f.next()?, f.next()?, f.next()?, f.next()?);
             Some(Commit {
                 sha: sha.to_string(),
                 is_merge: parents.split_whitespace().count() > 1,
                 message: body.to_string(),
+                trailers: block.to_string(),
             })
         })
         .collect();
@@ -250,12 +228,12 @@ fn find(git: &Git, target: &str, member: &str) -> Result<Found, String> {
         if line.split_whitespace().count() < 3 {
             continue; // not a merge: nothing was brought in
         }
-        let branch = branch_of(&subject_of(git, &merge)?);
+        let branch = subject_and_member(git, &merge)?.1.branch;
         // A later merge of the same branch (newer than the revert, in member..target) re-landed it.
         let relanded = position.get(revert.as_str()).is_some_and(|&r| {
             commits[..r]
                 .iter()
-                .any(|c| c.is_merge && c.sha != merge && branch_of(c.message.lines().next().unwrap_or("")) == branch)
+                .any(|c| c.is_merge && c.sha != merge && merge_member(c.message.lines().next().unwrap_or(""), &c.trailers).branch == branch)
         });
         if relanded || !holds(git, &merge, member)? {
             continue;
@@ -400,29 +378,5 @@ mod tests {
             live_reverts(&[edge(r1, A), edge(r2, r1), edge(r3, r2)]),
             vec![edge(A, r1), edge(r2, r3)]
         );
-    }
-
-    #[test]
-    fn the_branch_is_named_from_the_merge_subject() {
-        assert_eq!(branch_of("Merge branch 'feat/x' into main"), "feat/x");
-        assert_eq!(branch_of("chore(train): merge feat/x into train 12"), "feat/x");
-        assert_eq!(branch_of("chore(train): merge feat/x (abc1234) into train 12"), "feat/x");
-        assert_eq!(branch_of("Merge feat/x (abc1234def) into trial of main"), "feat/x");
-        assert_eq!(branch_of("chore(train): merge feat/x (abc1234)"), "feat/x");
-        assert_eq!(
-            branch_of("Merge feat/x (d5b1ce0e4, synced as sync/feat/x/2ab388102) into train/2026-11-26-u"),
-            "feat/x"
-        );
-        assert_eq!(
-            branch_of("Merge feat/x (b6d3953b3, synced as sync/feat/x) into train/2026-11-26-t"),
-            "feat/x"
-        );
-        assert_eq!(
-            synced_ref("Merge feat/x (d5b1ce0e4, synced as sync/feat/x/2ab388102) into train/u").as_deref(),
-            Some("sync/feat/x/2ab388102")
-        );
-        assert_eq!(synced_ref("Merge branch 'feat/x'"), None);
-        assert_eq!(branch_of("something else"), "something else");
-        assert_eq!(branch_of("fix: a (note)"), "fix: a (note)");
     }
 }

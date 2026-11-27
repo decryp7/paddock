@@ -355,8 +355,12 @@ fn proportional(_pid: u32) -> Option<u64> {
 pub trait ProcessSource {
     /// What `pid` really uses (see [`process_memory`]); `None` when there is no such process.
     fn memory(&self, pid: u32) -> Option<u64>;
-    /// The direct children of `pid`.
-    fn children(&self, pid: u32) -> Vec<u32>;
+    /// The raw listing of the pids that name `pid` as their parent. Only a hint: a parent pid is just a number, and on Windows it
+    /// outlives its process, so the list can hold the orphans of an earlier holder of the pid (ADR 0033; CI runs 6603, 7448, 9168).
+    /// Implementors supply it; nobody calls it but [`ProcessSource::children`], which keeps the children by identity. A Clippy ban
+    /// (`crates/clippy.toml`) refuses any other call, and `a_raw_listing_is_what_the_clippy_ban_catches` is its positive control.
+    #[doc(hidden)]
+    fn listed_children(&self, pid: u32) -> Vec<u32>;
     /// When the process that holds `pid` now started; `None` when there is none (ADR 0033: a walk follows a parent link
     /// only to a child that started no earlier than its parent).
     fn started(&self, pid: u32) -> Option<StartTime>;
@@ -378,6 +382,30 @@ pub trait ProcessSource {
     /// process started after it was handed on since and is not the scanned child. `None` (the default) for a live listing.
     fn listed_by(&self) -> Option<StartTime> {
         None
+    }
+    /// The direct children of `parent`, by identity (ADR 0033): empty when the pid now names another process than `parent`; a listed
+    /// pid whose process is gone, started before `parent`, or started after the scan that listed it ([`ProcessSource::listed_by`])
+    /// is a stranger's and is left out. The one listing the tree walk and every caller use.
+    fn children(&self, parent: ProcessId) -> Vec<ProcessId> {
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the one filter over the raw listing: every other caller goes through children"
+        )]
+        let listed = self.listed_children(parent.pid());
+        // The listing is of whoever holds the pid now: if that is no longer `parent`, the children are a stranger's.
+        if self.started(parent.pid()) != Some(parent.started()) {
+            return Vec::new();
+        }
+        let listed_by = self.listed_by();
+        listed
+            .into_iter()
+            .filter_map(|kid| {
+                let started = self.started(kid).filter(|s| {
+                    follows(*s, parent.started()) && listed_by.is_none_or(|t| *s <= t)
+                })?;
+                Some(ProcessId::new(kid, started))
+            })
+            .collect()
     }
 }
 
@@ -447,7 +475,7 @@ impl ProcessSource for OsSource {
         proportional(pid).or_else(|| resident(pid))
     }
 
-    fn children(&self, pid: u32) -> Vec<u32> {
+    fn listed_children(&self, pid: u32) -> Vec<u32> {
         children_or_scan((self.list)(pid), || self.scan.children(pid, self.scan_with))
     }
 
@@ -546,30 +574,17 @@ fn tree_fold(
     let mut seen = std::collections::HashSet::from([root.pid()]);
     let mut frontier = vec![root];
     while let Some(p) = frontier.pop() {
-        let kids = source.children(p.pid());
-        // The listing is of whoever holds the pid now: if that is no longer `p`, the children are a stranger's.
-        if source.started(p.pid()) != Some(p.started()) {
-            continue;
-        }
-        for kid in kids {
+        for kid in source.children(p) {
             if seen.len() >= MAX_TREE {
                 return Some(total);
             }
-            if !seen.insert(kid) {
+            if !seen.insert(kid.pid()) {
                 continue;
             }
-            // A child that is gone, older than its parent, or younger than the scan that listed it counts nothing and is not
-            // walked.
-            let listed_by = source.listed_by();
-            let Some(started) = source
-                .started(kid)
-                .filter(|s| follows(*s, p.started()) && listed_by.is_none_or(|t| *s <= t))
-            else {
-                continue;
-            };
-            if let Some(m) = read(kid, started) {
+            // `children` left out a child that is gone, older than its parent, or younger than the scan that listed it.
+            if let Some(m) = read(kid.pid(), kid.started()) {
                 total = total.saturating_add(m);
-                frontier.push(ProcessId::new(kid, started));
+                frontier.push(kid);
             }
         }
     }
@@ -757,7 +772,7 @@ mod tests {
         fn memory(&self, pid: u32) -> Option<u64> {
             Some(u64::from(pid))
         }
-        fn children(&self, pid: u32) -> Vec<u32> {
+        fn listed_children(&self, pid: u32) -> Vec<u32> {
             match pid {
                 1 => vec![2],
                 2 => vec![3],
@@ -1133,7 +1148,7 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
             self.memory_reads.set(self.memory_reads.get() + 1);
             self.tree.get(&pid).map(|e| e.1)
         }
-        fn children(&self, pid: u32) -> Vec<u32> {
+        fn listed_children(&self, pid: u32) -> Vec<u32> {
             self.children_reads.set(self.children_reads.get() + 1);
             self.tree.get(&pid).map(|e| e.0.clone()).unwrap_or_default()
         }
@@ -1236,7 +1251,7 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
             fn memory(&self, pid: u32) -> Option<u64> {
                 (pid != 9).then_some(5)
             }
-            fn children(&self, _pid: u32) -> Vec<u32> {
+            fn listed_children(&self, _pid: u32) -> Vec<u32> {
                 vec![2]
             }
             fn started(&self, pid: u32) -> Option<StartTime> {
@@ -1272,7 +1287,7 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
             fn memory(&self, _pid: u32) -> Option<u64> {
                 Some(5)
             }
-            fn children(&self, pid: u32) -> Vec<u32> {
+            fn listed_children(&self, pid: u32) -> Vec<u32> {
                 if pid == 1 { vec![2, 3] } else { vec![] }
             }
             fn started(&self, pid: u32) -> Option<StartTime> {
@@ -1530,35 +1545,110 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
         assert_eq!(resident(u32::MAX - 1), None);
     }
 
+    /// Regression (run 9168): a listing under a reused parent pid holds the orphans of the earlier holder (older than the new
+    /// holder) and a child that has since ended; `children` keeps only the real child. Runs on every OS: the listing is a fake.
+    #[test]
+    fn a_listing_under_a_reused_parent_pid_keeps_only_the_children_that_started_after_it() {
+        struct Reused;
+        impl ProcessSource for Reused {
+            fn memory(&self, _pid: u32) -> Option<u64> {
+                None
+            }
+            fn listed_children(&self, pid: u32) -> Vec<u32> {
+                if pid == 1 { vec![2, 3, 4, 5] } else { vec![] }
+            }
+            fn started(&self, pid: u32) -> Option<StartTime> {
+                match pid {
+                    1 => Some(StartTime::from_micros(100)),
+                    2 => Some(StartTime::from_micros(200)),
+                    3 => Some(StartTime::from_micros(50)),
+                    5 => Some(StartTime::from_micros(100)),
+                    _ => None,
+                }
+            }
+            fn table(&self) -> Table {
+                Table::new()
+            }
+        }
+        let parent = ProcessId::new(1, StartTime::from_micros(100));
+        // 2 started after 1; 3 is an orphan of an earlier holder of the pid; 4 has ended; 5 started on the same tick (allowed).
+        let kids: Vec<u32> = Reused
+            .children(parent)
+            .into_iter()
+            .map(|k| k.pid())
+            .collect();
+        assert_eq!(kids, vec![2, 5]);
+        // A parent whose pid names another process now (another start time) has no children of its own.
+        let handed_on = ProcessId::new(1, StartTime::from_micros(99));
+        assert!(Reused.children(handed_on).is_empty());
+        assert!(
+            Reused
+                .children(ProcessId::new(9, StartTime::from_micros(1)))
+                .is_empty()
+        );
+    }
+
+    /// The raw listing's Clippy ban (`crates/clippy.toml`, user decision 98, 2026-11-27) is what makes `children` the only way in: this
+    /// call is the ban's positive control. If the ban is removed or stops resolving the path, the `#[expect]` is unfulfilled and
+    /// Clippy (`-D warnings`) fails.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "positive control: the raw listing the ban must catch"
+    )]
+    fn raw_listing(source: &dyn ProcessSource, pid: u32) -> Vec<u32> {
+        source.listed_children(pid)
+    }
+
+    #[test]
+    fn a_raw_listing_is_what_the_clippy_ban_catches() {
+        assert!(raw_listing(&OsSource::default(), u32::MAX - 1).is_empty());
+    }
+
     #[test]
     fn the_os_source_lists_the_children_of_one_pid_without_a_table() {
         use crate::testchild::{Mode, child};
         let me = std::process::id();
         let c = crate::Supervised::spawn(child(Mode::Sleep)).unwrap();
         let pid = c.id().unwrap();
-        assert!(OsSource::default().children(me).contains(&pid));
+        // The listing is by identity (ADR 0033), as the tree walk takes it. A fresh source for each call: on Windows one scans once.
+        let identity = |pid: u32| {
+            let started = OsSource::default().started(pid).expect("a live process");
+            ProcessId::new(pid, started)
+        };
+        assert!(
+            OsSource::default()
+                .children(identity(me))
+                .iter()
+                .any(|k| k.pid() == pid)
+        );
         #[cfg(not(windows))]
-        assert!(OsSource::default().children(pid).is_empty());
+        assert!(OsSource::default().children(identity(pid)).is_empty());
         // On Windows a CREATE_NO_WINDOW child owns conhost.exe hosts and nothing else (CI run 6603; run 7448 saw two of
-        // them at once), so what is asserted is the kind of every child, not how many there are.
+        // them at once), so what is asserted is the kind of every child, not how many there are. `children` keeps only what
+        // started no earlier than the child: a process whose parent ended is listed under whatever holds that pid now, here
+        // the orphan of an earlier test child (run 9168).
         #[cfg(windows)]
-        {
-            let kids = OsSource::default().children(pid);
-            for kid in kids {
-                let id = Pid::from_u32(kid);
-                let mut sys = System::new().expect("a System");
-                sys.refresh_processes_specifics(
-                    ProcessesToUpdate::Some(&[id]),
-                    true,
-                    ProcessRefreshKind::nothing(),
-                );
-                let name = sys
-                    .process(id)
-                    .map(|p| p.name().to_string_lossy().to_lowercase());
-                assert_eq!(name.as_deref(), Some("conhost.exe"), "pid {kid}");
+        for kid in OsSource::default().children(identity(pid)) {
+            // conformance: pid-liveness — a child `children` just kept by identity; a host that ended since is skipped below
+            let id = Pid::from_u32(kid.pid());
+            let mut sys = System::new().expect("a System");
+            sys.refresh_processes_specifics(
+                ProcessesToUpdate::Some(&[id]),
+                true,
+                ProcessRefreshKind::nothing(),
+            );
+            // A host that ended since the listing is no wrong kind of child: only a process that is still there is judged.
+            if let Some(p) = sys.process(id) {
+                let name = p.name().to_string_lossy().to_lowercase();
+                assert_eq!(name, "conhost.exe", "pid {} of {pid}", kid.pid());
             }
         }
-        assert!(OsSource::default().children(u32::MAX - 1).is_empty());
+        // A pid that names no process has no children.
+        assert!(
+            OsSource::default()
+                .children(ProcessId::new(u32::MAX - 1, StartTime::from_micros(0)))
+                .is_empty()
+        );
         assert!(tree_memory(me) >= process_memory(pid).unwrap());
     }
 
