@@ -331,7 +331,10 @@ mod tests {
     use super::*;
 
     const H1: &str = "1111111111111111111111111111111111111111";
+    // Only the Unix-only eviction tests below use these two.
+    #[cfg(unix)]
     const H2: &str = "2222222222222222222222222222222222222222";
+    #[cfg(unix)]
     const H3: &str = "3333333333333333333333333333333333333333";
 
     fn tool(dir: &Path, bytes: &[u8]) -> PathBuf {
@@ -414,6 +417,9 @@ mod tests {
         assert!(!store.join(H1).exists(), "a refused entry leaves nothing");
     }
 
+    // Unix only: the test ages a folder with `set_modified` through `File::open`'s handle, which has no write-attributes access, so
+    // Windows refuses it with Access denied (trial run 9230); the store itself runs on the Linux runners only (the module docs).
+    #[cfg(unix)]
     #[test]
     fn the_least_recently_used_entry_beyond_the_limit_is_evicted_and_the_new_one_never() {
         let t = tempfile::tempdir().unwrap();
@@ -436,6 +442,9 @@ mod tests {
         assert!(store.join(H1).exists() && store.join(H2).exists() && store.join(H3).exists());
     }
 
+    // Unix only: the test ages a folder with `set_modified` through `File::open`'s handle, which has no write-attributes access, so
+    // Windows refuses it with Access denied (trial run 9230); the store itself runs on the Linux runners only (the module docs).
+    #[cfg(unix)]
     #[test]
     fn the_byte_limit_evicts_too_but_keeps_the_new_entry_even_when_it_alone_is_over() {
         let t = tempfile::tempdir().unwrap();
@@ -458,6 +467,9 @@ mod tests {
         assert!(store.join(H2).exists());
     }
 
+    // Unix only: the test ages a folder with `set_modified` through `File::open`'s handle, which has no write-attributes access, so
+    // Windows refuses it with Access denied (trial run 9230); the store itself runs on the Linux runners only (the module docs).
+    #[cfg(unix)]
     #[test]
     fn only_hash_named_folders_and_the_commands_own_temp_names_are_ever_removed() {
         let t = tempfile::tempdir().unwrap();
