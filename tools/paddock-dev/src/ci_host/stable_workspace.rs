@@ -563,8 +563,9 @@ mod tests {
         Scene { dir, env }
     }
 
-    fn go(sc: &Scene, win: bool, fake: Arc<Fake>, limit: u64) -> (i32, String) {
-        // conformance: no-clock-mark - the operations are fakes: no program starts, so nothing is slow to start under load
+    /// The command over `ops`, with every phase bounded by the general limit until `mark_file` appears and by `limit` counted from
+    /// the mark (ADR 0103): the real work of an earlier phase (the slot's folder, made on disk) cannot meet a short limit under load.
+    fn run_in(sc: &Scene, win: bool, ops: Arc<dyn Ops>, mark_file: &Path, limit: u64) -> (i32, String) {
         let mut out = Vec::new();
         let code = run_with(
             &sc.env,
@@ -572,25 +573,7 @@ mod tests {
             &Args {
                 name: "decryp7/paddock-crate".into(),
             },
-            fake,
-            Duration::from_secs(limit),
-            None,
-            &mut out,
-        );
-        (code, String::from_utf8(out).unwrap())
-    }
-
-    /// [`go`] with a hang mark: the limit counts from the moment the fake enters its hang, and every phase before it is bounded by
-    /// the general limit, so the real work of the earlier phases (the slot's folder) cannot meet the short limit under load.
-    fn go_marked(sc: &Scene, fake: Arc<Fake>, mark_file: &Path, limit: u64) -> (i32, String) {
-        let mut out = Vec::new();
-        let code = run_with(
-            &sc.env,
-            false,
-            &Args {
-                name: "decryp7/paddock-crate".into(),
-            },
-            fake,
+            ops,
             Duration::from_secs(limit),
             Some(ClockMark {
                 file: mark_file,
@@ -599,6 +582,16 @@ mod tests {
             &mut out,
         );
         (code, String::from_utf8(out).unwrap())
+    }
+
+    /// A run in which nothing hangs: no mark is ever written, so each phase is bounded by the general limit.
+    fn go(sc: &Scene, win: bool, fake: Arc<Fake>, limit: u64) -> (i32, String) {
+        run_in(sc, win, fake, &sc.dir.path().join("no-hang-mark"), limit)
+    }
+
+    /// [`go`] for a fake that writes `mark_file` when it enters its hang: `limit` counts from that moment.
+    fn go_marked(sc: &Scene, fake: Arc<Fake>, mark_file: &Path, limit: u64) -> (i32, String) {
+        run_in(sc, false, fake, mark_file, limit)
     }
 
     fn written(sc: &Scene) -> String {
@@ -841,7 +834,6 @@ mod tests {
 
     #[test]
     fn a_clone_that_fetched_another_commit_than_the_checkouts_is_an_error_never_a_silent_wrong_tree() {
-        // conformance: no-clock-mark - the operations are fakes: no program starts, so nothing is slow to start under load
         struct Skewed(Fake);
         impl Ops for Skewed {
             fn is_symlink(&self, p: &Path) -> bool {
@@ -878,21 +870,11 @@ mod tests {
             }
         }
         let sc = scene("Windows");
-        let mut out = Vec::new();
         let ops: Arc<dyn Ops> = Arc::new(Skewed(Fake {
             rename_fails: true,
             ..Fake::default()
         }));
-        let code = run_with(
-            &sc.env,
-            true,
-            &Args { name: "n".into() },
-            ops,
-            Duration::from_secs(5),
-            None,
-            &mut out,
-        );
-        let out = String::from_utf8(out).unwrap();
+        let (code, out) = run_in(&sc, true, ops, &sc.dir.path().join("no-hang-mark"), 5);
         assert_eq!(code, 0);
         assert!(out.contains("nor clone it there (the clone fetched def456, not abc123)"), "{out}");
         assert!(written(&sc).is_empty());

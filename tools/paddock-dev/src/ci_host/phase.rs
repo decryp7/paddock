@@ -385,6 +385,8 @@ mod tests {
     /// `run_with`) and neither use a clock mark (`ClockMark`, `hang_flow(`, `hang_env(`) nor carry the exemption line
     /// `// conformance: no-clock-mark - <reason>`: such a test times its limit from the phase's start, so setup work before its hang
     /// (a stand-in git that is slow to start under load) can meet the limit. The class seen four times (ADR 0103, second amendment).
+    /// A function that calls `run_with` (every phase of a whole command: the slot's folder is made on disk for real, so "the operations
+    /// are fakes" never holds for all of them, CI runs 9237 and 9238) takes no exemption: it uses a clock mark.
     fn unmarked_phase_tests(text: &str) -> Vec<String> {
         let trigger = regex::Regex::new(concat!(r"\.pha", r"se\(|\bbound", r"ed(_hung|_marked)?\(|\brun_", r"with\(")).unwrap();
         let marked = regex::Regex::new(concat!(
@@ -395,6 +397,7 @@ mod tests {
             r"-mark - \S"
         ))
         .unwrap();
+        let real_mark = regex::Regex::new(concat!(r"Clock", r"Mark|hang_", r"flow\(|hang_", r"env\(")).unwrap();
         let Some((_, tests)) = text.split_once("mod tests {") else {
             return Vec::new();
         };
@@ -407,7 +410,13 @@ mod tests {
         for (i, (at, name)) in starts.iter().enumerate() {
             let end = starts.get(i + 1).map_or(tests.len(), |n| n.0);
             let body = &tests[*at..end];
-            if trigger.is_match(body) && !marked.is_match(body) {
+            let whole_command = body.contains(concat!("run_", "with("));
+            let uses_mark = if whole_command {
+                real_mark.is_match(body)
+            } else {
+                marked.is_match(body)
+            };
+            if trigger.is_match(body) && !uses_mark {
                 bad.push(name.clone());
             }
         }
@@ -429,6 +438,15 @@ mod tests {
         assert!(unmarked_phase_tests(&exempt).is_empty());
         let bare = plain.replace("flow.phase", "// conformance: no-clock-mark -\n        flow.phase");
         assert_eq!(unmarked_phase_tests(&bare), ["slow_git"], "an exemption names its reason");
+        // A whole command (`run_with`) takes no exemption, only a mark: the class of runs 9237 and 9238.
+        let whole = "mod tests {\n    fn whole() {\n        // conformance: no-clock-mark - fake operations, no program\n        run_with(a, b);\n    }\n}\n";
+        assert_eq!(
+            unmarked_phase_tests(whole),
+            ["whole"],
+            "an exemption does not cover a whole command"
+        );
+        let whole_marked = whole.replace("run_with(a, b)", "run_with(a, Some(ClockMark { file, wait }))");
+        assert!(unmarked_phase_tests(&whole_marked).is_empty());
     }
 
     /// The top-level functions of an integration test file that set a kept-clone phase limit (`PADDOCK_KEPT_CLONE_TIMEOUT...`) and use
