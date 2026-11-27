@@ -1253,7 +1253,7 @@ fn the_record_steps_carry_their_jobs_name_and_the_leg_filter_as_the_workflow_nam
 /// `cmd::run_with` (the lookup that guards the write rule, the outcome that sorts the targets, the notices), not only the helpers it
 /// calls (review of train x: the helpers were tested, `run` was not).
 mod run_wiring {
-    use super::super::cmd::{TestCacheArgs, run_with};
+    use super::super::cmd::{TestCacheArgs, Trust, run_with};
     use super::*;
     use clap::Parser;
 
@@ -1275,7 +1275,7 @@ mod run_wiring {
         let root = tempfile::tempdir().unwrap();
         let args = Wrap::try_parse_from(["x", "run"]).unwrap().args;
         let env = |k: &str| env.iter().find(|(n, _)| *n == k).map(|(_, v)| (*v).to_string());
-        let trust: Box<dyn Fn(&Record) -> Result<(), super::super::trust::Distrust>> = Box::new(|_| Ok(()));
+        let trust: Trust = Box::new(|_| Ok(()));
         let nextest = |_: &[String], _: bool, _: bool| Ok((log.to_string(), true));
         let class = RunnerClass::here();
         run_with(&args, root.path(), &cfg(), cands, store, &class, &env, &trust, &nextest)

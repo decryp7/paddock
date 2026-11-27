@@ -176,10 +176,10 @@ mod tests {
     /// static row ("does not exist"). Only the stand-in override (the tests') wins.
     #[test]
     fn the_rows_run_the_sync_tips_own_dev_unless_the_stand_in_is_set() {
-        let root = Path::new("/wt/member");
+        let root = Path::new("wt/member");
         assert_eq!(program_for_tip(root, None), root.join("dev"));
-        let stand_in = std::ffi::OsString::from("/x/rows");
-        assert_eq!(program_for_tip(root, Some(stand_in)), Path::new("/x/rows"));
+        let stand_in = std::ffi::OsString::from("x/rows");
+        assert_eq!(program_for_tip(root, Some(stand_in)), Path::new("x/rows"));
     }
 
     #[test]

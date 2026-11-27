@@ -597,7 +597,7 @@ fn os_of(c: &RunnerClass) -> &'static str {
 }
 
 /// A record's reader-side check.
-type Trust = Box<dyn Fn(&Record) -> Result<(), super::trust::Distrust>>;
+pub(super) type Trust = Box<dyn Fn(&Record) -> Result<(), super::trust::Distrust>>;
 
 /// The reader-side trust check (§7): in CI every record's run is asked of the Gitea API; a local run reads its own store as is. With no
 /// token nothing can be verified: every record is undecided (never trusted, and never replaced).
