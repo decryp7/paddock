@@ -108,8 +108,7 @@ fn run(program: &Path, args: &[&str]) -> (i32, String) {
 fn run_env(program: &Path, args: &[&str], env: &[(&str, &str)]) -> (i32, String) {
     static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let file =
-        std::env::temp_dir().join(format!("paddock-setup-out-{}-{n}.txt", std::process::id()));
+    let file = scratch_root().join(format!("out-{n}.txt"));
     let out = std::fs::File::create(&file).expect("output file");
     let status = paddock_proc::command(program)
         .args(args)
@@ -122,9 +121,21 @@ fn run_env(program: &Path, args: &[&str], env: &[(&str, &str)]) -> (i32, String)
     (status.code().unwrap_or(-1), text)
 }
 
+/// The one folder of this test process, made by the test kit with a random name (never a name another run shares): every
+/// scratch folder and output file of the process is below it. Each test removes what it made, so what stays when the process
+/// ends is this one empty folder: a `static` is never dropped and the plain test harness has no end-of-process hook, so a guard
+/// cannot remove it (these tests run only in the Windows test VM, which is reset between runs, ER-14).
+fn scratch_root() -> &'static Path {
+    static ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    ROOT.get_or_init(|| {
+        // The folder outlives the function by design: `keep` hands it to the process instead of removing it on drop.
+        paddock_testkit::tempdir().keep()
+    })
+}
+
 fn scratch(name: &str) -> PathBuf {
     gate();
-    let p = std::env::temp_dir().join(format!("paddock-setup-test-{}-{name}", std::process::id()));
+    let p = scratch_root().join(name);
     std::fs::create_dir_all(&p).unwrap();
     p
 }
