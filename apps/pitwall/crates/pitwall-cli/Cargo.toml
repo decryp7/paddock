@@ -43,3 +43,10 @@ tokio = { workspace = true, features = ["rt", "net", "time", "io-util", "macros"
 
 [lints]
 workspace = true
+
+[package.metadata.paddock]
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `src/discover.rs` and `src/logging.rs` read the user's data and log folders from `PITWALL_HOME`, `HOME` and `APPDATA`: machine
+# paths, no repository file.
+test-reads = []

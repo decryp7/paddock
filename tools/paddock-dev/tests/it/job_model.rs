@@ -71,3 +71,52 @@ fn the_inputs_file_declares_what_no_condition_shows() {
     assert_eq!(d.projects["plan"], ["everything"]);
     assert!(d.projects.contains_key("gitleaks") && d.projects.contains_key("test-cache-shadow") && d.projects.contains_key("quick"));
 }
+
+/// The probe that the check sees what it checks (ER-33): on the real tree it reads ci.yml's jobs and the action files, the model builds
+/// and the dev tool's restore is found in them, not in a hand list.
+#[test]
+fn the_check_reads_the_real_tree_and_finds_no_model_problem() {
+    let found = paddock_dev::ci_job_model::findings_at(&root()).unwrap();
+    let unreadable: Vec<_> = found
+        .iter()
+        .filter(|f| f.message.contains("does not model") || f.message.contains("cannot be read"))
+        .collect();
+    assert!(unreadable.is_empty(), "{unreadable:#?}");
+    let actions = std::fs::read_dir(root().join(".gitea/actions"))
+        .unwrap()
+        .filter_map(|e| {
+            let e = e.unwrap();
+            std::fs::read_to_string(e.path().join("action.yml"))
+                .ok()
+                .map(|t| (e.file_name().to_string_lossy().into_owned(), t))
+        })
+        .collect();
+    let derived = paddock_ci_config::jobs::tool_cache_actions(&actions).unwrap();
+    assert!(
+        derived.contains("dev-tool-cache") && derived.contains("setup-rust"),
+        "the actions that restore the dev tool are read from the action files: {derived:?}"
+    );
+}
+
+/// Removal tests (ER-33): the check runs in ci.yml's plan job and in the member gate, and a change that deletes either line fails here.
+#[test]
+fn the_plan_job_runs_the_check_on_every_run_and_the_member_gate_has_its_row() {
+    let ci = ci_text();
+    let doc = paddock_ci_config::yaml::parse(&ci).unwrap();
+    let plan = doc.get("jobs").unwrap().get("plan").unwrap();
+    let step = plan
+        .get("steps")
+        .unwrap()
+        .items()
+        .iter()
+        .find(|s| s.get_text("run").is_some_and(|r| r.trim() == "./dev ci job-model check"))
+        .expect("the plan job has a step that runs `./dev ci job-model check`");
+    assert!(
+        step.get("if").is_none(),
+        "the step runs on every event, whatever the change (ER-41)"
+    );
+    assert!(
+        paddock_dev::pre_push::gates::ROW_SET.contains(&"job-model"),
+        "the member gate's job-model row (pre_push/gates.rs)"
+    );
+}

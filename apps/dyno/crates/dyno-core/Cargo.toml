@@ -56,6 +56,8 @@ workspace = true
 # What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
 # repository root; `[]` says the blind reads touch no repository file.
 # `tests/wire/main.rs` reads the wire fixtures of the app's core folder.
+# Root rules (ADR 0116 §6), read site by site: also paths taken from the environment (`HOME`, `XDG_*`, `OUT_DIR`, `CARGO_*`, tool
+# and runtime folders, folders a test passes). None is a repository file outside the globs.
 test-reads = [
     "apps/dyno/app/src/app/core/*.wire.json",
 ]

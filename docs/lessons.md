@@ -3865,8 +3865,12 @@ first and records the second (`ci fix-items`) is part of the queued green-main w
   - Train 2026-11-25-a's landing run ci.yml 8976 (plan job 48889) could not save the escape monitor's selection record:
     `::warning::the selection record of this plan was not saved (git push origin refs/paddock/plan-records/*:refs/paddock/plan-records/*:
     fatal: could not read Username for 'http://172.16.1.220:7400': No such device or address); the next nightly counts this commit as
-    not measured`. The plan job pushes the refs with no credentials over the http remote; likely fix: push with the job token, the way
-    checkout authenticates (to be fixed with the dispatch guards, train c).
+    not measured`. The plan job pushed the refs with no credentials over the http remote. A token for it was the wrong fix: train y's
+    push, with the token, was refused too ("User permission denied for writing"), because ci.yml is read-only by design
+    (`permissions: contents: read`; no job writes to the repository). **Resolved (user, 2026-11-27):** the record is an Actions artifact
+    `plan-record` of the plan job's own run (14 days), read by the nightly through the Actions API; the refs, the push and the prune are
+    deleted (ADR 0117 amendment `0117-plan-records-artifact-2026-11-27.md`). Class: a mechanism that needs a write path in a workflow
+    that is read-only on purpose; check that a new store fits the workflow's permissions before wiring it.
   - The same plan printed its `::notice::inactive:` glued to the end of that warning: `eprintln!` writes a line's text and its newline
     as two writes, and the runner merged the notice from standard output between them. Fixed in this train (`log_text::write_line`,
     one write per line, for the plan and the eleven `|l| eprintln!("{l}")` log closures). Still open: the other `eprintln!` calls with
@@ -4517,6 +4521,14 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   limit-over-setup case impossible is proposed on `test/proc-identity-ban`: a Clippy ban on `ProcessId::of` in test code, a `wait_ended` that drops
   the handle first, and the existing `no-clock-mark` check extended to every phase. Open until it lands.
 
+## Per-member trials on a moving train cost more than they proved; one trial of the tip does (2026-11-27, docs/batched-member-trials, user decision)
+- **What happened.** On train y each member's own CI trial ran on a train that kept moving: the trials went red on other members' defects, proved
+  little about the member, and took about 30 minutes each. Train z (2026-11-27) merged 8 members in about 40 minutes with the fast static rows per
+  member and one trial of the train tip, against about 90 minutes for one-by-one trials.
+- **Rule 100 amended.** A member has its own trial on the train only when it has no green trial on main (a Linux trial with `--onto origin/main` on its
+  head, or on a head whose only differences are merges of main); with one it joins with `--no-trial "trial <run id> green on main"`. One trial of the tip
+  covers the rest; red means pull the member it points to (ER-8). The final full run and `landing-held` are unchanged (ER-49).
+
 ## Path-keyed registers follow a pure rename (2026-11-27, fix/registers-follow-renames, ER-21)
 - **What happened.** The crate move `tools/throttle/src` to `crates/paddock-throttle/src` (45ec96c97, bf651d875) re-registered entries in the C53 baseline
   and the C30 allow list by hand and re-placed a C171 waiver: the allow-list growth guard read a rewritten path as a new entry (needing the user, ER-46),
@@ -4529,3 +4541,35 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   the files' current paths, so a rewritten entry is not growth. C135 and C104 pass a `rekey`; C53's liveness baseline already followed a move by hash
   (`moved`, not growth). C171 reads `git diff -M`, and its waiver may sit above the statement that holds the literal. A moved file's changed content is
   judged as usual: a new offending line still fails, and a new entry is still growth.
+
+## A wait ended on a 401 its own token had not earned (2026-11-28, fix/ci-wait-token, ER-28)
+- **What happened.** On 2026-11-27/28 five `./dev wait --ci-run` waiters (runs 9284, 9285, 9286, 9320, 9321) ended after five failed looks with
+  `HTTP 401 invalid username, password or token`, while a fresh `curl` or `./dev ci trial-verdict` with the same `GITEA_TOKEN` worked.
+- **Causes ruled out (ER-28).** A temp config file removed by a reaper: the main-tree client sends the token on standard input (`-K -`), there is no file (the
+  `curl_config` writer on `fix/test-cache-windows-records` is for the S3 and download paths). A child that lost the environment: the token is read once and
+  held in the probe; a running waiter's environment held the same token as `~/.zshenv` (hash compared, never printed), unchanged since 2026-11-14. A lazy
+  or expiring secret: none exists. A per-wait-age timer: the failures end at the same wall-clock minutes for waiters that started at different times
+  (about 00:08 and 00:29), so the cause is not the age of the process. Reproduction: a 10-minute `./dev wait --ci-run` and 17 minutes of the same
+  request through `-K -` every 15 s stayed 200; the refusal did not recur, so it is a transient Gitea or proxy refusal (Gitea behind Caddy), not proven further.
+- **Fix.** `CiRunProbe` holds through a 401 that follows a good look in the same wait (up to 40 looks, 10 minutes at 15 s; the length of a real refusal is
+  not measured), writes one `::warning::` and one "answers again" line, and at the end prints one `::error::` naming the likely causes and the check to run.
+  A 401 on the first look is a wrong token and ends as before.
+- **Shared layer (same branch, coordinator's step, ER-22).** The hold also lives in the one HTTP layer: `CurlHttp` is now `Retrying<CurlOnce>`, so every
+  READ caller (ci_runs client, trial-verdict, verdict, load, the artifact reader) holds and retries a 401 or 5xx with backoff (2, 4, 8, 16, then 30 s,
+  at most 5 minutes in total) for a 401 once the process has had a good answer (a 5xx or a network failure, curl exit 6, 7, 28, 52 or 56, is retried on the first call too: the 2026-11-27 18:00 outage was connect timeouts), with one `::warning::`, one recovery line and one final error naming the causes.
+  Writes (`send_json`, `post_json`: a dispatch, PUT, DELETE) are never retried, because a retried dispatch could start two runs; a test pins it. A 401 before
+  any good answer stays a wrong token. `wait --ci-run` uses `CurlOnce` and keeps its own probe-level hold, which respects `--max` and the clock.
+  `ci_runs::client::Client` lost its own 4-attempt retry and its `backoff_ms` (one mechanism, ER-22): a read through it is retried by the layer's schedule
+  only, once. A first-call blip (before any good answer) is no longer retried at all; the layer holds only after a good answer.
+
+## A curl config reads backslashes in quotes as escapes (2026-11-27, fix/test-cache-windows-records, run 9265)
+- **What happened.** The Windows crate leg recorded 0 of 61 packages in a green train run: its store lookup failed (no `test-cache shadow:` line, which
+  every other leg printed), so every record counted as "no definite answer" and was held back. The record step wrote the scratch paths
+  (`D:\a\_temp\...`) into the curl config in double quotes; curl reads `\\ \" \t \n \r \v` there as escapes and drops a backslash before any other
+  letter (curl `-K` format), so it wrote the answers to other files and the call failed. Linux and macOS paths have no backslash, and
+  paddock-dev (never cached) asks no lookup, so nothing had shown it. The failed lookup printed no cause.
+- **Fix.** One writer, `curl_config::line`, escapes every value paddock-dev writes into a curl config (the test-cache store, `CurlHttp`, the
+  throttle download token), per the `-K` rules of the curl manual; a test per caller proves it uses the writer, a real curl run proves the read-back on
+  a name with `\t\r`; the record step prints a `::warning::` with the cause when its lookup fails (ER-27, ER-44); the crate job runs
+  `ci test-cache selfcheck --shared` on every leg before it records (ER-33). Not covered: the shell and Node scripts that write a config
+  (`conformance/ci/dev-tool-publish.sh`, a token with no backslash or quote) are not Rust and still write their own line.

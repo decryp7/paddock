@@ -47,6 +47,13 @@ export function parseAllow(text) {
       if (typeof e[k] !== 'string' || e[k].trim() === '') throw new Error(`entry ${i + 1} has no ${k}`);
     }
     if (!/^GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}$/.test(e.id)) throw new Error(`entry ${i + 1}: ${e.id} is not a GHSA id`);
+    // The one judge of an approver word is the paddock-approvals crate (user decision 125); this is its copy, and the shared fixtures
+    // (npm-audit-fixtures.json) make both answer alike. A new exception grows a shrink-only list (ER-46): the user approves it.
+    const by = e.approvedBy.trim();
+    if (by !== 'user') {
+      const why = by === 'coordinator' ? 'but this needs the user' : 'must be "coordinator" or "user"';
+      throw new Error(`entry ${i + 1} (${e.id}): approvedBy = ${JSON.stringify(by)} ${why}`);
+    }
     const [from, to] = [dayNumber(e.approved), dayNumber(e.reviewBy)];
     if (Number.isNaN(from) || Number.isNaN(to)) throw new Error(`entry ${i + 1} (${e.id}): days are YYYY-MM-DD`);
     if (to <= from) throw new Error(`entry ${i + 1} (${e.id}): the review day is not after the approval day`);

@@ -2232,6 +2232,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-approvals"
+version = "0.1.0"
+dependencies = [
+ "paddock-workspace-hack",
+ "sha2",
+ "toml 0.9.12+spec-1.1.0",
+]
+
+[[package]]
 name = "paddock-ci-config"
 version = "0.1.0"
 dependencies = [
@@ -2254,17 +2263,18 @@ dependencies = [
 name = "paddock-dev"
 version = "0.1.0"
 dependencies = [
- "base64",
  "clap",
  "ctrlc",
  "jiff",
  "libc",
+ "miniz_oxide",
  "oxc_allocator",
  "oxc_ast",
  "oxc_ast_visit",
  "oxc_parser",
  "oxc_resolver",
  "oxc_span",
+ "paddock-approvals",
  "paddock-ci-config",
  "paddock-cli",
  "paddock-env",
@@ -2285,7 +2295,7 @@ dependencies = [
  "signal-hook",
  "syn 2.0.119",
  "tempfile",
- "toml",
+ "toml 1.2.0+spec-1.1.0",
  "tree-sitter",
  "tree-sitter-bash",
  "tree-sitter-yaml",
@@ -2487,7 +2497,7 @@ dependencies = [
  "thiserror",
  "time",
  "time-macros",
- "toml_datetime",
+ "toml_datetime 1.1.2+spec-1.1.0",
  "toml_parser",
  "tracing",
  "tracing-core",
@@ -2498,7 +2508,7 @@ dependencies = [
  "windows-core",
  "windows-sys 0.60.2",
  "windows-sys 0.61.2",
- "winnow",
+ "winnow 1.0.4",
  "zlib-rs",
 ]
 
@@ -3218,15 +3228,39 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "toml"
+version = "0.9.12+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf92845e79fc2e2def6a5d828f0801e29a2f8acc037becc5ab08595c7d5e9863"
+dependencies = [
+ "indexmap",
+ "serde_core",
+ "serde_spanned",
+ "toml_datetime 0.7.5+spec-1.1.0",
+ "toml_parser",
+ "toml_writer",
+ "winnow 0.7.15",
+]
+
+[[package]]
+name = "toml"
 version = "1.2.0+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5ffcdf8f50436dbbfd675c1fe1b8e0854f42b7defea8584bdebe1aee900e561"
 dependencies = [
  "serde_core",
  "serde_spanned",
- "toml_datetime",
+ "toml_datetime 1.1.2+spec-1.1.0",
  "toml_parser",
- "winnow",
+ "winnow 1.0.4",
+]
+
+[[package]]
+name = "toml_datetime"
+version = "0.7.5+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92e1cfed4a3038bc5a127e35a2d360f145e1f4b971b551a2ba5fd7aedf7e1347"
+dependencies = [
+ "serde_core",
 ]
 
 [[package]]
@@ -3244,8 +3278,14 @@ version = "1.1.5+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baa693a8032d7e1cada7d0041e96126df243179ff061456783ac7f12bda4744c"
 dependencies = [
- "winnow",
+ "winnow 1.0.4",
 ]
+
+[[package]]
+name = "toml_writer"
+version = "1.2.0+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "009dbb7700f11c55ef83aebbe4c0e9cf1f1ac0844bd8d6f00dc38f302026e13a"
 
 [[package]]
 name = "tracing"
@@ -3796,6 +3836,12 @@ name = "windows_x86_64_msvc"
 version = "0.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
+
+[[package]]
+name = "winnow"
+version = "0.7.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
 
 [[package]]
 name = "winnow"

@@ -52,10 +52,6 @@
         "reason": "called by host-runner production code (ci_run, ci_setup_rust) inside a folder that is otherwise dev-Mac only, so it is tested on every host (docs/research/2026-11-22-os-scoped-tests.md section 1)"
       },
       {
-        "name": "pre_push::heavy_tool::",
-        "reason": "called by host-runner production code (ci_run, ci_setup_rust) inside a folder that is otherwise dev-Mac only, so it is tested on every host (docs/research/2026-11-22-os-scoped-tests.md section 1)"
-      },
-      {
         "name": "pre_push::stacks::",
         "reason": "called by host-runner production code (ci_run, ci_setup_rust) inside a folder that is otherwise dev-Mac only, so it is tested on every host (docs/research/2026-11-22-os-scoped-tests.md section 1)"
       },

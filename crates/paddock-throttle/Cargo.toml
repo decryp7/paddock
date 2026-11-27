@@ -31,3 +31,10 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage
 paddock-testkit = { workspace = true }
 tempfile = "3"
 proptest = "1"
+
+[package.metadata.paddock]
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `src/guard.rs` `config_target_dirs` walks the ancestors of a folder it is given for `.cargo` configs; its one test
+# (`tests/it/ported.rs`) passes a folder inside its own temp rig: no repository file.
+test-reads = []
