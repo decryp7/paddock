@@ -348,3 +348,87 @@ fn a_slot_given_back_keeps_the_place_of_the_ticket() {
     assert_eq!(second.poll(), Poll::Waiting, "A's ticket kept its age, B is second");
     assert_eq!(first.poll(), Poll::Held, "A is first again");
 }
+
+// Train priority (user decision 91, 2026-11-26): a train or integrator step runs `throttle run --high`. While one waits for a slot it takes
+// the next free slot before every normal waiter, and a new normal step queues behind it. A waiting high-priority run is a marker (its
+// process's identity, like a ticket): a run that is killed leaves it, and the next poll of any waiter removes it.
+
+#[test]
+fn a_waiting_high_priority_run_takes_the_next_free_slot_before_a_normal_waiter_and_normal_goes_after() {
+    let rig = Rig::new();
+    let (n, h) = (rig.agent(12), rig.agent(13));
+    rig.procs.run(31, rig.now() - 50);
+    let holder = rig.plant_holder(&format!("31\nx\nholder\n{}\n/work\nsleep 9\n", rig.now()));
+    // The normal waiter came first and holds the head ticket.
+    let mut normal = Acquirer::new(&n.h, req("N")).unwrap();
+    assert_eq!(normal.poll(), Poll::Waiting);
+    let mut train = Acquirer::new(&h.h, req_high("T")).unwrap();
+    assert_eq!(train.poll(), Poll::Waiting, "the slot is held");
+    drop(holder);
+    assert_eq!(
+        normal.poll(),
+        Poll::Waiting,
+        "the free slot is not taken by a normal waiter while train work waits"
+    );
+    assert_eq!(train.poll(), Poll::Held, "train work takes the next free slot");
+    assert_eq!(normal.poll(), Poll::Waiting, "and normal work stays behind it while it runs");
+    train.release();
+    assert_eq!(
+        normal.poll(),
+        Poll::Held,
+        "once no train work remains, normal work proceeds (no starvation)"
+    );
+}
+
+#[test]
+fn a_normal_step_that_arrives_while_train_work_waits_queues_behind_it() {
+    let rig = Rig::new();
+    let (n, h) = (rig.agent(12), rig.agent(13));
+    rig.procs.run(31, rig.now() - 50);
+    let holder = rig.plant_holder(&format!("31\nx\nholder\n{}\n/work\nsleep 9\n", rig.now()));
+    let mut train = Acquirer::new(&h.h, req_high("T")).unwrap();
+    assert_eq!(train.poll(), Poll::Waiting);
+    drop(holder);
+    let mut late = Acquirer::new(&n.h, req("N")).unwrap();
+    assert_eq!(late.poll(), Poll::Waiting, "a slot is free, but train work was waiting first");
+    assert_eq!(train.poll(), Poll::Held);
+}
+
+#[test]
+fn a_killed_train_waiter_frees_the_queue() {
+    let rig = Rig::new();
+    let (n, h) = (rig.agent(12), rig.agent(13));
+    rig.procs.run(31, rig.now() - 50);
+    let _holder = rig.plant_holder(&format!("31\nx\nholder\n{}\n/work\nsleep 9\n", rig.now()));
+    let mut train = Acquirer::new(&h.h, req_high("T")).unwrap();
+    assert_eq!(train.poll(), Poll::Waiting);
+    let mut normal = Acquirer::new(&n.h, req("N")).unwrap();
+    assert_eq!(rig.poll_said(&mut normal), Poll::Waiting);
+    assert!(n.said().contains("waiting behind train work: T"), "{}", n.said());
+    // SIGKILL: the process is gone and ran no cleanup, so its marker is still in the folder.
+    std::mem::forget(train);
+    rig.procs.end(13);
+    assert_eq!(rig.count("pitcrew-heavy.high."), 1);
+    drop(_holder);
+    assert_eq!(normal.poll(), Poll::Held, "a dead train waiter blocks nobody");
+    assert_eq!(rig.count("pitcrew-heavy.high."), 0, "its marker is removed and said");
+}
+
+#[test]
+fn the_wait_line_names_the_train_work_it_waits_behind() {
+    let rig = Rig::new();
+    let (n, h) = (rig.agent(12), rig.agent(13));
+    rig.procs.run(31, rig.now() - 50);
+    let _holder = rig.plant_holder(&format!("31\nx\nholder\n{}\n/work\nsleep 9\n", rig.now()));
+    let mut train = Acquirer::new(&h.h, req_high("merge-check")).unwrap();
+    assert_eq!(train.poll(), Poll::Waiting);
+    let mut normal = Acquirer::new(&n.h, req("N")).unwrap();
+    assert_eq!(rig.poll_said(&mut normal), Poll::Waiting);
+    let said = n.said();
+    assert!(said.contains("waiting behind train work: merge-check (pid 13)"), "{said}");
+    assert!(
+        rig.activity_log().contains("waiting behind train work: merge-check"),
+        "{}",
+        rig.activity_log()
+    );
+}

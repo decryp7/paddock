@@ -156,6 +156,33 @@ slightly different moments, so they can disagree by one poll: the count can pass
 back costs the younger one that interval. Running steps are never stopped when the load rises. The wait line says what the rule saw: `1 running, 1 of at most 5 at
 once (14 cores, 15-minute load 15.0, CPU idle 80%)`. `THROTTLE_CPUS` replaces the OS's core count (tests, a machine whose cores the OS misreports).
 
+## Train priority (user decision 91, 2026-11-26)
+
+Train and integrator work goes before everything else in the queue, so nobody has to pause their own work for it. The mechanism is the
+`--high` flag that was already there (ADR 0102), now asked for by name from `./dev`: `--priority train` (`tools/paddock-dev/src/priority.rs`),
+which becomes `throttle run --high` for the step. One explicit switch, no environment variable.
+
+- **Who asks.** A push to a `train/*` branch, `main` or a release tag; `./dev merge check --gates` (its member gate and generator steps);
+  and an integrator's own `./dev check --pre-push --member-gate --priority train [--set slow]` and `./dev gen check --priority train`
+  (the train flow printed by `./dev` carries the flag). Everyone else runs their heavy steps through `./dev` as before and waits in order.
+- **What it does.** A `--high` run has no ticket: it writes a marker (`pitcrew-heavy.high.<pid>-<name>`, 3 lines: pid, its start time, when) and
+  polls. A normal waiter reads the markers before it looks at a slot (`Acquirer::poll`), so while a train step waits or runs, the next
+  free slot is the train step's and a normal step that arrives queues behind it. Normal runs, quick-lane rows included, do not take a free slot
+  past a live marker. A normal step that already holds a slot keeps it and is never stopped.
+- **No starvation.** Once no train marker remains, the normal waiters go on in their FIFO order. A marker counts at most `THROTTLE_PRIORITY_MAX`
+  (1800 s) and a waiter that has itself waited that long stops yielding to markers; a marker's own wait is bounded by `--queue-max` and
+  `--queue-stall`. A container run's drain marker still beats a train step (above).
+- **Crash safety.** The marker names its owner by pid plus start time, the same identity the tickets use: a train waiter killed with SIGKILL
+  leaves the file, and the next poll of any waiter finds that process gone, removes the marker (logged: `removed the stale high-priority marker`)
+  and goes on. Nothing blocks on a dead train step for longer than a poll interval. A kernel lock on the marker would say the same thing
+  and cost a second mechanism: the slots need the lock because they must be exact, a marker only has to go when its owner does.
+- **Why it waited.** A normal waiter says `waiting behind train work: <name> (pid <pid>)` (a CI job's marker says `CI job`) in its wait line, the
+  activity log and the CLEF log (`throttle.wait`, `Reason` `high-priority`, `Marker`).
+
+Common practice: build farms and CI schedulers (Buildkite and GitHub Actions queue priorities, Bazel remote-execution priorities, `nice` for
+CPU) rank queued work and run the higher rank first without pre-empting what runs; this is the same, with the bound that keeps lower rank
+from waiting for good. Measured on the machine with two shells: docs/benchmarks.md, "Train priority in throttle".
+
 ## Wait-for cycles
 
 The queue knows who waits for whom (`waitfor.rs`): a ticket behind the head waits for the head; the head, and a high-priority run, wait

@@ -49,6 +49,14 @@ pub const BREAKS_LOG: &str = "pitcrew-lock-breaks.log";
 pub const ACTIVITY_LOG: &str = "pitcrew-lock-activity.log";
 /// Ticket file name prefix.
 pub const TICKET_PREFIX: &str = "pitcrew-heavy.ticket.";
+/// The wait line for a high marker `<pid>-<name>`: who the waiter is behind, in words a person can act on ("waiting behind train work:
+/// merge-check (pid 4121)"; a CI job's marker says CI job).
+fn marker_wait_text(suffix: &str) -> String {
+    let (pid, name) = suffix.split_once('-').unwrap_or(("?", suffix));
+    let what = if record::is_ci_marker(suffix) { "CI job" } else { "train work" };
+    format!("waiting behind {what}: {name} (pid {pid})")
+}
+
 /// High marker file name prefix.
 pub const HIGH_PREFIX: &str = "pitcrew-heavy.high.";
 /// Drain marker file name prefix: a container run that has waited long for the machine to be free of other steps.
@@ -1083,7 +1091,7 @@ impl<'a> Acquirer<'a> {
                 if let Some(hm) = counts {
                     self.wait_for(
                         "high",
-                        &format!("a high-priority run goes first ({hm})"),
+                        &marker_wait_text(&hm),
                         &[("Reason", json!("high-priority")), ("Marker", json!(hm))],
                     );
                     return Poll::Waiting;

@@ -67,7 +67,7 @@ pub struct Real;
 
 impl Gates for Real {
     fn run(&self, root: &Path, base: &str) -> Result<GateRun, String> {
-        run_pre_push(root, base, &["--member-gate"])
+        run_pre_push(root, base, &["--member-gate", "--priority", "train"])
     }
 }
 

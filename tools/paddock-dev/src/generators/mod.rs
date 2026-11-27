@@ -42,6 +42,8 @@ pub struct CheckArgs {
     pub files: Vec<String>,
     /// The revision the change is measured against (its merge base with HEAD).
     pub base: String,
+    /// Who the heavy generator builds are for ([`crate::priority`]).
+    pub priority: crate::priority::Priority,
 }
 
 /// Reads and validates the registry of the repository at `root`.
@@ -233,9 +235,16 @@ pub fn command(a: &CheckArgs) -> Result<Report, CliError> {
             reg.generators.iter().map(|g| g.id.clone()).collect()
         })
     };
-    check_with_due(&reg, &root, &changed, &graph_due, a.all, &a.only, &run::Real::new(&root), &|l| {
-        crate::log_text::eline(l)
-    })
+    check_with_due(
+        &reg,
+        &root,
+        &changed,
+        &graph_due,
+        a.all,
+        &a.only,
+        &run::Real::new(&root).with_priority(a.priority),
+        &|l| crate::log_text::eline(l),
+    )
 }
 
 /// The paths changed in the working tree since the merge base of `base` and HEAD (committed, staged, unstaged and new files).

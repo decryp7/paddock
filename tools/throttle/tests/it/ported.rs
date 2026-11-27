@@ -258,7 +258,7 @@ fn a_live_high_marker_makes_a_normal_run_wait_until_that_process_is_gone() {
         assert_eq!(acq.poll(), Poll::Waiting);
         rig.clock.advance(std::time::Duration::from_secs(1));
     }
-    assert!(n.said().contains("high-priority"));
+    assert!(n.said().contains("behind train work: real"), "{}", n.said());
     rig.procs.end(72);
     assert_eq!(acq.poll(), Poll::Held);
 }

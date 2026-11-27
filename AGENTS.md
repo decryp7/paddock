@@ -134,6 +134,13 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   read the log instead of re-running. `--stall S` ends a command that wrote nothing and used no CPU for `S` seconds (exit 81); it is
   off by default, and a value is a hang detector set from a measured quiet gap with a wide margin, never a speed limit (ER-12;
   tools/throttle/README.md, "The run log and the hang detector").
+- **The queue orders the work; you do not pause for load (user decision 91, 2026-11-26).** Run every heavy step through `./dev`
+  (it goes through throttle) and let it wait: throttle admits by load and memory, queues first come first served, and lets train and
+  integrator work go first. Do not hold a step back by hand because the load looks high, and do not poll `uptime` before a build; a step
+  that waits says why (`waiting behind train work: <who>`) and ends at its `--queue-max`. Only the coordinator's `./dev load` decides
+  whether to *start another agent*. Integrators mark train steps with `--priority train` (`./dev check --pre-push --member-gate
+  --priority train [--set slow]`, `./dev gen check --priority train`; `./dev merge check --gates` passes it itself): the step goes before
+  normal waiters (tools/throttle/README.md, "Train priority").
 - **E2E and screenshots run on fresh code (guidance; a binding rule is proposed).** A running dev server is reused only with `PW_REUSE_SERVER=1`; default ports derive from the worktree path (`e2ePort` in `@decryp7/paddock-e2e`); a config that consumes `ui/dist` or the css fails at load with "rebuild ui: npm run build -w ui" when they were built from older sources (`build-guard.ts`, content stamps; lessons.md). New Playwright configs use these.
 - **Git fixtures (rule 102).** A test that needs a git repository builds it once per machine with `paddock_testkit::git_fixture::template` and copies it per test with `copy_tree`; a fixture builder with six or more `git` starts per test is a C174 finding (report-only).
 - **A reader change adds or updates a replay shape (user decision 96, 2026-11-26).** A change to the CI verdict, reuse, green, fix-items or
