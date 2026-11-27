@@ -2157,7 +2157,10 @@ fn a_cold_self_build_in_a_ci_job_compiles_through_the_kept_local_sccache() {
         ["--stop-server", "--start-server", "--show-stats", "--stop-server"],
         "a stale server is stopped, ours runs for this build, and ends with it"
     );
-    assert!(said.contains("compile cache") && said.contains("312 hits") && said.contains("1 misses"), "{said}");
+    assert!(
+        said.contains("compile cache") && said.contains("312 hits") && said.contains("1 misses"),
+        "{said}"
+    );
 }
 
 /// The wrapper's hash does not know about the compile cache: the same inputs name the same tool with or without it (the dev-tool
@@ -2202,7 +2205,10 @@ fn an_explicit_wrapper_and_every_release_or_missing_volume_case_leave_the_build_
             .find(|(k, _)| *k == "RUSTC_WRAPPER")
             .map_or("unset".to_string(), |(_, v)| v.clone());
         assert!(cargo.contains(&format!("wrapper={want} ")), "{what}: {cargo}");
-        assert!(cargo.contains("jobs=3") && !cargo.contains("-j 3"), "{what}: the job count stays in the environment: {cargo}");
+        assert!(
+            cargo.contains("jobs=3") && !cargo.contains("-j 3"),
+            "{what}: the job count stays in the environment: {cargo}"
+        );
         assert_eq!(sccache, "", "{what}: sccache was not started");
         assert!(!said.contains("compile cache"), "{what}: {said}");
     }
