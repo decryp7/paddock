@@ -7,6 +7,9 @@
 #   dev-tool-cache.sh verify <hit> <matched-key>   runs the tool (./dev rebuilds a binary that does not run or is not for its hash), checks that
 #                                         it reports the expected hash, and says what happened (outputs: state hit|miss|rejected, save)
 #   dev-tool-cache.sh summary <state> <saved> <verified> [<hit> <matched-key>]   the job-summary line (cache key, restore, save result)
+#   dev-tool-cache.sh store-restore <hash>   the runner-local store first (user decision 109): copies /sccache/paddock-dev-tools/<hash>/ into the
+#                                         job's own tool folder (output: hit); `verify` still checks the copy for its hash. The store is written
+#                                         by `./dev ci dev-tool-store publish` (the plan job only; tools/paddock-dev/src/ci_dev_tool_store.rs)
 #
 # The key is exactly the launcher's input hash plus the OS, the architecture and a cache-version salt (PADDOCK_DEV_TOOL_CACHE_VERSION,
 # bump it to retire every saved binary), with no restore-keys: a binary of another hash is never restored. Only a build that passed
@@ -29,6 +32,33 @@ cmd_no_download() { [ "${PADDOCK_DEV_DOWNLOAD:-}" = 0 ] || [ -z "${PADDOCK_DEV_T
 # The folder the launcher keeps this hash in for a job that may download: <home>/bin/<hash>.
 cache_path() {
   printf '%s\n' "${PADDOCK_DEV_HOME:-${HOME:?HOME is not set}/.paddock-dev}/bin/$1"
+}
+
+# The runner-local store of the tool (a folder of the /sccache volume the lanes already mount); PADDOCK_DEV_TOOL_STORE moves it.
+store_dir() { printf '%s\n' "${PADDOCK_DEV_TOOL_STORE:-/sccache/paddock-dev-tools}"; }
+
+cmd_store_restore() {
+  local hash="${1:-}" store dest tmp t0="$SECONDS"
+  [[ "$hash" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::dev-tool-cache: store-restore needs the 40-hex input hash, got '$hash'. Next step: pass the key step's hash output."; exit 1; }
+  store="$(store_dir)/$hash"
+  dest="$(cache_path "$hash")"
+  if [ ! -d "$store" ]; then
+    echo "dev-tool-cache: the runner store has no entry for $hash ($(store_dir)); the Actions cache is next."
+    out hit false
+    return 0
+  fi
+  tmp="$(dirname "$dest")/.store-$hash.$$"
+  if ! { mkdir -p "$(dirname "$dest")" && rm -rf "$tmp" && cp -R "$store/." "$tmp" && [ -n "$(ls -A "$tmp")" ]; }; then
+    rm -rf "$tmp"
+    echo "::warning::dev-tool-cache: the runner store entry $store could not be copied. Next step: the Actions cache or a build is used; check the /sccache volume."
+    out hit false
+    return 0
+  fi
+  # Our own copy replaces nothing running: an entry another step of this job made is only the same hash, as good as this one.
+  if [ -e "$dest" ]; then rm -rf "$tmp"; else mv "$tmp" "$dest"; fi
+  touch "$store" 2>/dev/null || true   # a use, for the store's eviction order
+  echo "dev-tool-cache: restored $hash from the runner store in $((SECONDS - t0)) s."
+  out hit true
 }
 
 cmd_key() {
@@ -104,9 +134,14 @@ cmd_verify() {
 
 cmd_summary() {
   local key="${KEY:-}" state="${1:-miss}" saved="${2:-}" verified="${3:-}" hit="${4:-}" matched="${5:-}" line
+  # SAVES=false: a job that only restores (the plan job is the one writer, user decision 109); unset keeps the writer's wording.
+  # SOURCE: store (the runner-local store) or empty (the Actions cache); DOWN=1: the cache service did not answer the job's probe.
+  # SOURCE: store (the runner-local store, user decision 109) or empty (the Actions cache).
+  local source="${SOURCE:-}" from="the Actions cache"
+  [ "$source" != store ] || from="the runner store"
   case "$state" in
-    hit) line="restored: exact hit (verified for its hash); saved: not needed" ;;
-    rejected) line="restored: exact hit but NOT usable (rebuilt); saved: NO (the key exists)" ;;
+    hit) line="restored: exact hit from $from (verified for its hash); saved: not needed" ;;
+    rejected) line="restored: exact hit from $from but NOT usable (rebuilt); saved: NO (the key exists)" ;;
     miss)
       if [ "$saved" = true ] && [ "$verified" = true ]; then line="restored: miss (built); saved: yes (found again by key)"
       elif [ "$saved" = true ]; then line="restored: miss (built); saved: NOT confirmed (the cache lookup after the save found nothing)"
@@ -129,5 +164,6 @@ case "${1:-}" in
   no-download) cmd_no_download ;;
   verify) shift; cmd_verify "$@" ;;
   summary) shift; cmd_summary "$@" ;;
-  *) echo "usage: dev-tool-cache.sh key | verify <hit> <matched-key> | summary <state> <saved> <verified> [<hit> <matched-key>]" >&2; exit 2 ;;
+  store-restore) shift; cmd_store_restore "$@" ;;
+  *) echo "usage: dev-tool-cache.sh store-restore <hash> | key | verify <hit> <matched-key> | summary <state> <saved> <verified> [<hit> <matched-key>]" >&2; exit 2 ;;
 esac

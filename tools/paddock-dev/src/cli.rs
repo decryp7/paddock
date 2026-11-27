@@ -1,8 +1,8 @@
 use crate::{
-    audit, check, check_ids, ci_build_env, ci_build_jobs, ci_dyno_linux_units, ci_host, ci_isolation, ci_run, ci_runs, ci_rust_pin,
-    ci_s3_guard, ci_setup_rust, deps_cache, disk, gates, generators, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints,
-    lessons_driver, load, local_sccache, locks, locks_guard, merge_check, places, plan_cmd, pr, pre_push, queue, release_isolation, slots,
-    test_cache, test_features, wait, worktree,
+    audit, check, check_ids, ci_build_env, ci_build_jobs, ci_dev_tool_store, ci_dyno_linux_units, ci_host, ci_isolation, ci_run, ci_runs,
+    ci_rust_pin, ci_s3_guard, ci_setup_rust, deps_cache, disk, gates, generators, heavy_cmd, heavy_install, hook, input_hash,
+    ipc_endpoints, lessons_driver, load, local_sccache, locks, locks_guard, merge_check, places, plan_cmd, pr, pre_push, queue,
+    release_isolation, slots, test_cache, test_features, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -387,6 +387,9 @@ enum CiCommand {
     /// PADDOCK_BUILD_COMMIT and PADDOCK_BUILD_DATE for the About page (the port of conformance/ci/build-env.mjs): appended to
     /// $GITHUB_ENV and printed. Never fails.
     BuildEnv(ci_build_env::BuildEnvArgs),
+    /// The runner-local store of `./dev`'s own binary on a Linux runner (user decision 109): `publish` keeps the verified tool by its
+    /// hash in a folder of the `/sccache` volume (the plan job's step; atomic, locked, size-limited, evicted). Never fails the job.
+    DevToolStore(ci_dev_tool_store::StoreArgs),
     /// The gate executor (ADR 0038 §1): the commands of one phase of a project's `paddock.ci.json`, one per line, a `cd` holds for the
     /// lines after it, each logged with its duration and exit; the port of conformance/ci/run-commands.sh for every project (an app
     /// under apps/, or crates, ui, conformance, tools, icons, eslint). `--list` prints the lines and runs nothing.
@@ -667,6 +670,13 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         return ci_build_env::run(a, out, err);
     }
     if let Command::Ci {
+        command: CiCommand::DevToolStore(a),
+    } = &cli.command
+    {
+        // A CI step's contract: plain lines, one `::warning::` on a problem, exit 0.
+        return ci_dev_tool_store::run(a, &|k| std::env::var(k).ok(), out, err);
+    }
+    if let Command::Ci {
         command: CiCommand::Run(a),
     } = &cli.command
     {
@@ -749,6 +759,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::BuildEnv(_),
         } => Err(CliError::failure("`ci build-env` was dispatched through the report path.")),
+        Command::Ci {
+            command: CiCommand::DevToolStore(_),
+        } => Err(CliError::failure("`ci dev-tool-store` was dispatched through the report path.")),
         Command::Ci {
             command: CiCommand::Run(_),
         } => Err(CliError::failure("`ci run` was dispatched through the report path.")),

@@ -3,7 +3,7 @@
 // and is saved only after the tool reported its own hash, and the summary never shows a failed save as a pass (ER-33).
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -190,4 +190,56 @@ test('a wrapper that gives no hash fails the step loudly, never a silent miss (E
   const bad = run(root, ['key']);
   assert.notEqual(bad.status, 0);
   assert.match(bad.text, /::error::dev-tool-cache: .*unexpected shape/);
+});
+
+// User decision 109: the runner-local store, a folder of the /sccache volume, is read before the Actions cache.
+/** A store with an entry for HASH holding a stand-in tool; returns the store folder. */
+function storeWith(root, hash = HASH, file = 'paddock-dev-linux-x86_64') {
+  const store = join(root, 'store');
+  mkdirSync(join(store, hash), { recursive: true });
+  writeFileSync(join(store, hash, file), '#!/bin/sh\n');
+  return store;
+}
+
+test('a store entry is copied into the job\'s own tool folder, never run from the shared store', () => {
+  const root = fixture();
+  const store = storeWith(root);
+  const r = run(root, ['store-restore', HASH], { PADDOCK_DEV_TOOL_STORE: store });
+  assert.equal(r.status, 0, r.text);
+  assert.equal(r.out.hit, 'true');
+  const mine = join(root, 'home', '.paddock-dev', 'bin', HASH);
+  assert.deepEqual(readdirSync(mine), ['paddock-dev-linux-x86_64'], 'the entry is copied into <home>/bin/<hash>, the folder the launcher reads');
+  assert.notEqual(mine, join(store, HASH));
+  assert.deepEqual(readdirSync(join(root, 'home', '.paddock-dev', 'bin')), [HASH], 'no temp copy is left behind');
+});
+
+test('no entry for the hash, a store that is not there, and an entry for another hash are all a miss that never fails the job', () => {
+  const root = fixture();
+  assert.equal(run(root, ['store-restore', HASH], { PADDOCK_DEV_TOOL_STORE: join(root, 'no-such-store') }).out.hit, 'false');
+  const other = storeWith(root, 'b'.repeat(40));
+  const r = run(root, ['store-restore', HASH], { PADDOCK_DEV_TOOL_STORE: other });
+  assert.equal(r.status, 0, r.text);
+  assert.equal(r.out.hit, 'false', 'a binary of another hash is never restored');
+  assert.equal(existsSync(join(root, 'home', '.paddock-dev', 'bin', HASH)), false);
+  // Positive control: the same store with the right entry hits.
+  assert.equal(run(root, ['store-restore', 'b'.repeat(40)], { PADDOCK_DEV_TOOL_STORE: other }).out.hit, 'true');
+});
+
+test('an empty store entry is a warned miss, and a bad hash is refused before any path is built from it', () => {
+  const root = fixture();
+  const store = join(root, 'store');
+  mkdirSync(join(store, HASH), { recursive: true });
+  const r = run(root, ['store-restore', HASH], { PADDOCK_DEV_TOOL_STORE: store });
+  assert.equal(r.out.hit, 'false');
+  assert.match(r.text, /::warning::dev-tool-cache: the runner store entry .* could not be copied/);
+  const bad = run(root, ['store-restore', '../../etc'], { PADDOCK_DEV_TOOL_STORE: store });
+  assert.notEqual(bad.status, 0);
+  assert.match(bad.text, /::error::dev-tool-cache: store-restore needs the 40-hex input hash/);
+});
+
+test('the summary says a hit came from the runner store, and still names the Actions cache otherwise', () => {
+  const root = fixture();
+  const sum = (env) => run(root, ['summary', 'hit', 'false', '', 'true', 'the-key'], { KEY: 'the-key', ...env }).sum;
+  assert.match(sum({ SOURCE: 'store' }), /exact hit from the runner store \(verified for its hash\)/);
+  assert.match(sum({}), /exact hit from the Actions cache/);
 });

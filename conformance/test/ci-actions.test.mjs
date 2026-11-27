@@ -2728,6 +2728,34 @@ test('the dev-tool-cache action restores, verifies, saves and reports from the r
   assert.match(text, /PADDOCK_DEV_TOOL_CACHE_DONE/, 'a later use in the same job does nothing');
 });
 
+// User decision 109: the runner-local store comes before the Actions cache, and only the plan job writes it.
+test('dev-tool-cache reads the runner store before the Actions cache, skips the cache on a store hit, and only a producer writes the store', () => {
+  const action = loadAction('dev-tool-cache');
+  const steps = stepsOf(action);
+  const at = (id) => steps.findIndex((s) => s.id === id);
+  assert.ok(at('store') > at('key') && at('store') < at('restore'), 'key, then the store, then the Actions cache');
+  assert.match(steps[at('restore')].if, /steps\.store\.outputs\.hit != 'true'/, 'a store hit never calls the cache service');
+  assert.match(steps[at('verify')].run, /steps\.store\.outputs\.hit == 'true'/, 'a store hit is verified like a restored one');
+  const keep = steps.find((s) => /dev-tool-store publish/.test(s.run ?? ''));
+  assert.ok(keep, 'a step keeps the verified tool in the store');
+  assert.match(keep.if, /inputs\.producer == 'true'/, 'only a producer writes the store');
+  assert.equal(keep['continue-on-error'], true, 'the store never fails the job');
+  assert.equal(action.inputs.producer.default, 'false', 'a job is a consumer unless it says otherwise');
+});
+
+test('only the plan action passes producer: true to dev-tool-cache (the one writer)', () => {
+  const producers = [];
+  for (const n of names) {
+    for (const s of stepsOf(loadAction(n))) if (usesToolCache(s) && String(s.with?.producer) === 'true') producers.push(`actions/${n}`);
+  }
+  for (const file of readdirSync(WORKFLOWS).filter((f) => f.endsWith('.yml'))) {
+    for (const [id, job] of Object.entries(loadWorkflow(file).jobs ?? {})) {
+      for (const s of stepsOf(job)) if (usesToolCache(s) && String(s.with?.producer) === 'true') producers.push(`${file}:${id}`);
+    }
+  }
+  assert.deepEqual(producers, ['actions/plan'], 'the plan action is the one producer');
+});
+
 // ADR 0115: every `actions/cache` step is followed, in its own job, by a step that reports it (the cache-report action, or for the
 // workflow template that runs in other repositories, a step named "Cache report" / "Cache save report" that prints the same line).
 // The step reads the cache step's id, so the report is of its own outputs. Read through the YAML reader (ER-42).
