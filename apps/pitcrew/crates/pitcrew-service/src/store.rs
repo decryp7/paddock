@@ -64,13 +64,9 @@ mod tests {
     use super::*;
 
     #[test]
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
     fn writes_atomically_with_a_backup_and_sets_damage_aside() {
-        let d = std::env::temp_dir().join(format!("pitcrew-it-store-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
+        let scratch = paddock_testkit::canonical_tempdir();
+        let d = scratch.join("it-store");
         let f = d.join("pitcrew.toml");
         assert_eq!(read_bounded(&f, 10).unwrap(), None);
         write_atomic(&f, "one").unwrap();
@@ -82,6 +78,5 @@ mod tests {
         assert!(moved.ends_with("pitcrew.toml.damaged-7"));
         assert!(set_aside(&f, 8).is_err());
         assert!(read_bounded(&d, 10).is_err(), "a folder is not a file");
-        let _ = std::fs::remove_dir_all(&d);
     }
 }

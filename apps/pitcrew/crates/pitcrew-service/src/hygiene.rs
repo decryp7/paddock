@@ -417,36 +417,27 @@ mod tests {
     #[cfg(unix)]
     use pitcrew_core::hygiene::CacheReason;
 
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
-    fn temp(name: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!("pitcrew-it-hyg-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&p);
-        std::fs::create_dir_all(&p).unwrap();
-        p
+    fn temp() -> paddock_testkit::CanonicalTempDir {
+        paddock_testkit::canonical_tempdir()
     }
 
     #[test]
     fn programs_are_found_on_the_given_path_only() {
-        let d = temp("find");
+        let d = temp();
         let file = d.join(format!("docker{}", std::env::consts::EXE_SUFFIX));
         std::fs::write(&file, "x").unwrap();
-        let path = std::env::join_paths([d.clone()]).unwrap().to_string_lossy().into_owned();
+        let path = std::env::join_paths([d.to_path_buf()]).unwrap().to_string_lossy().into_owned();
         assert_eq!(find_engine(Some(&path)), Some((EngineKind::Docker, file)));
-        let empty = temp("find-none");
+        let empty = temp();
         assert!(find_engine(Some(&empty.display().to_string())).is_none());
-        let _ = std::fs::remove_dir_all(d);
-        let _ = std::fs::remove_dir_all(empty);
     }
 
     #[test]
     fn a_missing_engine_is_a_report_with_a_next_step_and_the_act_folders_are_measured() {
-        let home = temp("home");
+        let home = temp();
         std::fs::create_dir_all(home.join(".cache/act/checkout")).unwrap();
         std::fs::write(home.join(".cache/act/checkout/a.txt"), vec![0u8; 2048]).unwrap();
-        let empty = temp("nopath");
+        let empty = temp();
         let r = report(Some(&empty.display().to_string()), Some(&home), Timestamp(5));
         assert!(r.engine.is_none() && r.problem.as_deref().unwrap().contains("No container engine"));
         let act = &r.folders[0];
@@ -469,13 +460,11 @@ mod tests {
             Timestamp(1)
         )
         .is_err());
-        let _ = std::fs::remove_dir_all(home);
-        let _ = std::fs::remove_dir_all(empty);
     }
 
     #[test]
     fn a_fake_engine_is_asked_for_a_preview_and_a_prune() {
-        let d = temp("fake");
+        let d = temp();
         use paddock_testkit::Actions;
         paddock_testkit::StandIn::new(&d, "docker")
             .exit(0)
@@ -526,14 +515,13 @@ mod tests {
         assert_eq!(res.freed, vec![(PruneKind::DanglingImages, 100_000_000)]);
         assert_eq!(res.failures[0].0, PruneKind::Volumes);
         assert!(res.failures[0].1.contains("boom"));
-        let _ = std::fs::remove_dir_all(d);
     }
 
     // A folder's own time cannot be set through a file handle on Windows; the logic is the same everywhere.
     #[cfg(unix)]
     #[test]
     fn the_cache_folder_is_reported_planned_and_trimmed_safely() {
-        let home = temp("cachehome");
+        let home = temp();
         let dir = home.join(".cache/actcache");
         std::fs::create_dir_all(dir.join("old")).unwrap();
         std::fs::write(dir.join("old/blob"), vec![0u8; 4096]).unwrap();
@@ -593,7 +581,6 @@ mod tests {
             now_ts()
         )
         .is_err());
-        let _ = std::fs::remove_dir_all(home);
     }
 
     #[test]

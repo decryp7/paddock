@@ -11,18 +11,31 @@ use std::path::{Path, PathBuf};
 
 struct Repo {
     dir: tempfile::TempDir,
+    /// Folders this repository owns besides its own (a bare `origin`): removed with it.
+    owned: std::cell::RefCell<Vec<tempfile::TempDir>>,
 }
 
 impl Repo {
     fn new() -> Repo {
         let dir = tempfile::tempdir().unwrap();
-        let r = Repo { dir };
+        let r = Repo {
+            dir,
+            owned: Default::default(),
+        };
         r.git(&["init", "-q", "-b", "main"]);
         r
     }
 
     fn path(&self) -> &Path {
         self.dir.path()
+    }
+
+    /// A path for a file this repository owns outside its work tree: its own temp folder, removed with the repository (ER-51).
+    fn owned_file(&self, name: &str) -> PathBuf {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(name);
+        self.owned.borrow_mut().push(dir);
+        file
     }
 
     // Starts git and the tool under test, never a process by pid.
@@ -1869,11 +1882,20 @@ fn reland_repo(reland: impl Fn(&Repo, &str)) -> (Repo, String) {
     (r, s)
 }
 
+/// The scratch files a test writes beside its repository are its own: never a name in the temp parent every test shares.
+#[test]
+fn scratch_files_are_in_a_folder_the_repository_owns() {
+    let (a, b) = (Repo::new(), Repo::new());
+    let (fa, fb) = (a.owned_file("msg-final.txt"), b.owned_file("msg-final.txt"));
+    assert_ne!(fa, fb);
+    assert_ne!(fa.parent(), a.path().parent());
+    let dir = fa.parent().unwrap().to_path_buf();
+    drop(a);
+    assert!(!dir.exists(), "removed with its repository");
+}
+
 fn write_reverted(r: &Repo) -> (i32, String, String) {
-    let file = r
-        .path()
-        .join("..")
-        .join(format!("msg-{}.txt", r.path().file_name().unwrap().to_string_lossy()));
+    let file = r.owned_file("msg.txt");
     let (code, text) = r.check(&["--branch", "member", "--target", "main", "--write-reverted", file.to_str().unwrap()]);
     let written = fs::read_to_string(&file).unwrap_or_default();
     let _ = fs::remove_file(&file);
@@ -1902,7 +1924,7 @@ fn a_reland_that_undoes_a_train_revert_gets_its_reverted_lines_and_the_rerun_pas
     );
     assert!(text.contains("1 of 1 finding(s) are the re-land's own"), "{text}");
     // The merge made with that message passes the check.
-    let msg = r.path().join("..").join("msg-final.txt");
+    let msg = r.owned_file("msg-final.txt");
     fs::write(&msg, &written).unwrap();
     r.git(&["merge", "-q", "--no-ff", "-F", msg.to_str().unwrap(), "member"]);
     let (code, text) = r.check(&["HEAD"]);
@@ -2375,10 +2397,7 @@ fn a_train_and_main_with_no_common_commit_are_not_judged_and_not_an_abort() {
 // ---- the chain: sync-member, the merge, then --write-reverted ----
 
 fn written_lines(r: &Repo, args: &[&str]) -> (i32, String, String) {
-    let file = r
-        .path()
-        .join("..")
-        .join(format!("w-{}.txt", r.path().file_name().unwrap().to_string_lossy()));
+    let file = r.owned_file("w.txt");
     let mut all = args.to_vec();
     let f = file.to_str().unwrap().to_string();
     all.extend(["--write-reverted", &f]);
@@ -2428,7 +2447,7 @@ fn the_chain_sync_member_then_the_merge_then_write_reverted_answers_the_train_si
     let (code, text, written) = written_lines(&r, &["--branch", "feat/shots", "--target", "main", "--no-generators"]);
     assert_eq!(code, 5, "{text}");
     assert!(written.contains("Reverted: shot.txt: "), "{written}\n{text}");
-    let msg = r.path().join("..").join("chain-final.txt");
+    let msg = r.owned_file("chain-final.txt");
     fs::write(&msg, &written).unwrap();
     r.git(&["merge", "-q", "--no-ff", "-F", msg.to_str().unwrap(), "feat/shots"]);
     let (code, text) = r.check(&["HEAD", "--no-generators"]);
@@ -2863,11 +2882,34 @@ mod member_trial {
         r.write("x2.txt", "x2\n");
         r.commit("feat: x2");
         r.git(&["merge", "-q", "--no-edit", "main"]);
-        let bare = r.path().join("..").join(format!("origin-{}.git", std::process::id()));
+        // Its own temp folder (ER-51): a name shared through the temp parent let a stale or concurrent origin reject the push.
+        let owned = tempfile::tempdir().unwrap();
+        let bare = owned.path().join("origin.git");
+        r.owned.borrow_mut().push(owned);
         r.git(&["init", "-q", "--bare", bare.to_str().unwrap()]);
         r.git(&["remote", "add", "origin", bare.to_str().unwrap()]);
         r.git(&["push", "-q", "origin", "feat/x"]);
         r
+    }
+
+    /// A leftover origin at the name the old fixture shared (temp parent, process id) must not reach a new test's origin.
+    #[test]
+    fn a_leftover_origin_at_the_old_shared_name_does_not_reject_the_push() {
+        let probe = Repo::new();
+        // A sibling of the repository folder: the old fixture's name in the shared temp parent.
+        let stale = probe.path().with_file_name(format!("origin-{}.git", std::process::id()));
+        let _ = std::fs::remove_dir_all(&stale);
+        probe.git(&["init", "-q", "--bare", stale.to_str().unwrap()]);
+        probe.write("s.txt", "s\n");
+        probe.commit("feat: stale");
+        probe.git(&["push", "-q", stale.to_str().unwrap(), "main:refs/heads/feat/x"]);
+        let r = pushed();
+        let origin = r.git(&["remote", "get-url", "origin"]);
+        let _ = std::fs::remove_dir_all(&stale);
+        assert_eq!(
+            r.git(&["--git-dir", &origin, "rev-parse", "refs/heads/feat/x"]),
+            r.git(&["rev-parse", "HEAD"])
+        );
     }
 
     fn stand_ins(dir: &Path, rows: &str) {
@@ -3029,7 +3071,7 @@ mod member_trial {
         r.git(&["checkout", "-q", "-b", "sync/feat/x", "feat/x"]);
         r.write("x2.txt", "x2\n");
         r.commit("feat: x2");
-        let bare = r.path().join("..").join(format!("origin-{}.git", std::process::id()));
+        let bare = r.owned_file("origin.git");
         r.git(&["init", "-q", "--bare", bare.to_str().unwrap()]);
         r.git(&["remote", "add", "origin", bare.to_str().unwrap()]);
         // Before the merge: the revert is listed as the member's own, none as another branch's.
