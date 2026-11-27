@@ -356,21 +356,54 @@ fn version_of(text: &str) -> Option<&str> {
     text.split_whitespace().nth(1)
 }
 
-/// The first failing lines of the baseline's log (`FAIL`, `TIMEOUT`, `SIG...` lines of nextest, and its `error` lines), at most ten and
-/// 200 characters each: what a person needs to see why the unmutated tree did not pass, since the scratch folder is gone by then.
+/// What a person needs to see why the unmutated tree did not pass, from the baseline's log (the scratch folder is gone by then): the
+/// first ten failing lines (`FAIL`, `TIMEOUT`, `SIG...` of nextest, and `error` lines), the `Summary` line, and the last five lines
+/// of the log, each at most 200 characters, with terminal colours removed.
 pub fn baseline_failures(log: &str) -> String {
-    let lines: Vec<String> = log
+    let plain: Vec<String> = log
         .lines()
-        .map(str::trim)
-        .filter(|l| l.starts_with("FAIL ") || l.starts_with("TIMEOUT ") || l.starts_with("SIG") || l.starts_with("error"))
-        .take(10)
-        .map(|l| l.chars().take(200).collect())
+        .map(strip_colours)
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
         .collect();
-    if lines.is_empty() {
-        "(none found in the baseline log)".to_string()
-    } else {
-        lines.join(" | ")
+    let failing = |l: &&String| {
+        ["FAIL ", "FAIL[", "TIMEOUT", "SIG", "error", "Summary"]
+            .iter()
+            .any(|p| l.starts_with(p))
+            || l.contains("FAIL [")
+    };
+    let mut picked: Vec<&String> = plain.iter().filter(failing).take(10).collect();
+    for l in plain.iter().rev().take(5).rev() {
+        if !picked.contains(&l) {
+            picked.push(l);
+        }
     }
+    if picked.is_empty() {
+        return "(the baseline log is empty)".to_string();
+    }
+    picked
+        .iter()
+        .map(|l| l.chars().take(200).collect::<String>())
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
+
+/// `text` without ANSI escape sequences (`ESC [ ... letter`).
+fn strip_colours(text: &str) -> String {
+    let mut out = String::new();
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' && chars.peek() == Some(&'[') {
+            for n in chars.by_ref() {
+                if n.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// The positive control: [`CONTROL_LIB`] must show [`CONTROL_MISSED`] as MISSED and a caught mutant, else the check cannot see
@@ -1052,12 +1085,18 @@ mod tests {
     }
 
     #[test]
-    fn the_baseline_failures_are_the_first_failing_lines_of_its_log() {
-        let log = "   Compiling x\n        PASS [ 1s] a::b\n        FAIL [ 2s] a::c\nerror: test run failed\n";
-        assert_eq!(baseline_failures(log), "FAIL [ 2s] a::c | error: test run failed");
-        assert_eq!(baseline_failures("all fine\n"), "(none found in the baseline log)");
+    fn the_baseline_failures_are_the_failing_lines_and_the_tail_of_its_log_without_colours() {
+        let log =
+            "   Compiling x\n        PASS [ 1s] a::b\n\u{1b}[31;1m        FAIL\u{1b}[0m [ 2s] a::c\nerror: test run failed\nlast line\n";
+        let got = baseline_failures(log);
+        assert!(
+            got.contains("FAIL [ 2s] a::c") && got.contains("error: test run failed") && got.contains("last line"),
+            "{got}"
+        );
+        assert!(!got.contains('\u{1b}'), "{got}");
+        assert_eq!(baseline_failures(""), "(the baseline log is empty)");
         let many: String = (0..30).map(|i| format!("FAIL [ 1s] t{i}\n")).collect();
-        assert_eq!(baseline_failures(&many).matches(" | ").count(), 9, "at most ten");
+        assert!(baseline_failures(&many).matches("FAIL [ 1s] t").count() <= 15, "bounded");
     }
 
     #[test]
