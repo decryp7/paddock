@@ -88,6 +88,7 @@ pub struct Ctx<'a> {
     today: String,
     ci: bool,
     workflows: OnceCell<Rc<Vec<util::workflows::Workflow>>>,
+    renames: OnceCell<Rc<baseline::Renames>>,
 }
 
 impl<'a> Ctx<'a> {
@@ -109,6 +110,7 @@ impl<'a> Ctx<'a> {
             today,
             ci: false,
             workflows: OnceCell::new(),
+            renames: OnceCell::new(),
         }
     }
 
@@ -183,6 +185,23 @@ impl<'a> Ctx<'a> {
     /// Today, `YYYY-MM-DD` (UTC).
     pub fn today(&self) -> &str {
         &self.today
+    }
+
+    /// The files git sees renamed between the run's merge base and the tree (old path to new), read once; empty for a tree in memory, a
+    /// folder that is no work tree, or a target git cannot resolve (a register then gets no help: the stricter reading, never a pass).
+    pub fn renames(&self) -> Rc<baseline::Renames> {
+        self.renames
+            .get_or_init(|| {
+                if self.is_in_memory() || !baseline::is_work_tree(self.root()) {
+                    return Rc::new(baseline::Renames::new());
+                }
+                Rc::new(
+                    baseline::merge_base(self.root(), &self.base_ref())
+                        .map(|b| baseline::renames(self.root(), &b))
+                        .unwrap_or_default(),
+                )
+            })
+            .clone()
     }
 
     /// The workflow files (`<workflowsDir>/*.yml|yaml`) with their jobs and steps, read once.

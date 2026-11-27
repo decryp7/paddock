@@ -4496,3 +4496,16 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   `#[expect]`). The positive control is `usage::tests::a_raw_listing_is_what_the_clippy_ban_catches`: its `#[expect]` is unfulfilled, and Clippy
   fails, if the ban is removed or stops resolving the path. Callers checked across `crates/`, `apps/` and `tools/`: only `paddock-proc` itself
   (`usage.rs`, `tests/it/orphan.rs`) implements or calls the trait; Debrief's, Dyno's and Pitcrew's `ProcessSource` are their own ports.
+
+## Path-keyed registers follow a pure rename (2026-11-27, fix/registers-follow-renames, ER-21)
+- **What happened.** The crate move `tools/throttle/src` to `crates/paddock-throttle/src` (45ec96c97, bf651d875) re-registered entries in the C53 baseline
+  and the C30 allow list by hand and re-placed a C171 waiver: the allow-list growth guard read a rewritten path as a new entry (needing the user, ER-46),
+  C171 asked `git diff --no-renames` and so read every line of a moved file as added, and rustfmt put a spread-out call's literal below its waiver comment.
+  The paddock-dev crate split moves about 40 modules and would have hit this on every batch.
+- **Fix (ER-21, the simplest complete fix).** One reader of git's own rename detection per host: `baseline::renames` (Rust, through the `git diff`
+  parser of `merge_check::diff`, `Ctx::renames` once per run) and `renamedFiles` in `util/baseline.mjs` (`git diff -M --name-status -z`). The shared
+  allow-list readers (C131, C173 on Rust; C30, C135, C140 on JavaScript) let an entry follow its file (an entry under the old path counts for the new
+  one and a warning asks for the rewrite), and `baseline::growth_following` and `baselineGrowth({ rekey })` read both sides of the growth comparison under
+  the files' current paths, so a rewritten entry is not growth. C135 and C104 pass a `rekey`; C53's liveness baseline already followed a move by hash
+  (`moved`, not growth). C171 reads `git diff -M`, and its waiver may sit above the statement that holds the literal. A moved file's changed content is
+  judged as usual: a new offending line still fails, and a new entry is still growth.

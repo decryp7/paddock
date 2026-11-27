@@ -19,6 +19,7 @@ mod check_c177;
 mod check_engine;
 mod check_ids;
 mod check_lex;
+mod check_renames;
 mod check_units;
 mod check_util;
 mod ci_isolation;
