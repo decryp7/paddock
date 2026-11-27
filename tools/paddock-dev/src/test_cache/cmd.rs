@@ -266,12 +266,15 @@ fn run(
     let filter = filter_of(a);
     let mut text: Vec<String> = Vec::new();
     // Whether this run may read at all, and what the lookup said.
+    // Whether this run may read, and what the lookup said. A run that may not reuse still looks the records up for the write rule
+    // ([`super::not_overwriting_trusted`]), so it seeds and refreshes records; only its reuse is off.
+    let looked = decide(cands, cfg, class, &filter, store, now(), &trust_check());
     let (decisions, notice) = match read_allowed(&env_get) {
         Err(why) => (
             cands.iter().map(|_| Decision::Run(super::Why::Off(why.clone()))).collect(),
             Some(why),
         ),
-        Ok(()) => decide(cands, cfg, class, &filter, store, now(), &trust_check()),
+        Ok(()) => looked.clone(),
     };
     if let Some(n) = notice {
         text.push(format!("::notice::test-cache: reuse is off for this run: {n}. Every target runs."));
@@ -389,7 +392,7 @@ fn run(
             ));
         }
         // Write-once while trusted, as in the record step: a local pass never replaces a trusted record.
-        let (put, kept) = super::not_overwriting_trusted(put, cands, &decisions);
+        let (put, kept) = super::not_overwriting_trusted(put, cands, &looked.0);
         if let Err(w) = &writes {
             text.push(format!("test-cache: nothing stored ({w})"));
         } else if let Err(e) = store.put_many(&put) {
@@ -578,7 +581,7 @@ fn os_of(c: &RunnerClass) -> &'static str {
 type Trust = Box<dyn Fn(&Record) -> Result<(), super::trust::Distrust>>;
 
 /// The reader-side trust check (§7): in CI every record's run is asked of the Gitea API; a local run reads its own store as is. With no
-/// token the check refuses every record (never trusts what it cannot verify).
+/// token nothing can be verified: every record is undecided (never trusted, and never replaced).
 fn trust_check() -> Trust {
     let ci = env_get("GITHUB_ACTIONS").is_some_and(|v| !v.is_empty()) || env_get("GITEA_ACTIONS").is_some_and(|v| !v.is_empty());
     if !ci {

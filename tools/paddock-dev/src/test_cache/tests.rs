@@ -6,6 +6,7 @@ use super::key::{KeyParts, RunnerClass, Target, key};
 use super::result::judge;
 use super::store::{FsStore, Lookup, Record, Store, StoreError};
 use super::*;
+use crate::job_outcome::JobOutcome;
 use std::collections::HashMap;
 
 const CFG: &str = include_str!("../../../../docs/test-cache.toml");
@@ -262,10 +263,16 @@ fn the_record_step_never_replaces_a_trusted_or_undecided_record_and_names_the_un
     // Run 9209 (red) re-stored the records run 9180 (green) had written under the same keys; every later lookup then refused them.
     let (_d, s) = scratch();
     let class = RunnerClass::here();
-    let (a, b, c, n) = (cand("a", "h1"), cand("b", "h2"), cand("c", "h3"), cand("n", "h4"));
-    s.put_many(&[rec(&a, &class, NOW - 60), rec(&b, &class, NOW - 60), rec(&c, &class, NOW - 60)])
-        .unwrap();
-    // a's record is trusted, b's refused (its job failed), c's undecided (the API did not answer); n has none.
+    let (a, b, c, n, o) = (cand("a", "h1"), cand("b", "h2"), cand("c", "h3"), cand("n", "h4"), cand("o", "h5"));
+    s.put_many(&[
+        rec(&a, &class, NOW - 60),
+        rec(&b, &class, NOW - 60),
+        rec(&c, &class, NOW - 60),
+        rec(&o, &class, NOW - 49 * 3600),
+    ])
+    .unwrap();
+    // a's record is trusted, b's refused (its job failed), c's undecided (the API did not answer), o's too old (48 hours while the
+    // nightly is paused); n has none.
     let trust = |r: &Record| -> Result<(), super::trust::Distrust> {
         match r.target.as_str() {
             "rust:b" => Err("job `crate (linux)` of run 8635 attempt 1 did not end success".into()),
@@ -283,32 +290,36 @@ fn the_record_step_never_replaces_a_trusted_or_undecided_record_and_names_the_un
         os_build: String::new(),
     };
     let log = [
-        "    Starting 4 tests across 4 binaries",
-        "        PASS [   0.010s] ( 1/4) a t::ok",
-        "        PASS [   0.010s] ( 2/4) b t::ok",
-        "        PASS [   0.010s] ( 3/4) c t::ok",
-        "        PASS [   0.010s] ( 4/4) n t::ok",
-        "     Summary [   0.050s] 4 tests run: 4 passed, 0 failed, 0 skipped",
+        "    Starting 5 tests across 5 binaries",
+        "        PASS [   0.010s] ( 1/5) a t::ok",
+        "        PASS [   0.010s] ( 2/5) b t::ok",
+        "        PASS [   0.010s] ( 3/5) c t::ok",
+        "        PASS [   0.010s] ( 4/5) n t::ok",
+        "        PASS [   0.010s] ( 5/5) o t::ok",
+        "     Summary [   0.050s] 5 tests run: 5 passed, 0 failed, 0 skipped",
     ]
     .join("\n");
-    let cands = [a.clone(), b.clone(), c.clone(), n.clone()];
+    let cands = [a.clone(), b.clone(), c.clone(), n.clone(), o.clone()];
     let (lines, stored) = super::cmd::record_with(&log, &cands, &cfg(), &class, "", &meta, &s, &trust);
-    assert_eq!(stored, 2, "b (refused) and n (missing) are replaced or written: {lines:?}");
+    assert_eq!(
+        stored, 3,
+        "b (refused), n (missing) and o (too old) are replaced or written: {lines:?}"
+    );
     let key = |c: &Candidate| Lookup {
         target: c.target.id.clone(),
         class: class.clone(),
         key: key_of(c, &cfg(), &class, ""),
     };
     let back: Vec<String> = s
-        .get_many(&[key(&a), key(&b), key(&c), key(&n)])
+        .get_many(&[key(&a), key(&b), key(&c), key(&n), key(&o)])
         .unwrap()
         .into_iter()
         .map(|r| r.unwrap().run)
         .collect();
     assert_eq!(
         back,
-        ["8635", "9209", "8635", "9209"],
-        "a trusted and c undecided stay; b and n are this run's"
+        ["8635", "9209", "8635", "9209", "9209"],
+        "a trusted and c undecided stay; b, n and o are this run's"
     );
     let shadow = lines.iter().find(|l| l.starts_with("test-cache shadow:")).expect("a shadow line");
     assert_eq!(
@@ -320,9 +331,29 @@ fn the_record_step_never_replaces_a_trusted_or_undecided_record_and_names_the_un
     let (k, sum) = read_shadow(std::slice::from_ref(shadow)).unwrap();
     assert_eq!((k, sum.matched, sum.passed, sum.findings.len()), (1, 1, 1, 0));
     assert!(lines.iter().any(|l| l.contains("2 held back")), "{lines:?}");
-    // A store that cannot answer the lookup: nothing is replaced, because nothing is known.
-    let (lines, stored) = super::cmd::record_with(&log, &cands, &cfg(), &class, "", &meta, &Down, &trust);
-    assert_eq!(stored, 0, "{lines:?}");
+    // A store whose lookup fails but whose writes work (an S3 GET times out, the PUT goes through): nothing is replaced, because nothing
+    // is known.
+    let blind = BlindStore::default();
+    let (lines, stored) = super::cmd::record_with(&log, &cands, &cfg(), &class, "", &meta, &blind, &trust);
+    assert_eq!((stored, blind.put.get()), (0, 0), "{lines:?}");
+}
+
+/// A store whose lookups fail and whose writes succeed, counting the records it was given.
+#[derive(Default)]
+struct BlindStore {
+    put: std::cell::Cell<usize>,
+}
+impl Store for BlindStore {
+    fn get_many(&self, _: &[Lookup]) -> Result<Vec<Option<Record>>, StoreError> {
+        Err(StoreError("read timed out".into()))
+    }
+    fn put_many(&self, r: &[Record]) -> Result<(), StoreError> {
+        self.put.set(self.put.get() + r.len());
+        Ok(())
+    }
+    fn delete_many(&self, _: &[Lookup]) -> Result<Vec<Option<Record>>, StoreError> {
+        Ok(Vec::new())
+    }
 }
 
 #[test]
@@ -578,7 +609,10 @@ fn the_nightly_is_recognised_by_its_event_or_its_workflow() {
 fn run_facts(git_ref: &str, jobs: &[(&str, bool)]) -> super::trust::RunFacts {
     super::trust::RunFacts {
         git_ref: git_ref.into(),
-        jobs: jobs.iter().map(|(n, ok)| (n.to_string(), *ok)).collect(),
+        jobs: jobs
+            .iter()
+            .map(|(n, ok)| (n.to_string(), if *ok { JobOutcome::Passed } else { JobOutcome::Failed }))
+            .collect(),
     }
 }
 
@@ -601,6 +635,10 @@ fn a_record_counts_only_when_its_run_is_a_main_or_train_run_and_its_own_job_succ
         (8637, 1) => Ok(Some(run_facts("refs/heads/feat/branch", &[("crate (linux)", true)]))),
         (8638, 1) => Ok(Some(run_facts("refs/heads/main", &[("crate (linux)", false)]))),
         (8639, 1) => Err("503".to_string()),
+        (8641, 1) => Ok(Some(super::trust::RunFacts {
+            git_ref: "refs/heads/main".into(),
+            jobs: vec![("crate (linux)".into(), JobOutcome::Unfinished)],
+        })),
         (8640, 1) => Ok(Some(run_facts(
             "refs/heads/main",
             &[("crate (linux)", true), ("crate (linux)", true)],
@@ -630,13 +668,29 @@ fn a_record_counts_only_when_its_run_is_a_main_or_train_run_and_its_own_job_succ
             .contains("did not end success"),
         "a failed job"
     );
+    // No answer is not a no: an unreadable run and a job still running are undecided, so their records are never replaced.
+    let unread = p.check(&ci_rec("8639", "crate (linux)", 1)).unwrap_err();
     assert!(
-        p.check(&ci_rec("8639", "crate (linux)", 1))
-            .unwrap_err()
-            .reason()
-            .contains("could not be read"),
-        "an unreadable run refuses"
+        matches!(&unread, super::trust::Distrust::Unknown(w) if w.contains("could not be read")),
+        "an unreadable run is undecided: {unread:?}"
     );
+    let running = p.check(&ci_rec("8641", "crate (linux)", 1)).unwrap_err();
+    assert!(
+        matches!(&running, super::trust::Distrust::Unknown(w) if w.contains("has not finished")),
+        "a job still running is undecided: {running:?}"
+    );
+    assert!(
+        matches!(
+            p.check(&ci_rec("8638", "crate (linux)", 1)),
+            Err(super::trust::Distrust::Refused(_))
+        ),
+        "a failed job is a definite no"
+    );
+    let no_token = Provenance::new(|_, _| Err("no API token (PLAN_TOKEN or GITEA_TOKEN)".to_string()));
+    assert!(matches!(
+        no_token.check(&ci_rec("8635", "crate (linux)", 1)),
+        Err(super::trust::Distrust::Unknown(_))
+    ));
     assert!(
         p.check(&ci_rec("9999", "crate (linux)", 1))
             .unwrap_err()

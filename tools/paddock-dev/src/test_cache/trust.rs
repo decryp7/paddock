@@ -22,8 +22,8 @@ use std::collections::HashMap;
 pub struct RunFacts {
     /// The ref the workflow ran on (`refs/heads/main`).
     pub git_ref: String,
-    /// Each job of the attempt: its display name and whether it ended `success`.
-    pub jobs: Vec<(String, bool)>,
+    /// Each job of the attempt: its display name and its outcome (a job still running is [`JobOutcome::Unfinished`]).
+    pub jobs: Vec<(String, JobOutcome)>,
 }
 
 /// The facts of attempt `attempt` of a run from the API: `Ok(None)` when the server has no such run. The run's last attempt is read
@@ -44,7 +44,7 @@ pub fn facts(client: &mut Client, id: u64, attempt: u64) -> Result<Option<RunFac
         } else {
             run.git_ref().to_string()
         },
-        jobs: jobs.iter().map(|j| (j.name.clone(), j.outcome == JobOutcome::Passed)).collect(),
+        jobs: jobs.iter().map(|j| (j.name.clone(), j.outcome.clone())).collect(),
     }))
 }
 
@@ -54,7 +54,8 @@ type Fetched = Result<Option<RunFacts>, String>;
 /// How a run attempt's facts are fetched (run, attempt); `Ok(None)` is a run the server does not have.
 type Fetch<'a> = Box<dyn FnMut(u64, u64) -> Result<Option<RunFacts>, String> + 'a>;
 
-/// A reader-side check with its per-run-attempt memory. `fetch` asks for facts; an error or an unknown run refuses the record.
+/// A reader-side check with its per-run-attempt memory. `fetch` asks for facts; an unknown run refuses the record, and a fetch error (the
+/// API failed, no token) leaves it undecided ([`Distrust::Unknown`]).
 pub struct Provenance<'a> {
     fetch: RefCell<Fetch<'a>>,
     seen: RefCell<HashMap<(u64, u64), Fetched>>,
@@ -93,8 +94,13 @@ impl<'a> Provenance<'a> {
         }
         let mut named = facts.jobs.iter().filter(|(name, _)| *name == r.job);
         match (named.next(), named.next()) {
-            (Some((_, true)), None) => Ok(()),
-            (Some((_, false)), None) => Err(format!("job `{}` of run {run} attempt {} did not end success", r.job, r.attempt).into()),
+            (Some((_, JobOutcome::Passed)), None) => Ok(()),
+            // A job still running (a record step writes before its own job ends) has no answer yet: neither trusted nor replaceable.
+            (Some((_, JobOutcome::Unfinished)), None) => Err(Distrust::Unknown(format!(
+                "job `{}` of run {run} attempt {} has not finished",
+                r.job, r.attempt
+            ))),
+            (Some(_), None) => Err(format!("job `{}` of run {run} attempt {} did not end success", r.job, r.attempt).into()),
             (None, _) => Err(format!("run {run} attempt {} has no job `{}`", r.attempt, r.job).into()),
             (Some(_), Some(_)) => Err(format!("run {run} attempt {} has several jobs named `{}`", r.attempt, r.job).into()),
         }
