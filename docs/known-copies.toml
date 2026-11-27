@@ -1602,18 +1602,3 @@ adr = "0123"
   owner = "paddock"
   delete_by = "v0.5.0"
   note = "The nightly's `installers (<App>, ...)` jobs are matched by their display name. They run only in the nightly and are never reused, so the scope line carries no name for them (ADR 0123 §3, out of scope on purpose); the match leaves when the nightly's installer jobs are written into the line or the nightly is split by app."
-
-  [[mechanism.copy]]
-  paths = ["tools/paddock-dev/src/ci_runs/dispatch.rs"]
-  kind = "copy"
-  owner = "paddock"
-  delete_by = "v0.5.0"
-  note = "Reads a workflow's `runs-on` with yaml_rust2 directly (the runner class of its jobs); it moves to the crate's yaml reader when the job model carries `runs-on`."
-
-  [[mechanism.copy]]
-  paths = ["tools/paddock-dev/src/ci_runs/dispatch_guards.rs"]
-  symbols = ["item:takes_since_run"]
-  kind = "copy"
-  owner = "paddock"
-  delete_by = "v0.5.0"
-  note = "Reads the `workflow_dispatch` inputs of a workflow with yaml_rust2 directly; it moves to the crate's yaml reader when the job model carries `on:`."

@@ -84,6 +84,22 @@ uses it, results in
 
 ## Results of shared tooling
 
+### 2026-11-27, trials yield to train runs; planned legs count as Mac and Windows (fix/trials-yield-to-trains)
+
+- **Commit:** origin/main 7da64dedb plus this branch's change. Not a new run: the saving is read from the recorded timeline of train run 9248 against trial run 9247 (CI replay of the two runs), so it is an expected figure.
+- **Machine:** the CI runners: d-gtr9 (6 Linux slots, `conformance/ci/runner-slots.json`) and the Windows runner (3 slots).
+- **Method:** trial 9247 (a member trial of `ci.yml`) was dispatched while train run 9248 of the same workflow was queued. The run lists and job timestamps of both runs were read. `classes_of` found no Mac or Windows class in `ci.yml` (a planned matrix is not a literal value), so neither `ci dispatch` nor `runner-wait` guarded those slots.
+- **Numbers:**
+
+  | Measure | Before | Expected after |
+  |---|---|---|
+  | 9248 `plan` job queued | 87 s (behind 9247's Linux jobs) | 0 s of trial load: the trial waits for the train run to finish |
+  | 9248 `crate (windows-latest)` queued | 315 s (9247 held 2 of 3 Windows slots) | the Windows slots are free of the trial |
+  | Critical-path cost of the trial | about 117 s or more | 0 s |
+  | `ci.yml` runner classes seen by `classes_of` | none | macOS and Windows |
+
+- **Reading:** a trial now waits (at most its `--max`) while a `train/*` run of the same workflow is queued or running, so the train's `plan` and Windows legs start at once. The cost moves to the trial, which is not on a train's critical path. A trial that waits for the whole `--max` ends with an `::error::` naming the train run. Tests: `ci_runs::dispatch::tests::a_trial_waits_while_a_train_run_of_its_workflow_is_queued` and the two beside it. Not measured: the real saving. The next train run with a trial dispatched beside it gives it; record it here.
+
 ### 2026-11-27, train priority in throttle (feat/throttle-train-priority)
 
 - **Commit:** origin/main 696f472f4 plus this branch's change (a debug build of tools/throttle, the binary the tests ran).
