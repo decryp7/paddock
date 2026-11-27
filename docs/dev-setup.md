@@ -197,6 +197,11 @@ with a 7-day expiry for `actions/cache` (the `./dev` binary, npm, Angular, the n
 expiry for sccache. The Windows runner has no zstd, so its cache entries are not shared across operating systems (a Windows key never
 hits a Linux or macOS entry). No folder is shared between concurrent lanes (ADR 0111): each Linux lane has its own
 `<mount>/sccache-<lane>`, and everything kept between jobs goes through a keyed cache.
+The one exception is the `./dev` binary: the plan job keeps the verified tool by its input hash in `<mount>/paddock-dev-tools/<hash>/`
+(`./dev ci dev-tool-store publish`: locked, atomic, at most 6 entries and 1 GiB, least recently used evicted), and every Linux job
+copies it into its own tool folder before it asks the Actions cache (user decision 109; `actions/cache` stays the fallback). Each Linux
+job also asks the Actions cache service once, with a 5 s limit (`dev-tool-cache.sh probe`); when it does not answer, the job skips its
+`actions/cache` steps with one `::warning::` and goes on cold.
 
 **Linker on Linux.** On a Linux development machine use mold (`sudo apt install mold`), in `~/.cargo/config.toml`:
 
