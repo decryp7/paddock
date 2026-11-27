@@ -1219,3 +1219,4 @@ reason = "ER-41: report-only until its first green run on the real tree, recorde
 owner = "ER-21 class: tests assert the live content of a tool-written register (a_run_is_added_to_the_green_runs_once_and_the_file_still_parses broke when shadow-run --write added run 9180; commit 0e33f28f0 worked around it)"
 since = 2026-11-27
 review_by = 2026-12-11
+approved = "user"
