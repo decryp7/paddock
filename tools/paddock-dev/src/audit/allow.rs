@@ -3,6 +3,7 @@
 //! its review day is after today, and on its review day it stops counting (ER-46; ER-42: one declared source, never a second list).
 //! `parse_allow` is tested against the script's own `parseAllow` on the same fixtures, so the two readers cannot drift apart.
 
+use paddock_approvals::{Approver, Claim, Verdict};
 use serde_json::Value;
 use std::path::Path;
 
@@ -92,6 +93,13 @@ pub fn parse_allow(text: &str) -> Result<Vec<Exception>, String> {
         };
         if !is_ghsa(&x.id) {
             return Err(format!("entry {n}: {} is not a GHSA id", x.id));
+        }
+        // The one judge of an approval is `paddock_approvals` (user decision 125); a new exception grows a shrink-only list, so the
+        // user gives it (ER-46). scripts/npm-audit.mjs keeps its copy of this rule, and the shared fixtures make both answer alike.
+        match Claim::from_word(Some(&x.approved_by)).verdict("approvedBy", Approver::User, "approvedBy = \"user\"") {
+            Verdict::Approved => {}
+            Verdict::Missing { line_to_add } => return Err(format!("entry {n} ({}): add {line_to_add}", x.id)),
+            Verdict::Mismatch { why } | Verdict::Stale { why } => return Err(format!("entry {n} ({}): {why}", x.id)),
         }
         let (Some(from), Some(to)) = (day_number(&x.approved), day_number(&x.review_by)) else {
             return Err(format!("entry {n} ({}): days are YYYY-MM-DD", x.id));

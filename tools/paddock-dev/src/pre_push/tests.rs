@@ -3832,3 +3832,30 @@ mod member_tests {
         );
     }
 }
+
+/// The approvals' stage (user decision 2026-11-27): a developer's push judges a missing approval as a warning, the member gate as an
+/// error. The rows that judge approvals (the Rust conformance checks and C100) get it from the environment.
+#[test]
+fn the_rows_that_judge_approvals_carry_the_stage_of_the_run() {
+    let stage_of = |member_gate: bool, id: &str| {
+        let f = Facts { member_gate, ..facts() };
+        let planned = plan_gates(
+            &json!({"conformance": false, "apps": [], "packages": {}}),
+            &change(&["docs/x.md"]),
+            &f,
+        );
+        let row = run_gates(&planned)
+            .into_iter()
+            .find(|g| g.id == id)
+            .cloned()
+            .unwrap_or_else(|| panic!("{id} is not run: {planned:?}"));
+        row.env
+            .iter()
+            .find(|(k, _)| k == crate::check::growth_approval::STAGE_ENV)
+            .map(|(_, v)| v.clone())
+    };
+    for id in ["conformance", "gates-register"] {
+        assert_eq!(stage_of(false, id).as_deref(), Some("branch-push"), "{id}: a push");
+        assert_eq!(stage_of(true, id).as_deref(), Some("member-gate"), "{id}: the member gate");
+    }
+}

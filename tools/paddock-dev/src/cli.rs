@@ -902,6 +902,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
                 release_tag: a.release_tag,
                 warn: a.warn,
                 base: a.base,
+                stage: crate::check::growth_approval::stage_from_env(&|k| std::env::var(k).ok()).map_err(CliError::usage)?,
             },
             dev_command_paths(),
         ),

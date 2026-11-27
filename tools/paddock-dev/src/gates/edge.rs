@@ -169,6 +169,17 @@ fn merge_base(root: &Path, base: &str) -> String {
         .unwrap_or_else(|| base.to_string())
 }
 
+/// The `--format` that gives a commit's trailers as git's own parser reads them (ER-42: the one reader, `merge_check::trailers`).
+fn trailers_format() -> String {
+    format!("--format={}", crate::merge_check::trailers::TRAILERS_FORMAT)
+}
+
+/// The same for the branch's commits together, each led by its sha: the output is empty only when there is no commit, so a branch whose
+/// commits carry no trailer still gets its version (and its date moves are found without a trailer).
+fn head_format() -> String {
+    format!("--format=%H%n{}", crate::merge_check::trailers::TRAILERS_FORMAT)
+}
+
 /// The history of `docs/gates.toml` that date moves are judged against (§3.1), oldest first: every commit of the register along the
 /// first parent of the merge base with `base` (a merge into main is one version, carrying the messages of what it brings in), then one more version for HEAD whose message is the messages of all the branch's
 /// commits to the register together. A branch that creates the register, or moves several dates over several commits, is judged by
@@ -187,8 +198,8 @@ pub fn register_history(root: &Path, base: &str) -> Result<Vec<Version>, String>
     for sha in list.lines() {
         // A commit that deleted the register has no version.
         let Some(text) = register_at(root, sha) else { continue };
-        let mut message = Real
-            .run("git", &["log", "-1", "--format=%B", sha], root, None)
+        let mut trailers = Real
+            .run("git", &["log", "-1", &trailers_format(), sha], root, None)
             .map_err(|e| format!("git log {sha}: {}", e.message))?;
         // A merge is one version: it carries the messages of the register commits it brings in (`sha^1..sha`).
         if Real
@@ -198,17 +209,17 @@ pub fn register_history(root: &Path, base: &str) -> Result<Vec<Version>, String>
             let brought = Real
                 .run(
                     "git",
-                    &["log", "--format=%B", &format!("{sha}^1..{sha}"), "--", "docs/gates.toml"],
+                    &["log", &trailers_format(), &format!("{sha}^1..{sha}"), "--", "docs/gates.toml"],
                     root,
                     None,
                 )
                 .map_err(|e| format!("git log {sha}^1..{sha}: {}", e.message))?;
-            message.push('\n');
-            message.push_str(&brought);
+            trailers.push('\n');
+            trailers.push_str(&brought);
         }
         out.push(Version {
             sha: sha.to_string(),
-            message,
+            trailers,
             text,
         });
     }
@@ -216,7 +227,7 @@ pub fn register_history(root: &Path, base: &str) -> Result<Vec<Version>, String>
         let messages = Real
             .run(
                 "git",
-                &["log", "--format=%B", &format!("{mb}..HEAD"), "--", "docs/gates.toml"],
+                &["log", &head_format(), &format!("{mb}..HEAD"), "--", "docs/gates.toml"],
                 root,
                 None,
             )
@@ -224,7 +235,7 @@ pub fn register_history(root: &Path, base: &str) -> Result<Vec<Version>, String>
         if let (false, Some(text)) = (messages.trim().is_empty(), register_at(root, "HEAD")) {
             out.push(Version {
                 sha: "HEAD".into(),
-                message: messages,
+                trailers: messages,
                 text,
             });
         }
@@ -426,13 +437,106 @@ mod tests {
         git_c(&["merge", "-q", "--no-ff", "-m", "Merge topic", "topic"]);
         // on main the merge is ONE version carrying the messages it brings in
         let h = register_history(root, "main").unwrap();
-        assert_eq!(h.len(), 2, "{:?}", h.iter().map(|v| &v.message).collect::<Vec<_>>());
+        assert_eq!(h.len(), 2, "{:?}", h.iter().map(|v| &v.trailers).collect::<Vec<_>>());
         assert!(date_history(&h).is_empty(), "{:?}", date_history(&h));
         // a later direct commit on main that moves the date without a trailer is caught
         write("2027-01-06");
         git_c(&["commit", "-q", "-am", "docs: quiet move"]);
         let h = register_history(root, "main").unwrap();
         assert_eq!(h.len(), 3);
+        assert!(
+            date_history(&h).iter().any(|p| p.message.contains("without a `Gates-date:")),
+            "{:?}",
+            date_history(&h)
+        );
+    }
+
+    #[test]
+    fn git_reads_the_trailers_so_a_line_in_prose_or_in_a_subject_approves_nothing() {
+        use crate::gates::register::date_history;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let init = [
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+        ];
+        let git_c = |args: &[&str]| git(root, &[&init[..], args].concat());
+        let write = |text: String| {
+            std::fs::create_dir_all(root.join("docs")).unwrap();
+            std::fs::write(root.join("docs/gates.toml"), text).unwrap();
+        };
+        git(root, &["init", "-q", "-b", "main"]);
+        write(entry("2026-12-06"));
+        git(root, &["add", "."]);
+        git_c(&["commit", "-q", "-m", "feat: register"]);
+        // three moves, each with the approval line written another way: inside prose, as the subject, and as a real trailer
+        let t = |old: &str, new: &str| format!("Gates-date: X {old} -> {new}; approved: user");
+        let moves = [
+            (
+                "2026-12-06",
+                "2026-12-07",
+                "docs: one".to_string(),
+                format!("The line {} is how a move is approved.", t("2026-12-06", "2026-12-07")),
+            ),
+            ("2026-12-07", "2026-12-08", t("2026-12-07", "2026-12-08"), String::new()),
+            (
+                "2026-12-08",
+                "2026-12-09",
+                "docs: three".to_string(),
+                format!("why\n\n{}", t("2026-12-08", "2026-12-09")),
+            ),
+        ];
+        for (_, new, subject, body) in &moves {
+            write(entry(new));
+            git_c(&["commit", "-q", "-am", subject, "-m", body]);
+        }
+        let h = register_history(root, "main").unwrap();
+        let problems = date_history(&h);
+        let flagged: Vec<&str> = h
+            .iter()
+            .map(|v| v.sha.as_str())
+            .filter(|sha| problems.iter().any(|p| p.message.contains(&sha[..9])))
+            .collect();
+        let shas = Real.run("git", &["log", "--reverse", "--format=%H"], root, None).unwrap();
+        let shas: Vec<&str> = shas.lines().collect();
+        assert_eq!(
+            flagged,
+            [shas[1], shas[2]],
+            "prose and subject approve nothing, the real trailer does: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn a_branch_whose_commits_carry_no_trailer_still_has_its_version_so_its_date_move_is_found() {
+        use crate::gates::register::date_history;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let init = [
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+        ];
+        let git_c = |args: &[&str]| git(root, &[&init[..], args].concat());
+        let write = |text: String| {
+            std::fs::create_dir_all(root.join("docs")).unwrap();
+            std::fs::write(root.join("docs/gates.toml"), text).unwrap();
+        };
+        git(root, &["init", "-q", "-b", "main"]);
+        write(entry("2026-12-06"));
+        git(root, &["add", "."]);
+        git_c(&["commit", "-q", "-m", "feat: register"]);
+        git(root, &["checkout", "-q", "-b", "topic"]);
+        write(entry("2026-12-20"));
+        git_c(&["commit", "-q", "-am", "docs: re-plan"]);
+        let h = register_history(root, "main").unwrap();
+        assert_eq!(h.last().map(|v| v.sha.as_str()), Some("HEAD"), "{h:?}");
         assert!(
             date_history(&h).iter().any(|p| p.message.contains("without a `Gates-date:")),
             "{:?}",
@@ -480,7 +584,7 @@ mod tests {
             date_history(&h).is_empty(),
             "{:?} in {:?}",
             date_history(&h),
-            h.last().map(|v| &v.message)
+            h.last().map(|v| &v.trailers)
         );
     }
 
@@ -545,7 +649,12 @@ mod tests {
         assert_eq!(h.len(), 2, "{h:?}");
         assert_eq!(h[0].text, "version = 1\n# base\n");
         assert_eq!(h[1].sha, "HEAD");
-        assert!(h[1].message.contains("first move") && h[1].message.contains("Gates-date: x 2026-01-01"));
+        // git's own trailer parser gives the trailers (ER-42), never the prose of the messages
+        assert!(
+            h[1].trailers.contains("Gates-date: x 2026-01-01") && !h[1].trailers.contains("first move"),
+            "{:?}",
+            h[1].trailers
+        );
         // a branch that creates the register has no history to judge
         assert!(register_history(root, "nope").is_err() || register_history(root, "nope").unwrap().is_empty());
     }
