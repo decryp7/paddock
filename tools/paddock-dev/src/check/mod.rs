@@ -19,6 +19,7 @@ pub mod c53_parents;
 pub mod config;
 pub mod conformance;
 pub mod finding;
+pub mod growth_approval;
 pub mod inline_waiver;
 pub mod jsre;
 pub mod lex;

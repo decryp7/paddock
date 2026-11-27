@@ -249,6 +249,8 @@ pub enum Growth<T> {
         added: usize,
         /// Entries it has under another exact key.
         moved: Vec<Moved<T>>,
+        /// The exact keys of the added entries, sorted: what the user's approval of the growth names ([`super::growth_approval`]).
+        fresh: Vec<String>,
     },
     /// Not measurable here: a warning (an error in CI for [`Unmeasured::NoBase`]), never silence.
     Unmeasured(Unmeasured),
@@ -328,7 +330,10 @@ pub fn growth<T: Clone>(
         }
     };
     let r = reconcile(current, &old, exact, loose, &|_, _| true);
+    let mut fresh: Vec<String> = r.fresh.iter().map(|&n| exact(&current[n])).collect();
+    fresh.sort_unstable();
     Growth::Added {
+        fresh,
         base,
         added: r.fresh.len(),
         moved: r

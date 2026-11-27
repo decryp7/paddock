@@ -87,9 +87,10 @@ export default {
       entriesOf: (j) => j.allow ?? [],
       ...(ctx.options.git ? { git: ctx.options.git } : {}),
       ...(ctx.options.baseRef ? { baseRef: ctx.options.baseRef } : {}),
+      check: 'C135',
     });
     if (g.reason) out.push(unmeasuredFinding(ctx, { id: 'C135', rule: 21, file: ALLOW, what: 'the list', g }));
-    else for (const a of g.added) out.push(error('C135', 21, ALLOW, 1, `the list grew: \`${a.site}\` in ${a.path} is not in the list at the merge base ${g.base.slice(0, 9)}`, "Remove the entry and fix the suite; growing the list needs the user's approval."));
+    else for (const a of g.added) out.push(error('C135', 21, ALLOW, 1, `the list grew: \`${a.site}\` in ${a.path} is not in the list at the merge base ${g.base.slice(0, 9)}`, "Remove the entry and fix the suite; growing the list needs the user's approval." + (g.ask ? ` ${g.ask}` : '')));
     return [...out, ...allow.warnings()];
   },
 };

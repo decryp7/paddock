@@ -485,7 +485,7 @@ export const sourceGone = (ctx) => (entry) => !ctx.exists(entry.file);
  * The baseline entries that the baseline at the merge base does not have (a multiset difference by file and hash, then by hash alone: a moved site is `moved`, not added), or `{ reason }`
  * when it could not be measured. One shrink-only rule for every baseline file: conformance/src/util/baseline.mjs.
  */
-export function baselineGrowth(ctx, current, path = BASELINE_PATH) {
+export function baselineGrowth(ctx, current, path = BASELINE_PATH, check = 'C71') {
   return sharedGrowth({
     root: ctx.root,
     path,
@@ -495,6 +495,7 @@ export function baselineGrowth(ctx, current, path = BASELINE_PATH) {
     entriesOf: (json) => json.sites ?? [],
     ...(ctx.options.git ? { git: ctx.options.git } : {}),
     baseRef: targetRef(ctx.options),
+    check,
   });
 }
 
@@ -548,7 +549,7 @@ export default {
         }
         if (!g.reason && g.added.length) {
           const list = g.added.slice(0, 8).map((e) => `${e.file}:${e.line ?? '?'}`).join(', ');
-          out.push(error('C71', 49, path, 1, `the baseline grew: ${g.added.length} entr${g.added.length === 1 ? 'y is' : 'ies are'} not in the baseline at the merge base ${g.base.slice(0, 9)} (${list}${g.added.length > 8 ? ', ...' : ''}); it may only shrink (ADR 0041 §4)`, 'Remove the entries and fix the sites (wait on the condition, a fake clock, or a waiver with its reason). Growing the baseline needs the user\'s approval.'));
+          out.push(error('C71', 49, path, 1, `the baseline grew: ${g.added.length} entr${g.added.length === 1 ? 'y is' : 'ies are'} not in the baseline at the merge base ${g.base.slice(0, 9)} (${list}${g.added.length > 8 ? ', ...' : ''}); it may only shrink (ADR 0041 §4)`, 'Remove the entries and fix the sites (wait on the condition, a fake clock, or a waiver with its reason). Growing the baseline needs the user\'s approval.' + (g.ask ? ` ${g.ask}` : '')));
         }
       }
     }
