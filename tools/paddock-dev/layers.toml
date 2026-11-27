@@ -112,6 +112,7 @@ modules = [
 name = "gates"
 uses = ["ci"]
 modules = [
+    "mutants_gate",
     "pre_push",
 ]
 
