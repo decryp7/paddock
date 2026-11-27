@@ -8,6 +8,7 @@
 //! masked; waits are logged; the queue is FIFO with `--high` first. Ticket and marker liveness still compares a pid with the OS start
 //! time (never a formatted time; EPERM is alive).
 
+pub mod boot;
 pub mod capture;
 pub mod cli;
 pub mod clock;
