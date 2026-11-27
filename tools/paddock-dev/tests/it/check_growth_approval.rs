@@ -250,7 +250,11 @@ fn a_digest_of_other_additions_a_wrong_count_a_line_that_is_not_the_users_or_ano
 #[test]
 fn the_javascript_reader_agrees_with_the_rust_reader_on_digest_and_approval() {
     use super::check::{has_node, node, skip};
-    use paddock_dev::check::growth_approval::{GrowthApproval, growth_approval, growth_digest};
+    use paddock_approvals::{Verdict, growth_digest, judge_growth, parse_gates};
+    let growth_approved = |gates: &str, check: &str, keys: &[String]| {
+        let records = parse_gates(gates).map(|g| g.growth).unwrap_or_default();
+        judge_growth(&records, check, keys) == Verdict::Approved
+    };
     if !has_node() {
         return skip("node is not installed");
     }
@@ -270,10 +274,7 @@ fn the_javascript_reader_agrees_with_the_rust_reader_on_digest_and_approval() {
             format!("{}\n[[other]]\ncheck = \"C139\"\n", gates("C139", "user", 4, &right)),
         ),
     ];
-    let want: Vec<bool> = cases
-        .iter()
-        .map(|(c, g)| growth_approval(Some(g), c, &keys) == GrowthApproval::Approved)
-        .collect();
+    let want: Vec<bool> = cases.iter().map(|(c, g)| growth_approved(g, c, &keys)).collect();
     assert_eq!(
         want,
         [true, false, false, false, false, false, true],

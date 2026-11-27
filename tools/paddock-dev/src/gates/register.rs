@@ -50,15 +50,6 @@ impl fmt::Display for Date {
     }
 }
 
-/// Who approved an entry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Approver {
-    /// The coordinator.
-    Coordinator,
-    /// The user.
-    User,
-}
-
 /// The fields every dated entry carries.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stamp {
@@ -70,8 +61,6 @@ pub struct Stamp {
     pub since: Date,
     /// When it is reviewed at the latest.
     pub review_by: Date,
-    /// Who approved it.
-    pub approved: Approver,
 }
 
 /// An entry of `not_gated`, `conditional`, `report_only` or `level`.
@@ -232,7 +221,8 @@ fn date(t: &toml::Table, k: &str) -> Option<Date> {
 
 fn stamp(t: &toml::Table, ctx: &str, errors: &mut Vec<String>) -> Option<Stamp> {
     let mut missing = Vec::new();
-    for k in ["reason", "owner", "since", "review_by", "approved"] {
+    // `approved` is not read here: the approvals have one reader (`paddock_approvals`, judged in `evaluate`).
+    for k in ["reason", "owner", "since", "review_by"] {
         if !t.contains_key(k) {
             missing.push(k);
         }
@@ -241,14 +231,6 @@ fn stamp(t: &toml::Table, ctx: &str, errors: &mut Vec<String>) -> Option<Stamp> 
         errors.push(format!("{ctx} lacks {}", missing.join(", ")));
         return None;
     }
-    let approved = match text(t, "approved").as_deref() {
-        Some("coordinator") => Approver::Coordinator,
-        Some("user") => Approver::User,
-        other => {
-            errors.push(format!("{ctx}: approved = {other:?} must be \"coordinator\" or \"user\""));
-            return None;
-        }
-    };
     let (Some(since), Some(review_by)) = (date(t, "since"), date(t, "review_by")) else {
         errors.push(format!("{ctx}: since and review_by must be dates (YYYY-MM-DD)"));
         return None;
@@ -258,7 +240,6 @@ fn stamp(t: &toml::Table, ctx: &str, errors: &mut Vec<String>) -> Option<Stamp> 
         owner: text(t, "owner").unwrap_or_default(),
         since,
         review_by,
-        approved,
     })
 }
 
@@ -370,10 +351,6 @@ pub fn parse(src: &str) -> (Register, Vec<String>) {
             text(e, "id").unwrap_or_default(),
             text(e, "app").unwrap_or_default()
         );
-        if text(e, "approved").as_deref() != Some("user") {
-            errors.push(format!("{ctx} needs approved = \"user\""));
-            continue;
-        }
         let (Some(id), Some(app), Some(owner), Some(target)) = (text(e, "id"), text(e, "app"), text(e, "owner"), text(e, "target")) else {
             errors.push(format!("{ctx} lacks id, app, owner or target"));
             continue;
@@ -959,12 +936,17 @@ approved = "user"
         let (r, errs) = parse(GOOD);
         assert!(errs.is_empty(), "{errs:?}");
         assert_eq!((r.not_gated.len(), r.ignored.len(), r.ratchet.len(), r.harness.len()), (1, 1, 1, 1));
-        let bad = GOOD
-            .replace("owner = \"ADR 0060 WP-4\"\n", "")
-            .replace("approved = \"user\"", "approved = \"coordinator\"");
+        let bad = GOOD.replace("owner = \"ADR 0060 WP-4\"\n", "");
         let (_, errs) = parse(&bad);
         assert!(errs.iter().any(|e| e.contains("lacks owner")), "{errs:?}");
-        assert!(errs.iter().any(|e| e.contains("needs approved = \"user\"")), "{errs:?}");
+        // The approvals are not this reader's: a register that lacks `approved` still parses whole (`paddock_approvals` judges it).
+        let (r, errs) = parse(
+            &GOOD
+                .replace("approved = \"user\"\n", "")
+                .replace("approved = \"coordinator\"\n", ""),
+        );
+        assert!(errs.is_empty(), "{errs:?}");
+        assert_eq!((r.not_gated.len(), r.ignored.len(), r.ratchet.len()), (1, 1, 1));
         assert!(parse("not = toml = at all").1[0].contains("not valid TOML"));
         assert!(parse("version = 2").1[0].contains("version must be 1"));
     }

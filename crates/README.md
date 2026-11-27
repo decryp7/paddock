@@ -139,6 +139,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-repo-graph` | the project graph: Cargo and npm projects and edges (Tauri `frontendDist`, tsconfig, angular.json, ESLint config references), file to project, the affected closure, lockfile differences and a `History` port; git and `cargo metadata` adapters behind features (ADR 0022 §6) | yes (`paddock-dev`; Pacenotes later); built |
 | `paddock-ci-config` | the CI job model: ci.yml's jobs, matrices, `needs` and the projects each job runs for, built once from the workflow text (`jobs::model`, `jobs::render`); the one CI YAML reader (`yaml`) and expression evaluator (`expr`); a pure core with no file or process I/O (ADR 0123) | yes (`paddock-dev`); built |
 | `paddock-slots` | numbered slots over OS file locks the kernel releases when the holder dies, a holder protocol and a typed API: no stale reclaim, so no reclaim race (ADR 0022, the CI kit's job isolation) | yes (`paddock-dev ci slot`); built |
+| `paddock-approvals` | approvals of exceptions as one pure core: a typed record of each approval kind (the gate register's `approved` fields, `[[register_growth]]`, docs/os-removals.toml), one verdict per thing that needs approval (approved, missing, mismatch, stale) and one stage policy (branch push, member gate, landing) | yes (`paddock-dev`: the gates register row, the growth checks, C155); built |
 | `paddock-throttle` | the throttle core: one heavy step at a time per machine; slots as kernel file locks, a FIFO queue, load rules, the priority lane, the CLEF troubleshooting log and per-run logs, and the stall detector; ports for clock, process table and load. The `throttle` program (`tools/throttle`) is the thin binary over it (user decision 77) | yes (`tools/throttle`; `paddock-shim` next); built, moved from the tool |
 | `paddock-shim` | interception and monitoring of heavy tools (cargo, npm, npx, node, playwright, ng) by the name a program is called as: the real tool further along PATH, a throttle slot, the same arguments, streams and exit code, an event stream with sinks (run log line, stall report); install of the links (user decision 77) | yes (`tools/throttle`, as `throttle shims install`); built |
 | `paddock-siblings` | hand-off between the family's apps: the apps and what each accepts (`docs/ecosystem.md`), a typed `Handoff` (open, import files, show an item), discovery of an installed sibling per OS, starting it detached with paths or a deep link, plain "not installed" and "needs update" answers, the receiving side's parsers (plan X45; from Pitcrew's `debrief_link.rs` and `handoff.rs`) | yes (Pitcrew, Dyno, Debrief, Spotter); built |
@@ -2174,3 +2175,23 @@ The shared layers under `tools/paddock-dev` (`./dev`), each with a pure core and
   or written (Windows locks block other handles); `sN.owner` and `sN.release` are information and a request. Reading
   `slot_states` takes a shared lock on `sN.live` for an instant and never touches `sN.lock`, so a status call cannot make an acquirer skip a slot.
   Used by `./dev ci slot acquire|release|status` (see `tools/paddock-dev/src/slots.rs` for the detached-holder design).
+
+## `paddock-approvals` (user decision 2026-11-27)
+
+One pure core for every approval of an exception (ER-46, ER-39, ER-41); no file, git or process access. The caller reads the registers
+and the merge-base diff (`tools/paddock-dev`) and hands in text and sets.
+
+- Records, read with the `toml` crate (ER-42): `parse_gates` (docs/gates.toml: the `approved` field of every entry of `ENTRY_TABLES` as an
+  `EntryRecord`, and the `[[register_growth]]` records as `GrowthRecord`) and `parse_os_removals` (docs/os-removals.toml: `OsRemovalRecord`).
+  A text that cannot be read is a `Problem`: a broken register approves nothing.
+- Verdict, one per thing that needs approval: `Verdict::{Approved, Missing { line_to_add }, Mismatch { why }, Stale { why }}` from
+  `EntryRecord::verdict`, `judge_growth` (the additions' count and `growth_digest`) and `judge_os_removals` (per removal key). Stale means
+  the exception it approves is already on the target branch, so the line goes. `Missing` carries the line the approver records; the crate
+  never writes an approval.
+- Stage, `Stage::{BranchPush, MemberGate, Landing}` and `severity(stage, &verdict, added_by_branch)`: Missing on an entry the branch adds is
+  a warning at a push and an error at the member gate and landing (an entry main already carries without it: an error always); Stale is a
+  warning on a branch and an error at landing; Mismatch is always an error. `judge_entries` applies it to a whole register against the
+  target branch's. `Stage::or_strictest(None)` is landing.
+- Used by `paddock-dev` through `check::growth_approval` (a thin adapter), C100's register row (`gates check`) and C155. The stage reaches
+  them through `PADDOCK_APPROVAL_STAGE`, which `./dev check --pre-push` sets (`branch-push`, or `member-gate` with `--member-gate`).
+  The JavaScript copy of the growth reader stays in `conformance/src/util/baseline.mjs`; a parity test holds both to the same digest and answers.
