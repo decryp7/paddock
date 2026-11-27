@@ -1,0 +1,3 @@
+2026-11-25T14:38:10.9098060Z Job: paddock-dev
+2026-11-25T14:39:13.7135710Z [32;1m    Starting[0m [1m2198[0m tests across [1m3[0m binaries ([1m380[0m tests [33;1mskipped[0m, including [1m97[0m tests via [1mprofile.ci.default-filter[0m)
+2026-11-25T14:45:06.9685230Z [32;1m     Summary[0m [ 353.256s] [1m2198[0m tests run: [1m2198[0m [32;1mpassed[0m, [1m380[0m [33;1mskipped[0m

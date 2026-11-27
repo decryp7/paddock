@@ -1,0 +1,11 @@
+2026-11-25T14:38:10.9634574Z Job: crate
+2026-11-25T14:39:06.8416359Z [32;1m    Starting[0m [1m4307[0m tests across [1m102[0m binaries ([1m123[0m tests [33;1mskipped[0m)
+2026-11-25T14:43:26.1501330Z [32;1m     Summary[0m [ 259.308s] [1m4307[0m tests run: [1m4307[0m [32;1mpassed[0m, [1m123[0m [33;1mskipped[0m
+2026-11-25T14:43:29.5317136Z [32;1m    Starting[0m [1m140[0m tests across [1m4[0m binaries
+2026-11-25T14:43:34.4652393Z [32;1m     Summary[0m [   4.933s] [1m140[0m tests run: [1m140[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-25T14:43:36.8136023Z [32;1m    Starting[0m [1m197[0m tests across [1m7[0m binaries
+2026-11-25T14:43:39.3911054Z [32;1m     Summary[0m [   2.578s] [1m197[0m tests run: [1m197[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-25T14:43:41.4496683Z [32;1m    Starting[0m [1m119[0m tests across [1m2[0m binaries
+2026-11-25T14:43:47.2596992Z [32;1m     Summary[0m [   5.810s] [1m119[0m tests run: [1m119[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-25T14:43:48.9876754Z [32;1m    Starting[0m [1m123[0m tests across [1m2[0m binaries
+2026-11-25T14:43:49.9291983Z [32;1m     Summary[0m [   0.942s] [1m123[0m tests run: [1m123[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m

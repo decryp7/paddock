@@ -1,0 +1,9 @@
+2026-11-25T21:11:24.9747060Z Job: app
+2026-11-25T21:14:28.6228220Z [32;1m    Starting[0m [1m3042[0m tests across [1m70[0m binaries ([1m18[0m tests [33;1mskipped[0m)
+2026-11-25T21:16:49.0199990Z [35;1m  TRY 1 FAIL[0m [   0.110s] (─────────) [35;1mdyno-platform[0m [36mvolumes::tests[0m[36m::[0m[34;1mfree_on_macos_is_never_below_statvfs[0m
+2026-11-25T21:16:49.1741410Z [31;1m  TRY 2 PASS[0m [   0.153s] (2950/3042) [35;1mdyno-platform[0m [36mvolumes::tests[0m[36m::[0m[34;1mfree_on_macos_is_never_below_statvfs[0m
+2026-11-25T21:16:58.2251030Z [31;1m     Summary[0m [ 149.601s] [1m3042[0m tests run: [1m3041[0m [32;1mpassed[0m, [1m1[0m [31;1mfailed[0m, [1m18[0m [33;1mskipped[0m
+2026-11-25T21:16:58.2251060Z [31;1m FLKY-FL 2/2[0m [   0.153s] (2950/3042) [35;1mdyno-platform[0m [36mvolumes::tests[0m[36m::[0m[34;1mfree_on_macos_is_never_below_statvfs[0m
+2026-11-25T21:16:58.3357380Z ::error::failed (exit 100): cargo nextest run --workspace --profile ci
+2026-11-25T21:16:58.3630410Z ##[error]Process completed with exit code 1.
+2026-11-25T21:17:16.8535800Z ##[error]Process completed with exit code 1.

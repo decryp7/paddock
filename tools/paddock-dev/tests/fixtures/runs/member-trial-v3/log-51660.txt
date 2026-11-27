@@ -1,0 +1,3 @@
+2026-11-26T13:20:42.4811212Z Job: conformance
+2026-11-26T13:28:15.7568288Z [32;1m    Starting[0m [1m20[0m tests across [1m3[0m binaries ([1m2776[0m tests [33;1mskipped[0m)
+2026-11-26T13:28:16.1328472Z [32;1m     Summary[0m [   0.376s] [1m20[0m tests run: [1m20[0m [32;1mpassed[0m, [1m2776[0m [33;1mskipped[0m
