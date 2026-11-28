@@ -1,0 +1,14 @@
+2026-11-27T18:23:47.7886811Z Job: crate
+2026-11-27T18:29:00.9621078Z [32;1m    Starting[0m [1m4506[0m tests across [1m105[0m binaries ([1m123[0m tests [33;1mskipped[0m)
+2026-11-27T18:41:36.4566796Z [31;1m  TRY 2 PASS[0m [ 123.627s] (4506/4506) [35;1mpaddock-throttle::it[0m [36mslots[0m[36m::[0m[34;1mthe_queue_model_has_no_wait_cycle_and_never_exceeds_the_maximum[0m
+2026-11-27T18:41:36.4566796Z [31;1m     Summary[0m [ 755.498s] [1m4506[0m tests run: [1m4505[0m [32;1mpassed[0m ([1m1[0m [33;1mslow[0m), [1m1[0m [31;1mfailed[0m, [1m123[0m [33;1mskipped[0m
+2026-11-27T18:41:36.4570608Z [31;1m FLKY-FL 2/2[0m [ 123.627s] (4506/4506) [35;1mpaddock-throttle::it[0m [36mslots[0m[36m::[0m[34;1mthe_queue_model_has_no_wait_cycle_and_never_exceeds_the_maximum[0m
+2026-11-27T18:41:36.5972594Z ##[error]Process completed with exit code 100.
+2026-11-27T18:41:56.1558890Z [32;1m    Starting[0m [1m140[0m tests across [1m4[0m binaries
+2026-11-27T18:42:02.7482894Z [32;1m     Summary[0m [   6.591s] [1m140[0m tests run: [1m140[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-27T18:42:05.1321270Z [32;1m    Starting[0m [1m197[0m tests across [1m7[0m binaries
+2026-11-27T18:42:07.6721823Z [32;1m     Summary[0m [   2.540s] [1m197[0m tests run: [1m197[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-27T18:42:09.9441993Z [32;1m    Starting[0m [1m119[0m tests across [1m2[0m binaries
+2026-11-27T18:42:17.3729860Z [32;1m     Summary[0m [   7.428s] [1m119[0m tests run: [1m119[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-27T18:42:19.4331849Z [32;1m    Starting[0m [1m124[0m tests across [1m2[0m binaries
+2026-11-27T18:42:20.4872459Z [32;1m     Summary[0m [   1.056s] [1m124[0m tests run: [1m124[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
