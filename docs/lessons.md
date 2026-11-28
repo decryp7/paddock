@@ -4606,6 +4606,18 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   `ci test-cache selfcheck --shared` on every leg before it records (ER-33). Not covered: the shell and Node scripts that write a config
   (`conformance/ci/dev-tool-publish.sh`, a token with no backslash or quote) are not Rust and still write their own line.
 
+## A test that builds inside its time budget fails together with its family on a cold build (2026-11-28, fix/nextest-build-cost-class, run 9371)
+- **What happened.** CI run 9371 (a cold cache after a rustflags change) stopped ten plugin tests at the default 60 s (five of `cargo-paddock-plugin::it
+  test_command` in one `crate` job, five of `paddock-plugin-host::it faults` in another); all passed on the retry in 37 s to 46 s, and flaky-as-failure turned the legs
+  red. Every test that locates the plugin fixture starts `cargo build -p paddock-plugin-test --bin ...` when the program is not built (CI selects the two
+  packages without `paddock-plugin-test`), the children wait on one build, and a cold build is longer than the limit meant for the test's own work. The
+  census found 54 such tests in `crates`, 21 in Pitcrew and 1 in Debrief; the stand-in compile (`rustc`, 0.3 s) is no member.
+- **Fix.** One cost class, `build` (ER-12, ER-44): a test that starts a compiler or `cargo build` has the name prefix `build_`, each workspace's default
+  nextest profile gives that filterset a budget from the measured cold time (docs/benchmarks.md, "test build cost class"), and every place that starts a build
+  calls `paddock_testkit::build_cost::charge`, which fails a test of another name under nextest. paddock-dev's `build_cost` tests check the places and the
+  overrides by `syn` and the TOML parser, with positive controls. Not fixed here: the child `cargo build` does not get the parent's `--config` flags, so a
+  rustflags change makes it a full rebuild (the class takes the cost, it does not remove it).
+
 ## A golden went stale and the push passed (2026-11-28, fix/prepush-golden-rows, trials 9286, 9327, 9360)
 - **What happened.** Three times in two days a change altered what a golden records and only a CI trial went red: `fix/sccache-start-reliable` and
   `fix/pipefail-grep-q` changed setup-rust shell steps and left `tests/golden/ci-run/commands.tsv` stale (9286, 9327); `fix/flaky-touched-grading`

@@ -84,6 +84,31 @@ uses it, results in
 
 ## Results of shared tooling
 
+### 2026-11-28, test build cost class (fix/nextest-build-cost-class)
+
+- **Commit:** measured on a scratch copy of origin/main a3d3d98ee (the tests unchanged: the class and its names are this branch); CI numbers from run 9371 (trial/tmp/sccache-remap-measure at 664b2228e, the `crate (ubuntu-latest, 1/3)` and `(2/3)` jobs 54415 and 54416).
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2.1, rustc 1.100.0 (rust-toolchain.toml), debug test profile. A fresh build folder for every row and no sccache (`RUSTC_WRAPPER=` empty); one build at a time through `./dev throttle`.
+- **Load:** 1-minute load 19.8 at the start of the first row, 7.3 at the end of the last (other agents' work on the host).
+- **Cause (CI run 9371):** the run followed a change of the rustflags (the remap of the build folder's path), and CI selects `paddock-plugin-host` and `cargo-paddock-plugin` without `paddock-plugin-test`, so the fixture is not prebuilt: `paddock_plugin_test::fixture::locate` starts `cargo build -p paddock-plugin-test --bin paddock-plugin-fixture` inside the test. Reproduced in P2 with a parent that has `--config` rustflags the child cargo does not get (that the child lacks them in run 9371 is inferred from P2, not read from the log): the child rebuilds the fixture's dependency graph from nothing. Every test that locates the fixture waits on that one build (cargo's build lock), so the whole family reaches the limit together, and only the first try's compiled work is kept for the retry.
+- **Command:** (P1) `cargo build --quiet -p paddock-plugin-test --bin <name>` in `crates`, one fixture after the other; (P2) `cargo nextest run -p paddock-plugin-host -p cargo-paddock-plugin --all-features --no-fail-fast --config "target.'cfg(all())'.rustflags=['--remap-path-prefix=<build folder>=/paddock-target']"` with a nextest configuration that stops nothing for 30 minutes (the CI shape: the parent has flags the children lack, and CI selects only these two packages, so the fixture is not prebuilt); (P3) `cargo build --quiet -p pitcrew-service --example fake_runner` in `apps/pitcrew`; (P4) `cargo build -q -p debrief-store-worker` in `apps/debrief/app/src-tauri`; (P5) the stand-in's `rustc --edition 2021 -C debuginfo=0` as `paddock-testkit`'s `compile_stub` runs it.
+- **Runs:** single (n = 1 each): a cold build is the thing measured, and it cannot be repeated without emptying the folder.
+- **Numbers:**
+
+  | Measure | Time |
+  |---|---|
+  | P1: plugin fixture, cold folder | 40.7 s (`paddock-plugin-fixture`), then 0.7 s (`-v1`) and 0.6 s (`misbehaving`) over its dependencies |
+  | P2: the 13 slowest tests of the 123 (those that locate the fixture), cold in-test rebuild | 39.6 s to 41.0 s each, the run 43.0 s (14 tests over 30 s), 84.3 s with the test build |
+  | P2: the same tests with the fixture prebuilt (`-p paddock-plugin-test` selected too) | 0.1 s to 2.3 s each |
+  | CI run 9371, 10 tests (`cargo-paddock-plugin::it test_command` 5, `paddock-plugin-host::it faults` 5) | try 1 stopped at 60.01 s to 60.02 s (TMT) all ten; try 2 passed in 37.4 s to 38.6 s, one in 45.8 s (`a_crashing_plugin_is_restarted_after_the_back_off_and_then_quarantined`). A cold CI build is therefore about 60 s plus the 38 s to 46 s the retry still needed, near 100 s |
+  | P3: Pitcrew's `fake_runner` example, cold | 138.3 s |
+  | P4: `debrief-store-worker`, cold, from the app's folder | 412.3 s |
+  | P4b: Debrief's `health::commands::tests::build_a_real_store_worker_...` as nextest ran it (the app's test program built, the worker not; the ci profile), cold in-test `cargo build -p debrief-store-worker` | 249.3 s for the test (try 1; it then failed at the link for want of `libduckdb` in the child's environment, a setup fault of this run, and passed in 5.9 s once `apps/debrief/.cargo/libduckdb.toml` named the library); the class's 1800 s held it where the ci profile's 90 s would have stopped it |
+  | P5: the stand-in compile | 0.3 s |
+  | The other builds in tests: `cargo-paddock-plugin` flow's tiny project, `paddock-testkit`'s one-file crate | 0.2 s to 1.2 s (warm folder, nextest's own times, run once) |
+
+- **The class:** a test that starts a compiler or `cargo build` has the name prefix `build_` (`paddock_testkit::build_cost`). Members, found by running the tests with the charge in place (a test of another name fails with the new name): 54 tests of `crates` (22 `paddock-plugin-host::it faults`, 12 `features`, 12 `install`, 5 `cargo-paddock-plugin::it test_command`, 1 `flow`, 2 `paddock-plugin-test::it fake`), 1 of `paddock-testkit::it process` (a real `cargo build` of a one-file crate), 21 of Pitcrew's `supervision` and 1 of Debrief's `health::commands::tests`. Budgets (hang backstops, ER-12): `crates` 300 s (7x the cold 40.7 s, 3x the CI 100 s), Pitcrew 900 s (6.5x the 138 s), Debrief 1800 s (4.4x the 412 s). Not in the class: the stand-in compile (P5, 0.3 s; `StandIn::install` is in hundreds of tests and none of them was slow in run 9371), `cargo metadata`, `cargo tree` and `cargo generate-lockfile` (no compiler; the graph class of paddock-dev), and Debrief's `debrief-plugin-dotnet` real-runtime fixture (`dotnet build`, skipped where no SDK is installed, and no CI runner has one).
+- **Notes:** the first number of each row is the cold one; the margins are the ones the paddock-dev time tiers use (ADR 0121), kept as a backstop for a hang and not as a performance limit. The in-test build not inheriting the parent's `--config` flags is the cause of the 60 s, and is left as it is here: a build in a test is a class of its own cost, and a class that never needed the default limit again is what this change records. Raw output: the measuring script's log of 2026-11-28, kept in the author's scratch folder only.
+
 ### 2026-11-28, the golden row in the push gate (fix/prepush-golden-rows)
 
 - **Commit:** base a3d3d98ee, this branch (before the commit: the working tree of the branch).

@@ -497,6 +497,7 @@ dependencies = [
  "paddock-plugin-package",
  "paddock-plugin-test",
  "paddock-proc",
+ "paddock-testkit",
  "paddock-workspace-hack",
  "serde_json",
  "tempfile",
