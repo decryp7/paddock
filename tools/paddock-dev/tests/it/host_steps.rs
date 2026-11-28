@@ -628,8 +628,11 @@ fn build_folder_writes_the_kept_folder_to_the_included_ci_toml_and_target_in_a_c
     let host = same(&|fx| cargo_ws(fx, true), &build_folder("macOS", "spotter-rust", "s1"));
     assert!(
         host.tree.iter().any(|l| l.starts_with("f ws/.cargo/ci.toml")
-            && l.ends_with("[build]\\ntarget-dir = '<ROOT>/home/.paddock-ci/target-spotter-rust-s1'\\n\"")),
-        "cargo reads the folder from the included ci.toml: {:?}",
+            && l.contains("[build]\\ntarget-dir = '<ROOT>/home/.paddock-ci/target-spotter-rust-s1'\\n")
+            && l.ends_with(
+                "[target.'cfg(all())']\\nrustflags = ['--remap-path-prefix=<ROOT>/home/.paddock-ci/target-spotter-rust-s1=/paddock-target']\\n\""
+            )),
+        "cargo reads the folder from the included ci.toml, and the folder is remapped to one fixed name: {:?}",
         host.tree
     );
     // A container, a second slot, a config without the include, a bad name and a host job without a slot.

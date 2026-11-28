@@ -3416,6 +3416,44 @@ trains of 2026-11-26/27 touched 16 areas on average, and 11 of 15 changed a laye
 each option would have run; whole-repository classes keyed on the whole tree): trains 93 to 98% for every option, members 55 to 78% against
 82% today. Limits: the layering is a sketch; per-test seconds sum the threads. Quoted by ADR [0125](adr/0125-paddock-devs-tests-always-run-and-the-crate-is-layered-before-any-split-by-area.md).
 
+## sccache build-folder remap: the same bytes in every slot (2026-11-28, ci/sccache-remap-build-folder, user decision 142)
+
+**Question.** Windows CI missed sccache across runner slots because compiled libraries embed the slot's build-folder path (trial 9286: every serde rlib held
+`target-paddock-crate-s3` twice, so the bytes differed by slot and so did the key of every dependent). **Change.** `build-folder` writes
+`[target.'cfg(all())'] rustflags = ['--remap-path-prefix=<build folder>=/paddock-target']` to `.cargo/ci.toml` on all three OSes (a Linux container: the remap alone).
+**Option and sources.** rustc's stable `--remap-path-prefix` (rustc book, "Command-line arguments"). Cargo's `trim-paths` is still unstable on the pinned cargo 1.100.0
+(`cargo -Z help` lists `-Z trim-paths`; cargo reference, "Unstable features") and would remap the sources too, which the decision excludes. The key is `target.<cfg>`, not
+`build.rustflags`: cargo uses one source of rustflags and a matching `target.<cfg>` entry (the root config's Windows `+crt-static`) beats `build.rustflags`
+(cargo reference, "Configuration"); all matching `target.<cfg>` entries are joined (checked: both flags reach rustc).
+
+**Local proof (Mac mini, rustc 1.100.0).** `cargo build -p serde_json` in `tools/throttle` into two fresh folders, no sccache, `CARGO_INCREMENTAL=0`:
+
+| Build | serde_core rlib | serde_json rlib | itoa, memchr, zmij |
+|---|---|---|---|
+| no remap, folders A and B | DIFFERENT (1 slot path inside) | DIFFERENT | identical |
+| remap in `ci.toml` form, folders A and B | IDENTICAL (0 slot paths, `/paddock-target/debug/build/serde_core/<h>/out/private.rs`) | IDENTICAL | identical |
+
+With a private sccache server (`SCCACHE_BASEDIRS` naming both folders) the second folder hit 5 of 5 Rust compiles, so the remap argument (which names the folder) does not enter the key.
+
+**CI proof (trial run 9371 of a throwaway branch with a temporary proof step; the step is not in this branch).** Same method on each leg, two fresh folders, rlibs compared with `cmp`:
+macOS (job 54346, slot s4) and Windows (job 54418, slot s1): with the remap serde_core and serde_json are IDENTICAL (`/paddock-target` twice inside, no slot path); without it
+both are DIFFERENT. Windows' `cfg(all())` table therefore joins with `+crt-static` and the remap matches the `C:/...` folder. The macOS slot folder also held a serde_core restored
+from the cache with `target-paddock-crate-s3` inside: the old defect, seen in slot s4.
+
+**Panics and backtraces.** A test crate whose build script writes `gen.rs` into `OUT_DIR` and `include!`s it, built with the remap: `file!()` of an own file `src/lib.rs`,
+`Location::caller()` `src/lib.rs:8:43`, an own panic `src/lib.rs:14:56`; the generated file shows `/paddock-target/debug/build/probe/<h>/out/gen.rs` (also in its panic location).
+Source paths are unchanged; only build-script output is renamed, so a debugger cannot open it from the printed path (it is generated).
+
+**sccache statistics, Windows crate leg.** Before (run 9325, job 53572, slot s2, a warm build folder): 43 compiles executed, L0 hits 0, L1 (S3) hits 0, misses 43, S3 writes 16,
+write failures 22. After, first run with the new flags (run 9371, job 54418, slot s1): 1101 executed (the flag changes every key and every fingerprint, once), S3 hits 0, misses 1101,
+**S3 write failures 888, writes 0**; the guard logged the store not answering within 10 s. macOS (job 54346): 1113 executed, L0 hits 26, S3 hits 0, write failures 984. So the
+S3 hit rate after the change could **not be measured**: the first run only fills the cache, and the store refused most writes, so a later slot found little to hit. A second run
+(the real branch's trial) is held (user: RustFS is being moved).
+**First-run cost.** Every Rust job rebuilt everything once (crate Windows 41 min against 6 to 13, macOS 21 min against 4 to 10). On Linux, ten plugin tests that build a fixture binary
+inside the test hit the 60 s hang limit and passed on the retry (flaky-as-failure, so the jobs were red): cold cache after the flag change, not a path effect; one more run on a filled cache is
+needed to confirm. A Linux container's path is the same in every lane, so the remap helps Linux only across workspaces; the user decided to apply it there too.
+**Not measured:** S3 hits after the change; a warm second run; Linux hit rates.
+
 ## Member audits in a developer's push (2026-11-28, fix/prepush-member-audits)
 
 Question: can a developer's `./dev check --pre-push` run the `member-audits` profile, so a builder meets `safe_remove_lint` and its
