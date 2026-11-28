@@ -68,9 +68,9 @@ fn a_child_forked_before_it_execs_keeps_the_folder_locked_until_it_does_and_the_
     assert_eq!(unsafe { libc::read(ready[0], std::ptr::addr_of_mut!(b).cast(), 1) }, 1);
 
     first.stop();
-    assert!(
-        dyno_agent::instance::is_held(&dirs),
-        "the stopped agent's lock should still be held by the forked child's copy of the descriptor"
+    paddock_testkit::lock::await_held(
+        "the stopped agent's lock is still held by the forked child's copy of the descriptor",
+        || dyno_agent::instance::is_held(&dirs),
     );
     match start_on(&dirs) {
         Ok(r) => {

@@ -9,6 +9,7 @@ mod exe;
 mod golden;
 mod hostile;
 mod limits;
+mod lock;
 mod net;
 mod path;
 mod process;
