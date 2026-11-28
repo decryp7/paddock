@@ -741,7 +741,7 @@ pub fn plan_text(p: &Plan) -> String {
 pub fn command_plan(root: Option<PathBuf>, base: &str) -> Result<Report, CliError> {
     let root = crate::gates::command::repo_root(root.as_deref())?;
     // The run's own folder under the job's temp folder (or the system's), with an owner record, removed through `safe_remove` as the gate's is.
-    let parent = scratch_parent(&root)?.join("plan");
+    let parent = scratch_parent(&root, &|k| std::env::var(k).ok())?.join("plan");
     let scratch = parent.join(format!("run-{}-{}", std::process::id(), started_stamp()));
     std::fs::create_dir_all(&scratch)
         .map_err(|e| CliError::failure(format!("the scratch folder {} cannot be made: {e}", scratch.display())))?;
@@ -782,10 +782,10 @@ pub fn parse_shard(text: &str) -> Result<(u32, u32), String> {
 
 /// The scratch parent: the dev-targets folder's `mutants` where there is one (a developer's machine), else the job's own temp folder (CI has
 /// no worktree root: `RUNNER_TEMP`, which the runner makes for this job and removes after it).
-fn scratch_parent(root: &Path) -> Result<PathBuf, CliError> {
-    match crate::places::dev_targets(root, &|k| std::env::var(k).ok()) {
+fn scratch_parent(root: &Path, env: &dyn Fn(&str) -> Option<String>) -> Result<PathBuf, CliError> {
+    match crate::places::dev_targets(root, env) {
         Ok(targets) => Ok(targets.join("mutants")),
-        Err(e) => match std::env::var("RUNNER_TEMP").ok().filter(|t| !t.is_empty()) {
+        Err(e) => match env("RUNNER_TEMP").filter(|t| !t.is_empty()) {
             Some(t) => Ok(PathBuf::from(t).join("mutants")),
             None => Err(e),
         },
@@ -801,7 +801,7 @@ pub fn command_gate(root: Option<PathBuf>, base: &str, shard: Option<&str>) -> R
         .map(|t| t.trim().to_string())
         .filter(|t| !t.is_empty())
         .ok_or_else(|| CliError::failure(format!("{} has no HEAD commit", root.display())))?;
-    let parent = scratch_parent(&root)?;
+    let parent = scratch_parent(&root, &|k| std::env::var(k).ok())?;
     let scratch = parent.join(format!("run-{}-{}", std::process::id(), started_stamp()));
     std::fs::create_dir_all(&scratch)
         .map_err(|e| CliError::failure(format!("the scratch folder {} cannot be made: {e}", scratch.display())))?;
@@ -1261,5 +1261,29 @@ mod tests {
         assert_eq!(broken.not_measured.len(), 1, "{broken:?}");
         assert!(plan_outputs(&broken).contains("run=false\n"));
         assert!(plan_text(&broken).contains("NOT MEASURED"), "{}", plan_text(&broken));
+    }
+
+    /// The scratch parent (user decision 143): the dev-targets folder's `mutants` where there is one, else the job's `RUNNER_TEMP`, else the cause.
+    /// Written against the proof run 9374's two MISSED mutants (`-> Ok(Default::default())` and `delete !` of the empty-value filter).
+    #[test]
+    fn the_scratch_parent_is_the_dev_targets_folder_else_the_runner_temp_else_the_cause() {
+        let root = tempfile::tempdir().unwrap();
+        let env =
+            |vars: &'static [(&'static str, &'static str)]| move |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
+        let targets = crate::places::DEV_TARGETS_ENV;
+        // A named dev-targets folder wins over RUNNER_TEMP.
+        let both: &'static [(&str, &str)] = &[("PADDOCK_DEV_TARGETS", "/data/targets"), ("RUNNER_TEMP", "/ci/tmp")];
+        assert_eq!(targets, "PADDOCK_DEV_TARGETS");
+        assert_eq!(
+            scratch_parent(root.path(), &env(both)).unwrap(),
+            PathBuf::from("/data/targets/mutants")
+        );
+        // CI has no dev-targets folder: the job's temp folder.
+        let ci: &'static [(&str, &str)] = &[("RUNNER_TEMP", "/ci/tmp")];
+        assert_eq!(scratch_parent(root.path(), &env(ci)).unwrap(), PathBuf::from("/ci/tmp/mutants"));
+        // An empty RUNNER_TEMP is no folder: the dev-targets cause, never a path below "".
+        let empty: &'static [(&str, &str)] = &[("RUNNER_TEMP", "")];
+        assert!(scratch_parent(root.path(), &env(empty)).is_err());
+        assert!(scratch_parent(root.path(), &env(&[])).is_err());
     }
 }
