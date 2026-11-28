@@ -223,6 +223,7 @@ fn command_with(
             let fork = git
                 .text(&["merge-base", &basis, &train_tip])
                 .map(|t| t.trim().to_string())
+                .map_err(|e| e.to_string())
                 .and_then(|t| {
                     if t.is_empty() {
                         Err("git printed no merge base".to_string())
