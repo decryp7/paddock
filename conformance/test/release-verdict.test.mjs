@@ -2,6 +2,7 @@
 // meant to build them and did not fails. The nightly builds every released app's installers, with the same inputs as the app's own
 // release workflow.
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -119,15 +120,31 @@ test('a night ended early for a train in CI warns that it measured nothing, and 
   for (const r of reasons) assert.equal(expr(r.with['skip-reason']), "needs.gate.outputs.train_skip == 'true' && 'train' || ''", r.where);
 });
 
-test('an inactive app is a notice, never a red run, and a tag is never excused by it', () => {
-  for (const event of ['workflow_dispatch', 'push']) {
+test('an inactive app: a manual run is NOT MEASURED and fails as such (ER-33), a push only says so, a tag is never excused', () => {
+  for (const event of ['workflow_dispatch', 'schedule']) {
     const v = verdict({ app: 'dyno', event, ref: 'refs/heads/main', planRun: 'false', skipReason: 'inactive', releaseResult: 'skipped' });
-    assert.deepEqual([v.ok, v.level], [true, 'notice'], event);
-    assert.match(v.line, /dyno is inactive \(docs\/ci-active-apps\.toml/);
+    assert.deepEqual([v.ok, v.level, v.notMeasured], [false, 'error', true], event);
+    assert.match(v.line, /^installers: NOT MEASURED \(dyno\): dyno is inactive \(docs\/ci-active-apps\.toml/, event);
+    assert.match(v.line, /no app job ran/, event);
   }
-  // Positive controls: the same manual run without the reason is red, and a tag with it is not excused.
-  assert.equal(verdict({ app: 'dyno', event: 'workflow_dispatch', planRun: 'false', releaseResult: 'skipped' }).ok, false);
+  const push = verdict({ app: 'dyno', event: 'push', ref: 'refs/heads/main', planRun: 'false', skipReason: 'inactive', releaseResult: 'skipped' });
+  assert.deepEqual([push.ok, push.level], [true, 'notice']);
+  assert.match(push.line, /dyno is inactive \(docs\/ci-active-apps\.toml/);
+  // Positive controls: a measured run is not flagged, a manual run without the reason fails as "not built", a tag with it is not excused.
+  assert.equal(verdict({ app: 'dyno', event: 'workflow_dispatch', planRun: 'true', releaseResult: 'success' }).notMeasured, undefined);
+  const plain = verdict({ app: 'dyno', event: 'workflow_dispatch', planRun: 'false', releaseResult: 'skipped' });
+  assert.equal(plain.ok, false);
+  assert.equal(plain.notMeasured, undefined);
   assert.equal(verdict({ app: 'dyno', event: 'push', ref: 'refs/tags/dyno-v1.2.0', planRun: 'false', skipReason: 'inactive', releaseResult: 'skipped' }).ok, false);
+});
+
+test('release-verdict.mjs exits 6, the not-measured code, for an inactive app on a manual run and prints NOT MEASURED', () => {
+  const r = spawnSync(process.execPath, [join(PADDOCK, 'conformance', 'ci', 'release-verdict.mjs')], {
+    env: { PATH: process.env.PATH, APP: 'dyno', EVENT: 'workflow_dispatch', REF: 'refs/heads/x', PLAN_RUN: 'false', SKIP_REASON: 'inactive', RELEASE_RESULT: 'skipped' },
+    encoding: 'utf8',
+  });
+  assert.equal(r.status, 6, r.stderr);
+  assert.match(r.stdout, /::error::installers: NOT MEASURED \(dyno\)/);
 });
 
 test('the release-verdict action is documented and runs the script', () => {

@@ -106,7 +106,7 @@ The file is read only through `tools/paddock-dev/src/active_apps.rs` (ER-42).
   foundation and the active apps, never for an inactive one. A push to main reuses a landing run of the same commit as before
   (ER-49): the set is data in the tree, so both read the same one.
 - `./dev plan --ci --app <app>` (debrief.yml, the release workflows' plan action) answers `false` for an inactive app, writes
-  `inactive=true` and says "Inactive" in the job summary; a release workflow's verdict reports it as a notice, not as a red run.
+  `inactive=true` and says "Inactive" in the job summary; a manual run's release verdict says NOT MEASURED and fails (exit 6, ER-33: no app job ran); a push only says so.
 - **The nightly ignores the set** (a `schedule` event, or the `os_full` input of the nightly's manual run): every app, the full check.
 - **An app's own schedule follows the set** (user, 2026-11-25): debrief.yml's scheduled run, and those of debrief-bench, debrief-fuzz, debrief-corpus and debrief-mutants, pass `app: debrief` to the schedule-skip
   action (`./dev ci schedule-skip --app debrief`), which ends it with a notice while Debrief is inactive. Making the app active again

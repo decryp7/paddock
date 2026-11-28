@@ -5,6 +5,7 @@
 // installer, issues research 2026-10-30, X4). The verdict job of every release workflow and of the nightly runs this and
 // writes one line to the job summary: "installers: built" or "installers: not built (why)".
 //
+// A manual run or nightly whose app is inactive measured nothing: it says NOT MEASURED and exits 6 (ER-33), never a green run.
 // A nightly skipped by its change gate says why. A run that was ASKED to build installers (a nightly, a manual run, a tag) and did not fails. A push to main whose change does
 // not reach the app is allowed to build nothing and says so. A push the plan said to build, with no installers, warns: it is
 // the shape of the original gap.
@@ -18,7 +19,7 @@ import { isMain } from '../src/util/is-main.mjs';
  *   `needs.*` values ('true'/'false'; 'success'/'skipped'/'failure'/'cancelled'; empty when the job did not exist). skipReason
  *   'train': the gate ended a scheduled run early because a train was in CI (./dev ci schedule-skip); 'inactive': the app is not
  *   in docs/ci-active-apps.toml's `active`, so the plan ran none of its jobs.
- * @returns {{ok:boolean, level:'notice'|'warning'|'error', line:string}}
+ * @returns {{ok:boolean, level:'notice'|'warning'|'error', line:string, notMeasured?:boolean}} notMeasured: nothing was measured, which is not a pass (ER-33; exit 6)
  */
 export function verdict({ app, event, ref = '', planRun = '', skipReason = '', releaseResult = '', gatesResult = '', failedGates = [] }) {
   const isTag = ref.startsWith('refs/tags/');
@@ -33,6 +34,7 @@ export function verdict({ app, event, ref = '', planRun = '', skipReason = '', r
   }
   // The app is inactive (docs/ci-active-apps.toml): its plan ran nothing and nothing was asked of it, which a notice says (not green). A
   // tag is never excused: its plan runs the app whatever the set says.
+  if (skipReason === 'inactive' && !isTag && asked) return { ok: false, level: 'error', notMeasured: true, line: `installers: NOT MEASURED (${app}): ${app} is inactive (docs/ci-active-apps.toml \`active\` does not name it), so no app job ran and this run proves nothing about the release path; add ${app} to \`active\` on a throwaway branch or let the nightly build them` };
   if (skipReason === 'inactive' && !isTag) return { ok: true, level: 'notice', line: `installers: not built (${app}): ${app} is inactive (docs/ci-active-apps.toml \`active\` does not name it); not green, the nightly builds them` };
   // A nightly ended early because a train was in CI: nothing was measured, which a warning says (it is not a green night).
   if (planRun === 'false' && event === 'schedule' && skipReason === 'train') return { ok: true, level: 'warning', line: `installers: not built (${app}): a train was in CI, so this night measured nothing (not measured, not green); the next scheduled night builds them` };
@@ -66,5 +68,5 @@ if (isMain(import.meta.url)) {
   const v = verdict({ app: e.APP ?? 'app', event: e.EVENT ?? '', ref: e.REF ?? '', planRun: e.PLAN_RUN ?? '', skipReason: e.SKIP_REASON ?? '', releaseResult: e.RELEASE_RESULT ?? '', gatesResult, failedGates });
   console.log(`::${v.level}::${v.line}`);
   if (e.GITHUB_STEP_SUMMARY) appendFileSync(e.GITHUB_STEP_SUMMARY, `**${v.line}**\n\n`);
-  process.exit(v.ok ? 0 : 1);
+  process.exit(v.ok ? 0 : v.notMeasured ? 6 : 1);
 }
