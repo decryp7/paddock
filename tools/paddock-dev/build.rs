@@ -23,8 +23,10 @@ fn main() {
         println!("cargo:rustc-env=PADDOCK_DEV_EMBEDDED_HASH={hash}");
     }
 
-    let manifest = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"));
-    let out = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("cargo sets OUT_DIR"));
+    let manifest = std::path::PathBuf::from(
+        std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|e| panic!("build.rs: cargo sets CARGO_MANIFEST_DIR: {e}")),
+    );
+    let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap_or_else(|e| panic!("build.rs: cargo sets OUT_DIR: {e}")));
     println!("cargo:rerun-if-changed=src/check");
     println!("cargo:rerun-if-changed=tests/it");
     let write = |name: &str, text: Result<String, String>| {
