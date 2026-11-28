@@ -29,9 +29,9 @@
       "groupSlug": "paddock"
     },
     {
-      "description": "Gitea Actions only supports v3 of the artifact actions",
-      "matchPackageNames": ["actions/upload-artifact", "actions/download-artifact"],
-      "allowedVersions": "<4"
+      "description": "The Gitea forks of the v4 artifact actions have no tags: their digests are bumped by hand (docs/research/2026-11-ci-artifacts-v4.md)",
+      "matchPackageNames": ["ChristopherHX/gitea-upload-artifact", "ChristopherHX/gitea-download-artifact"],
+      "enabled": false
     },
     {
       "description": "Node follows app/.nvmrc, which CI and the host runners must match; bump it by hand",

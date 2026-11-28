@@ -146,7 +146,7 @@ jobs:
       # One artifact per target, as before; a shard has seven targets.
       - name: Upload crashes (${{ matrix.targets[0] }})
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         with:
           name: crashes-${{ matrix.targets[0] }}
           path: apps/debrief/fuzz/artifacts/${{ matrix.targets[0] }}/
@@ -154,7 +154,7 @@ jobs:
 
       - name: Upload crashes (${{ matrix.targets[1] }})
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         with:
           name: crashes-${{ matrix.targets[1] }}
           path: apps/debrief/fuzz/artifacts/${{ matrix.targets[1] }}/
@@ -162,7 +162,7 @@ jobs:
 
       - name: Upload crashes (${{ matrix.targets[2] }})
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         with:
           name: crashes-${{ matrix.targets[2] }}
           path: apps/debrief/fuzz/artifacts/${{ matrix.targets[2] }}/
@@ -170,7 +170,7 @@ jobs:
 
       - name: Upload crashes (${{ matrix.targets[3] }})
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         with:
           name: crashes-${{ matrix.targets[3] }}
           path: apps/debrief/fuzz/artifacts/${{ matrix.targets[3] }}/
@@ -178,7 +178,7 @@ jobs:
 
       - name: Upload crashes (${{ matrix.targets[4] }})
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         with:
           name: crashes-${{ matrix.targets[4] }}
           path: apps/debrief/fuzz/artifacts/${{ matrix.targets[4] }}/
@@ -186,7 +186,7 @@ jobs:
 
       - name: Upload crashes (${{ matrix.targets[5] }})
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         with:
           name: crashes-${{ matrix.targets[5] }}
           path: apps/debrief/fuzz/artifacts/${{ matrix.targets[5] }}/
@@ -194,7 +194,7 @@ jobs:
 
       - name: Upload crashes (${{ matrix.targets[6] }})
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         with:
           name: crashes-${{ matrix.targets[6] }}
           path: apps/debrief/fuzz/artifacts/${{ matrix.targets[6] }}/

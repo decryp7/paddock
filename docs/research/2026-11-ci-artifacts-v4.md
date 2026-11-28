@@ -28,3 +28,15 @@ The forks have no tags, so Renovate cannot track them: the digests are bumped by
 - This change moves ci.yml's upload steps to the fork (`ChristopherHX/gitea-upload-artifact@81f940d0...`, the plan job's
   `plan-record` first). The release workflows, the demo releases and the other workflows still use the v3 pin and go in the release
   batch (rule 54).
+
+## The release batch (2026-11-28, user decision 130c)
+
+- Every remaining `actions/upload-artifact` and `actions/download-artifact` step moves to the same two pinned forks: the release
+  workflows (`app-release`, `shell-demo-release`, `workbench-demo-release`, `throttle-release`, Debrief's release job in `debrief.yml`),
+  the fuzz, bench and mutants workflows, the bench template and the rest of `debrief.yml`. No workflow uses the v3 action now.
+- Names stay unique per run: the matrix legs name their artifact by OS or target, and Debrief's seven fuzz uploads by target.
+  `download-artifact` without `name` keeps the v3 layout (`<path>/<name>/`), so the releases' `find artifacts -type f` is unchanged.
+- `conformance/test/ci-actions.test.mjs` fails on any `*-artifact@` step in any workflow or template that is not one of the two forks
+  at its digest, with a positive control. Renovate leaves the forks alone (no tags): `renovate.json` and `renovate/app.json` replace
+  the old "<4" rule with it.
+- Rule 54: the release path changed, so each touched app's `<app>-release.yml` is dispatched from the branch with the bundle built.

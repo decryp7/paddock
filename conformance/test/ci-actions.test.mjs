@@ -139,12 +139,36 @@ test('in a job that moves the checkout (stable-workspace), every upload-artifact
   assert.ok(checked >= 1, 'app-release.yml at least');
 });
 
+// Every workflow and workflow template, not only the shared actions and the app workflows.
+const allWorkflowFiles = () =>
+  ['workflows', 'workflow-templates'].flatMap((d) =>
+    readdirSync(join(PADDOCK, '.gitea', d)).filter((f) => /\.ya?ml$/.test(f)).map((f) => join(PADDOCK, '.gitea', d, f)));
+
+// Gitea 28 lists only v4 artifacts, and the upstream v4 actions refuse a Gitea server (GHESNotSupportedError): only these forks
+// work, pinned by digest because they have no tags (docs/research/2026-11-ci-artifacts-v4.md). ci.yml and the release path share them.
+const ARTIFACT_FORKS = {
+  'ChristopherHX/gitea-upload-artifact': '81f940d004763f986ba3582c007fd842dd5cb0d7',
+  'ChristopherHX/gitea-download-artifact': '75635f32b4c1c41c4b3d64e8f85210112ed4c9c7',
+};
+const ARTIFACT_STEP = /^\s*(?:- )?uses:\s*(\S*(?:upload|download)-artifact)@(\S+)/gm;
+const wrongArtifactSteps = (text) => [...text.matchAll(ARTIFACT_STEP)].filter(([, action, ref]) => ARTIFACT_FORKS[action] !== ref);
+
 test('the shared actions follow the repo rules: no AI attribution text, Gitea-compatible artifact actions', () => {
-  for (const f of [...names.map((n) => join(ACTIONS, n, 'action.yml')), ...workflows.map((w) => join(WORKFLOWS, w))]) {
+  for (const f of [...names.map((n) => join(ACTIONS, n, 'action.yml')), ...workflows.map((w) => join(WORKFLOWS, w)), ...allWorkflowFiles()]) {
     const text = read(f);
     assert.doesNotMatch(text, /Co-Authored-By|Generated with/i, f);
-    assert.doesNotMatch(text, /actions\/(?:upload|download)-artifact@v4/, `${f}: Gitea supports v3 only`);
+    for (const [line, action, ref] of wrongArtifactSteps(text)) {
+      assert.fail(`${f}: "${line.trim()}": ${action}@${ref} must be the Gitea v4 fork pinned to its digest (${ARTIFACT_FORKS[action] ?? 'no such fork'})`);
+    }
   }
+});
+
+test('positive control: a v3, an upstream v4 or an unpinned artifact step is seen by the artifact-fork check', () => {
+  assert.equal(wrongArtifactSteps('      - uses: actions/upload-artifact@v3\n').length, 1);
+  assert.equal(wrongArtifactSteps('        uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3\n').length, 1);
+  assert.equal(wrongArtifactSteps('      - uses: actions/upload-artifact@v4\n').length, 1);
+  assert.equal(wrongArtifactSteps('      - uses: ChristopherHX/gitea-upload-artifact@main\n').length, 1);
+  assert.equal(wrongArtifactSteps(`      - uses: ChristopherHX/gitea-upload-artifact@${ARTIFACT_FORKS['ChristopherHX/gitea-upload-artifact']} # v4\n`).length, 0);
 });
 
 test('no workflow, action or doc switches the compile cache by a repository variable any more (user decision 2026-11-21)', () => {
@@ -1506,7 +1530,7 @@ test('every host job that keeps a build folder caps it at the end, with the shar
   const app = parseJobs(ci).find((j) => j.id === 'app').text;
   assert.ok(app.indexOf('actions/prune-build-folder') > app.indexOf('actions/host-cleanup'), 'after the clean-up of the job');
   assert.match(rel, /- uses: \.\/\.gitea\/actions\/prune-build-folder\n\s+if: always\(\) && runner\.os != 'Linux'\n\s+with:\n\s+drop-bundles: "true"/, "app-release's bundle job prunes on the hosts after the upload");
-  assert.ok(rel.indexOf('actions/prune-build-folder') > rel.indexOf('actions/upload-artifact'), 'only after the installers are uploaded');
+  assert.ok(rel.indexOf('actions/prune-build-folder') > rel.indexOf('gitea-upload-artifact'), 'only after the installers are uploaded');
   const action = read(join(ACTIONS, 'prune-build-folder', 'action.yml'));
   assert.match(action, /kit\.sh" host prune-build-folder "\$MAX_GB" "\$DROP_BUNDLES"/, 'through the kit shim: ./dev ci prune-build-folder, or the shell on the release path');
   const kit = read(join(PADDOCK, 'conformance', 'ci', 'kit.sh'));

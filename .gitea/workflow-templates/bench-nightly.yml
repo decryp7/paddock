@@ -92,7 +92,7 @@ jobs:
         run: |
           echo "- bench-previous cache: saved: $RESULT" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
-      - uses: actions/upload-artifact@v3
+      - uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         if: always()
         with:
           name: bench-results
