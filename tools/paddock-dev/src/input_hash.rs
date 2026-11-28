@@ -10,6 +10,7 @@
 use paddock_cli::{CliError, Report};
 use paddock_proc::{Limits, command as proc_command, run_bounded};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -86,16 +87,24 @@ fn config_digest(exec: &dyn Exec, root: &Path, text: &str) -> Result<String, Cli
     Ok(out.trim().to_string())
 }
 
-/// Whether a config sets nothing but the build folder (`target-dir` in `[build]`, or a top-level dotted `build.target-dir`),
-/// besides blank lines and comments: such a file is not hashed, because the build folder never changes the binary (as
-/// `CARGO_TARGET_DIR` does not), and CI's build-folder action writes one next to the tool in the middle of a job. Read line by
-/// line exactly as the wrapper's awk does (`only_build_folder`), so any other table, key or an inline table counts.
+/// Whether a config sets nothing but the build folder (`target-dir` in `[build]`, or a top-level dotted `build.target-dir`, and the
+/// path remap of that folder that `ci_host::build_folder` writes next to it), besides blank lines and comments: such a file is not
+/// hashed, because the build folder never changes the binary (as `CARGO_TARGET_DIR` does not; the remap only renames the folder in
+/// the paths the binary embeds), and CI's build-folder action writes one next to the tool in the middle of a job. The remap is the one
+/// line `rustflags = ['--remap-path-prefix=<folder>=/paddock-target']` under `[target.'cfg(all())']`; any other key there counts.
+/// Read line by line exactly as the wrapper's awk does (`only_build_folder`), so any other table, key or an inline table counts.
 pub fn only_names_build_folder(config: &str) -> bool {
+    use crate::ci_host::build_folder::{REMAP_TABLE, REMAP_TARGET};
     let text = config.replace('\r', "");
     let mut section = String::new();
     let assigns = |line: &str, key: &str| {
         line.strip_prefix(key)
             .is_some_and(|rest| rest.trim_start_matches([' ', '\t']).starts_with('='))
+    };
+    let remap_line = |line: &str| {
+        line.strip_prefix("rustflags = ['--remap-path-prefix=")
+            .and_then(|rest| rest.strip_suffix(&format!("={REMAP_TARGET}']")))
+            .is_some_and(|folder| !folder.contains('\''))
     };
     for line in text.lines().map(|l| l.trim_start_matches([' ', '\t'])) {
         if line.is_empty() || line.starts_with('#') {
@@ -103,13 +112,14 @@ pub fn only_names_build_folder(config: &str) -> bool {
         }
         if line.starts_with('[') {
             section = line.chars().filter(|c| !matches!(c, ' ' | '\t')).collect();
-            if section != "[build]" {
+            if section != "[build]" && section != REMAP_TABLE {
                 return false;
             }
             continue;
         }
-        let build_folder =
-            (section == "[build]" && assigns(line, "target-dir")) || (section.is_empty() && assigns(line, "build.target-dir"));
+        let build_folder = (section == "[build]" && assigns(line, "target-dir"))
+            || (section.is_empty() && assigns(line, "build.target-dir"))
+            || (section == REMAP_TABLE && remap_line(line));
         if !build_folder {
             return false;
         }
@@ -380,6 +390,22 @@ pub fn command() -> Result<Report, CliError> {
     ))
 }
 
+/// SHA-256 over length-prefixed fields, as lower-case hex: two field lists differ in the key whenever they differ in any field or in
+/// where the fields split.
+pub fn digest(fields: &[String]) -> String {
+    let mut h = Sha256::new();
+    for f in fields {
+        h.update((f.len() as u64).to_le_bytes());
+        h.update(f.as_bytes());
+    }
+    hex(&h.finalize())
+}
+
+/// Lower-case hex of `bytes`.
+pub fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -387,6 +413,12 @@ mod tests {
 
     /// The child echoes more than a pipe holds: its output must be read while it runs, or it blocks until the limit.
     #[cfg(unix)]
+    #[test]
+    fn the_digest_depends_on_where_fields_split() {
+        assert_ne!(digest(&["ab".into(), "c".into()]), digest(&["a".into(), "bc".into()]));
+        assert_eq!(digest(&["a".into()]), digest(&["a".into()]));
+    }
+
     #[test]
     fn a_run_with_input_reads_a_large_reply_while_the_child_runs() {
         let bytes = vec![b'x'; 1 << 20];

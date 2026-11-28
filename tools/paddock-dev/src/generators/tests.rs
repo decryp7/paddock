@@ -774,3 +774,99 @@ fn a_check_that_still_compiles_after_its_build_is_flagged() {
         "{lines:?}"
     );
 }
+
+// ---- The golden entries: every golden test has declared inputs --------------------------------------------------------------------
+
+/// The files of `files` (repository-relative path, text) that hold a golden test: one that compares what the code answers with a
+/// recorded file (the testkit's golden check, a recorded expected folder) or that is a `*_golden` module. The markers are built here so
+/// this file does not hold them itself.
+fn golden_holders(files: &[(String, String)]) -> Vec<String> {
+    let markers = [
+        ["check_", "golden("].concat(),
+        ["golden", "_dir()"].concat(),
+        ["tests/golden/", "expected"].concat(),
+    ];
+    files
+        .iter()
+        .filter(|(path, text)| {
+            let stem = path.rsplit('/').next().unwrap_or(path).trim_end_matches(".rs");
+            stem.ends_with("_golden") || markers.iter().any(|m| text.contains(m.as_str()))
+        })
+        .map(|(path, _)| path.clone())
+        .collect()
+}
+
+/// The golden holders `reg` leaves out: no `golden = true` entry names their path among its inputs.
+fn undeclared_goldens(reg: &Registry, holders: &[String]) -> Vec<String> {
+    holders
+        .iter()
+        .filter(|h| !reg.generators.iter().any(|g| g.golden && g.marks(h)))
+        .cloned()
+        .collect()
+}
+
+/// The sources of the tool read from the real tree: `src/**` and `tests/it/*`, as repository-relative paths.
+fn tool_sources() -> Vec<(String, String)> {
+    fn walk(dir: &std::path::Path, rel: &str, out: &mut Vec<(String, String)>) {
+        let mut entries: Vec<_> = std::fs::read_dir(dir).unwrap().flatten().collect();
+        entries.sort_by_key(|e| e.file_name());
+        for e in entries {
+            let name = e.file_name().to_string_lossy().to_string();
+            let path = e.path();
+            if path.is_dir() {
+                walk(&path, &format!("{rel}/{name}"), out);
+            } else if name.ends_with(".rs") {
+                out.push((format!("{rel}/{name}"), std::fs::read_to_string(&path).unwrap()));
+            }
+        }
+    }
+    let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut out = Vec::new();
+    walk(&base.join("src"), "tools/paddock-dev/src", &mut out);
+    walk(&base.join("tests/it"), "tools/paddock-dev/tests/it", &mut out);
+    out
+}
+
+/// A new golden cannot slip through: every file holding a golden test is marked by a `golden = true` entry of the registry, so the
+/// pre-push `goldens` row runs it when a change reaches its inputs (ER-21). Positive controls (ER-33): the detector sees a golden
+/// holder it is given, a holder no entry names is reported, and the real registry with its golden entries removed leaves the real
+/// holders undeclared.
+#[test]
+fn tree_every_file_with_a_golden_test_is_marked_by_a_golden_entry_of_the_registry() {
+    let reg = super::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap_or_else(|e| panic!("{e:?}"));
+    let new_golden = [(
+        "tools/paddock-dev/tests/it/brand_new.rs".to_string(),
+        format!("fn t() {{ {}&p, &s, m) }}", ["check_", "golden("].concat()),
+    )];
+    let seen = golden_holders(&new_golden);
+    assert_eq!(seen, ["tools/paddock-dev/tests/it/brand_new.rs"], "the detector sees a golden test");
+    assert_eq!(undeclared_goldens(&reg, &seen), seen, "a golden no entry names is reported");
+    let sources = tool_sources();
+    let holders = golden_holders(&sources);
+    assert!(
+        holders.len() >= 5,
+        "the real tree holds the goldens this check is about: {holders:?}"
+    );
+    let no_goldens = Registry::parse(REG_WITHOUT_GOLDENS).unwrap();
+    assert_eq!(
+        undeclared_goldens(&no_goldens, &holders),
+        holders,
+        "with no golden entry every real holder is undeclared"
+    );
+    let missing = undeclared_goldens(&reg, &holders);
+    assert!(
+        missing.is_empty(),
+        "a golden test has no declared inputs: add its files to a `golden = true` entry of docs/generators.toml (check, build, regenerate, paths), then the push gate's `goldens` row runs it when a change reaches them: {missing:?}"
+    );
+}
+
+const REG_WITHOUT_GOLDENS: &str = r#"
+version = 1
+[[generator]]
+id = "icons"
+what = "icons"
+check = ["node", "icons/tools/install.mjs", "--check"]
+regenerate = "node icons/tools/install.mjs"
+paths = ["icons/**"]
+cost = "fast"
+"#;

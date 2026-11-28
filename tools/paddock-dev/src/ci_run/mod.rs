@@ -246,7 +246,7 @@ pub fn run_with(args: &RunArgs, env: &HashMap<String, String>, stop: &Arc<Atomic
 }
 
 fn throttle_prefix(env: &HashMap<String, String>) -> Vec<String> {
-    crate::throttle::throttle_prefix(env, &|p| crate::throttle::on_path(env, p))
+    crate::throttle::throttle_prefix(env, &|p| crate::pathfind::on_path(env, p))
 }
 
 fn execute(

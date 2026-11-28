@@ -213,7 +213,8 @@ pub(crate) fn cargo_config(ctx: &mut Ctx) {
             }
         }
     }
-    // `.cargo/ci.toml` is written by build-folder: it may hold only `[build] target-dir`.
+    // `.cargo/ci.toml` is written by build-folder: it may hold only `[build] target-dir` and the remap of that folder
+    // (`[target.'cfg(all())'] rustflags = ['--remap-path-prefix=<build folder>=/paddock-target']`; none of `[build]` in a container).
     let ci = clone.join(".cargo").join("ci.toml");
     if ci.is_file() {
         match std::fs::read_to_string(&ci)
@@ -227,22 +228,35 @@ pub(crate) fn cargo_config(ctx: &mut Ctx) {
             ),
             Ok(t) => {
                 let build = t.get("build").and_then(toml::Value::as_table);
-                let only_target = t.len() == 1 && build.is_some_and(|b| b.len() == 1 && b.contains_key("target-dir"));
-                if !only_target {
+                let target_dir = build.and_then(|b| b.get("target-dir")).and_then(toml::Value::as_str);
+                let remap = remap_folder(&t);
+                let only_build_folder = t.keys().all(|k| k == "build" || k == "target")
+                    && build.is_none_or(|b| b.len() == 1 && b.contains_key("target-dir"))
+                    && (t.get("target").is_none() || remap.is_some());
+                if !only_build_folder {
                     ctx.add(
                         Probe::CargoConfig,
-                        format!("{} holds more than `[build] target-dir`.", ci.display()),
-                        "build-folder writes only the target-dir.",
+                        format!(
+                            "{} holds more than `[build] target-dir` and the remap of the build folder.",
+                            ci.display()
+                        ),
+                        "build-folder writes only the target-dir and the remap.",
                     );
-                } else if let (Some(dir), Some(target)) = (
-                    build.and_then(|b| b.get("target-dir")).and_then(toml::Value::as_str),
-                    ctx.folder(Kind::Target),
-                ) && ctx
-                    .opts
-                    .paths
-                    .real(Path::new(dir))
-                    .map(|p| !ctx.opts.paths.same(&p, &target))
-                    .unwrap_or(true)
+                } else if let (Some(dir), Some(from)) = (target_dir, remap)
+                    && dir != from
+                {
+                    ctx.add(
+                        Probe::CargoConfig,
+                        format!("{} remaps {from}, not its target-dir {dir}.", ci.display()),
+                        "build-folder writes the remap of the folder it sets.",
+                    );
+                } else if let (Some(dir), Some(target)) = (target_dir, ctx.folder(Kind::Target))
+                    && ctx
+                        .opts
+                        .paths
+                        .real(Path::new(dir))
+                        .map(|p| !ctx.opts.paths.same(&p, &target))
+                        .unwrap_or(true)
                 {
                     ctx.add(
                         Probe::CargoConfig,
@@ -457,6 +471,19 @@ pub(crate) fn angular(ctx: &mut Ctx) {
             }
         }
     }
+}
+
+/// The folder `ci.toml` remaps: the one `[target.'cfg(all())'] rustflags = ['--remap-path-prefix=<folder>=/paddock-target']` that
+/// build-folder writes (`ci_host::build_folder::ci_toml_text`); `None` when the file has no `target` table or it holds anything else.
+fn remap_folder(ci: &toml::Table) -> Option<&str> {
+    use crate::ci_host::build_folder::REMAP_TARGET;
+    let table = ci.get("target")?.as_table()?;
+    let only = table.get("cfg(all())").filter(|_| table.len() == 1)?.as_table()?;
+    let flags = only.get("rustflags").filter(|_| only.len() == 1)?.as_array()?;
+    let [flag] = flags.as_slice() else { return None };
+    flag.as_str()?
+        .strip_prefix("--remap-path-prefix=")?
+        .strip_suffix(&format!("={REMAP_TARGET}"))
 }
 
 #[cfg(test)]

@@ -739,7 +739,7 @@ pub fn plan_text(p: &Plan) -> String {
 /// `mutants plan --base <rev>`: the shards for the diff to `HEAD`, written to `GITHUB_OUTPUT` (standard output without it). Exit 0 whatever
 /// it found (report-only, ER-41): a diff it could not count plans no shard and says `NOT MEASURED`.
 pub fn command_plan(root: Option<PathBuf>, base: &str) -> Result<Report, CliError> {
-    let root = crate::gates::command::repo_root(root.as_deref())?;
+    let root = crate::repo_root::repo_root(root.as_deref())?;
     // The run's own folder under the job's temp folder (or the system's), with an owner record, removed through `safe_remove` as the gate's is.
     let parent = scratch_parent(&root, &|k| std::env::var(k).ok())?.join("plan");
     let scratch = parent.join(format!("run-{}-{}", std::process::id(), started_stamp()));
@@ -795,9 +795,9 @@ fn scratch_parent(root: &Path, env: &dyn Fn(&str) -> Option<String>) -> Result<P
 /// `mutants gate --base <rev> [--shard k/n]`.
 pub fn command_gate(root: Option<PathBuf>, base: &str, shard: Option<&str>) -> Result<Report, CliError> {
     let shard = shard.map(parse_shard).transpose().map_err(CliError::usage)?;
-    let root = crate::gates::command::repo_root(root.as_deref())?;
+    let root = crate::repo_root::repo_root(root.as_deref())?;
     let started = std::time::Instant::now();
-    let head = crate::plan_repo::git_text(&root, &["rev-parse", "HEAD"])
+    let head = crate::git::git_text(&root, &["rev-parse", "HEAD"])
         .map(|t| t.trim().to_string())
         .filter(|t| !t.is_empty())
         .ok_or_else(|| CliError::failure(format!("{} has no HEAD commit", root.display())))?;

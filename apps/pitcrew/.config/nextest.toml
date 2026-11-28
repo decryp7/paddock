@@ -10,6 +10,17 @@
 test-threads = -1
 slow-timeout = { period = "30s", terminate-after = 4 }
 
+# Class build (crates/paddock-testkit/src/build_cost.rs): a test that starts a compiler or a `cargo build` has the name prefix `build_`
+# (`paddock_testkit::build_cost::charge` fails a test of another name under nextest; tools/paddock-dev/tests/it/build_cost.rs checks the
+# places that start a build and this override). The supervision tests build the `fake_runner` example when it is missing (a `cargo test
+# --test supervision` does not build examples). In the default profile, so the ci profile inherits it.
+# waiver: the build class's budget, a hang backstop and not a performance limit (ER-12), from the cold time of docs/benchmarks.md "2026-11-28,
+# test build cost class": `cargo build -p pitcrew-service --example fake_runner` took 138.3 s from a fresh build folder with no sccache (Mac mini
+# of 14 cores at a 1-minute load of 7 to 20). 900 s is 6.5x that.
+[[profile.default.overrides]]
+filter = 'test(/(^|::)build_[^:]*$/)'
+slow-timeout = { period = "60s", terminate-after = 15 }
+
 # CI: every failure reported, one retry that still fails the run (ER-12: flaky-result = "fail"), a JUnit report.
 [profile.ci]
 # ADR 0103 (D2): a test whose child still holds its output 500 ms after the test ended is reported as LEAK. Report-only (ER-41):

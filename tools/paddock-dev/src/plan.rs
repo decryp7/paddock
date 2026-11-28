@@ -1808,7 +1808,7 @@ mod tests {
                 "x",
             ],
         ] {
-            assert!(crate::plan_repo::git_text(d, args).is_some());
+            assert!(crate::git::git_text(d, args).is_some());
         }
     }
 

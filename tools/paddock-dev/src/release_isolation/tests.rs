@@ -37,6 +37,39 @@ fn registry_files_with_old_modification_times_pass() {
     assert!(v.passed(), "an honest run with 2006 times must not be red: {}", lines(&v));
 }
 
+/// build-folder writes the remap of the build folder next to `target-dir` (a container: the remap alone); the probe accepts exactly that
+/// (user decision 142) and still refuses a remap of another folder or any other flag.
+#[test]
+fn a_ci_toml_as_build_folder_writes_it_passes_and_a_foreign_remap_or_flag_fails() {
+    use crate::ci_host::build_folder::ci_toml_text;
+    let write = |f: &Fixture, text: &str| {
+        std::fs::create_dir_all(f.clone.join(".cargo")).unwrap();
+        std::fs::write(f.clone.join(".cargo").join("ci.toml"), text).unwrap();
+    };
+    let (_d, f) = job();
+    let dir = f.target.display().to_string().replace('\\', "/");
+    write(&f, &ci_toml_text(Some(&dir), &dir));
+    let v = f.verify();
+    assert!(v.passed(), "host form: {}", lines(&v));
+    write(&f, &ci_toml_text(None, &dir));
+    let v = f.verify();
+    assert!(v.passed(), "container form (the remap alone): {}", lines(&v));
+    write(&f, &ci_toml_text(Some(&dir), "/somewhere/else"));
+    let v = f.verify();
+    assert!(!v.passed() && lines(&v).contains("remaps /somewhere/else"), "{}", lines(&v));
+    for other in [
+        "[target.'cfg(all())']\nrustflags = ['-Dwarnings']\n",
+        "[target.'cfg(all())']\nrustflags = ['--remap-path-prefix=/a=/elsewhere']\n",
+        "[target.'cfg(all())']\nrustflags = ['--remap-path-prefix=/a=/paddock-target', '-Dwarnings']\n",
+        "[target.'cfg(unix)']\nrustflags = ['--remap-path-prefix=/a=/paddock-target']\n",
+        "[target.'cfg(all())']\nlinker = 'x'\n",
+    ] {
+        write(&f, other);
+        let v = f.verify();
+        assert!(!v.passed() && lines(&v).contains("holds more than"), "{other:?}: {}", lines(&v));
+    }
+}
+
 #[test]
 fn without_pins_verify_fails_unless_a_local_trial_allows_it_and_never_on_a_tag() {
     let (_d, mut f) = job();

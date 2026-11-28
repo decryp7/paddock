@@ -65,7 +65,7 @@ impl Machine for Real<'_> {
     }
 
     fn has_program(&self, program: &str) -> bool {
-        super::on_path(self.env, program)
+        crate::pathfind::on_path(self.env, program)
     }
 
     fn run(&self, call: &ToolCall, log: &mut dyn Write) -> Result<Ran, String> {

@@ -3,12 +3,13 @@
 //! checkout, which must be the merge result (a check reads files, not trees). A checkout that is not the result, or a registry
 //! that cannot be read, is NOT MEASURED, never a pass (ER-33).
 
-use super::{Merge, git::Git};
+use super::Merge;
 use crate::generators::{
     self,
     registry::{Cost, PATH},
     run::Runner,
 };
+use crate::git::Git;
 use paddock_cli::Exit;
 use serde_json::{Value, json};
 use std::path::Path;

@@ -11,8 +11,8 @@
 //! (b48df1818). A finding is answered with `Reverted: <path>: <reason>` (or `Hunks-dropped:`) in the merge message.
 
 use super::diff::{DIFF_FLAGS, FileDiff, Hunk, parse, trivial};
-use super::git::{Git, short};
 use super::{Ctx, Finding, Kind, trailers};
+use crate::git::{Git, short};
 use std::collections::{HashMap, HashSet};
 
 /// Commits touching a file that are searched for the commit being reverted.

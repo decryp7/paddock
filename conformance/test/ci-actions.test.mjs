@@ -1053,12 +1053,20 @@ test('build-folder keeps a host job\'s build folder outside the checkout as carg
   const mac = runBuildFolder('macOS');
   assert.equal(mac.status, 0, mac.stderr + mac.stdout);
   const kept = join(mac.root, 'home', '.paddock-ci', 'target-spotter-rust-s1');
-  assert.equal(mac.ci.split('\n').slice(1).join('\n'), `[build]\ntarget-dir = '${kept}'\n`, 'cargo reads the folder from the included ci.toml');
+  assert.equal(
+    mac.ci.split('\n').slice(1).join('\n'),
+    `[build]\ntarget-dir = '${kept}'\n[target.'cfg(all())']\nrustflags = ['--remap-path-prefix=${kept}=/paddock-target']\n`,
+    'cargo reads the folder from the included ci.toml, and the folder is remapped to one fixed name (the same bytes in any slot)',
+  );
   assert.match(mac.env, new RegExp(`^PADDOCK_BUILD_FOLDER=${kept}$`, 'm'));
   assert.ok(existsSync(kept), 'the kept folder exists');
   const linux = runBuildFolder('Linux');
   assert.equal(linux.status, 0, linux.stderr + linux.stdout);
-  assert.equal(linux.ci, null, 'no ci.toml in a container (an old one is removed)');
+  assert.equal(
+    linux.ci.split('\n').slice(1).join('\n'),
+    `[target.'cfg(all())']\nrustflags = ['--remap-path-prefix=${linux.ws}/target=/paddock-target']\n`,
+    'a container builds in cargo\'s default target/ (no target-dir); the old file is replaced by the remap',
+  );
   assert.match(linux.env, new RegExp(`^PADDOCK_BUILD_FOLDER=${linux.ws}/target$`, 'm'));
   const missing = runBuildFolder('macOS', { include: false });
   assert.notEqual(missing.status, 0, 'a workspace whose config does not include ci.toml would silently build elsewhere');

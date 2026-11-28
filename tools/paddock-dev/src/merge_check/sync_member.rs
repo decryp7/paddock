@@ -13,16 +13,17 @@
 //!   first): that work is not this member's to re-apply.
 //!
 //! Run it AFTER the merge too: with the train in HEAD (the sync tip), it also runs the fast static rows on that tip
-//! ([`static_rows`]: conformance, the gate register, Clippy and the Windows Clippy of the workspaces the member touches, through
+//! ([`static_rows`]: conformance, the gate register, Clippy and the Windows Clippy of the workspaces the member touches, the goldens its change reaches and the
+//! `overlap-tests` row (the tests of the packages the member and main both changed, ER-21), through
 //! `check --pre-push --only ... --base <train>`), prints each row, and a failing or unmeasured row is exit 5 or 6 with one `::error::`
 //! ("fix on the member, then re-sync"). `--no-static "<reason>"` skips them and logs the reason. Once they pass it dispatches the
 //! member's own CI trial ([`trial_dispatch`]: the member's affected jobs on the train, the run id printed; `--no-trial "<reason>"`
 //! skips it). The command changes no file of the checkout; the trial pushes only the scratch ref `trial/<member>`.
 
-use super::git::{Git, short};
 use super::reverted_base::live_for_member;
 use super::static_rows::{self, StaticGates};
 use super::trial_dispatch::{self, Dispatcher, Pusher};
+use crate::git::{Git, short};
 use paddock_cli::{CliError, Report};
 use serde_json::json;
 use std::path::Path;
@@ -106,7 +107,7 @@ fn command_with(
         return Err(CliError::usage("--no-static needs a reason.")
             .with_hint("Say why, for example --no-static \"docs-only sync, the rows ran on the last tip\"."));
     }
-    let root = crate::gates::command::repo_root(root)?;
+    let root = crate::repo_root::repo_root(root)?;
     let git = Git::new(&root);
     let step = |why: String, next: &str| CliError::failure(format!("::error::merge sync-member: {why}. Next step: {next}"));
     let name = member_name(&git, member).map_err(|e| step(e, "check out the member's branch, or pass --member <branch>"))?;
@@ -115,14 +116,14 @@ fn command_with(
         .map(|t| t.trim().to_string())
         .map_err(|e| {
             step(
-                e,
+                e.to_string(),
                 "run `git fetch origin` and give the train's full ref, for example origin/train/<date>-<n>",
             )
         })?;
     let head = git
         .text(&["rev-parse", "--verify", "HEAD^{commit}"])
         .map(|t| t.trim().to_string())
-        .map_err(|e| step(e, "run it inside the member's worktree"))?;
+        .map_err(|e| step(e.to_string(), "run it inside the member's worktree"))?;
     // After `git merge <train>` the train is in HEAD and `member..train` is empty: read from the train merge's first parent, the
     // member's pre-merge tip, and leave out what a later commit of HEAD already re-applied.
     let (basis, after) = if git.is_ancestor(&train_tip, &head).map_err(|e| step(e, "run `git status`"))? {
@@ -150,7 +151,7 @@ fn command_with(
                     &format!("This reverts commit {}", r.1),
                     &format!("{train_tip}..{head}"),
                 ])
-                .map_err(|e| step(e, "run `git log` to see why"))?;
+                .map_err(|e| step(e.to_string(), "run `git log` to see why"))?;
             if hits.trim().is_empty() {
                 open.push(r);
             } else {
@@ -216,7 +217,22 @@ fn command_with(
     let step = match (no_static, after) {
         (Some(reason), _) => static_rows::skipped(reason.trim()),
         (None, false) => static_rows::not_yet(train),
-        (None, true) => static_rows::interpret(rows.run(&root, &train_tip), short(&train_tip)),
+        (None, true) => {
+            // The member's fork point from main: the merge base of its pre-merge tip and the train. Main's side of the overlap is
+            // `fork..train`, the member's is the sync tip's change against the train (`check --pre-push --base`).
+            let fork = git
+                .text(&["merge-base", &basis, &train_tip])
+                .map(|t| t.trim().to_string())
+                .map_err(|e| e.to_string())
+                .and_then(|t| {
+                    if t.is_empty() {
+                        Err("git printed no merge base".to_string())
+                    } else {
+                        Ok(t)
+                    }
+                });
+            static_rows::interpret(rows.run(&root, &train_tip, &fork), short(&train_tip))
+        }
     };
     text.extend(step.text.iter().cloned());
     // The trial follows the static rows: only a sync tip they passed (or that `--no-static` let through, logged) is worth a CI run.

@@ -153,7 +153,7 @@ pub fn command(a: &DynoLinuxUnitsArgs) -> Result<Report, CliError> {
         Some(r) => r.clone(),
         None => {
             let cwd = std::env::current_dir().map_err(|e| CliError::failure(format!("current folder: {e}")))?;
-            crate::worktree::git::Git::at(&cwd)
+            crate::worktree::git::git_at(&cwd)
                 .text(&["rev-parse", "--show-toplevel"])
                 .map(|t| PathBuf::from(t.trim()))
                 .map_err(|e| CliError::failure(format!("dyno-linux-units: {e}")))?

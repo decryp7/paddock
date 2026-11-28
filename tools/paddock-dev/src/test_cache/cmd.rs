@@ -12,7 +12,7 @@ use super::config::{Config, Mode};
 use super::key::{RunnerClass, Target};
 use super::store::{FsStore, Lookup, Record, Store};
 use super::{Candidate, Decision, decide, read_allowed, write_allowed};
-use crate::plan_repo::git_text;
+use crate::git::git_text;
 use clap::Args;
 use paddock_cli::{CliError, Exit, Report};
 use paddock_proc::{Limits, run_bounded};
@@ -87,9 +87,9 @@ fn now() -> u64 {
 }
 
 /// The local store's folder: `test-cache` beside the gate rows' records in the pre-push state folder
-/// ([`crate::pre_push::state_dir`], the one definition of where they live).
+/// ([`crate::git::state_dir`], the one definition of where they live).
 pub fn store_dir(root: &Path) -> PathBuf {
-    crate::pre_push::state_dir(root).join("test-cache")
+    crate::git::state_dir(root).join("test-cache")
 }
 
 /// The packages of `workspace` as targets, from the planner's Cargo graph.
@@ -240,15 +240,6 @@ pub fn candidates_in(root: &Path, w: &World, workspace: &str, os: &str) -> Resul
         .collect()
 }
 
-fn repo_root(root: Option<PathBuf>) -> Result<PathBuf, CliError> {
-    if let Some(r) = root {
-        return Ok(r);
-    }
-    let cwd = std::env::current_dir().map_err(|e| fail(format!("The current folder cannot be read: {e}.")))?;
-    let out = crate::input_hash::Exec::run(&crate::input_hash::Real, "git", &["rev-parse", "--show-toplevel"], &cwd, None)?;
-    Ok(PathBuf::from(out.trim()))
-}
-
 /// The filter a run is keyed under: `--filter`, normalized (empty: the whole package).
 fn filter_of(a: &TestCacheArgs) -> String {
     super::key::normalize_filter(a.filter.as_deref().unwrap_or(""))
@@ -260,7 +251,7 @@ fn env_get(k: &str) -> Option<String> {
 
 /// `ci test-cache <action>`.
 pub fn command(a: &TestCacheArgs) -> Result<Report, CliError> {
-    let root = repo_root(a.root.clone())?;
+    let root = crate::repo_root::repo_root(a.root.as_deref())?;
     let local = FsStore::new(&a.store.clone().unwrap_or_else(|| store_dir(&root)));
     let env: std::collections::HashMap<String, String> = crate::process_env::vars().collect();
     let shared = if a.shared {
@@ -1041,12 +1032,15 @@ fn shadow_run(a: &TestCacheArgs, root: &Path) -> Result<Report, CliError> {
     }
     let mut text = format!("test-cache shadow-run: clean: {summary}");
     if a.write {
-        let path = root.join(super::config::FILE);
+        let path = root.join(crate::registers::TEST_CACHE);
         let cur = std::fs::read_to_string(&path).map_err(|e| fail(format!("{} cannot be read: {e}", path.display())))?;
         let next = super::with_green_run(&cur, id).map_err(fail)?;
         if next != cur {
             std::fs::write(&path, next).map_err(|e| fail(format!("{} cannot be written: {e}", path.display())))?;
-            text.push_str(&format!("\ntest-cache shadow-run: run {id} added to {}", super::config::FILE));
+            text.push_str(&format!(
+                "\ntest-cache shadow-run: run {id} added to {}",
+                crate::registers::TEST_CACHE
+            ));
         }
     }
     Ok(Report::new(serde_json::json!({"verdict": "clean", "run": id}), text))

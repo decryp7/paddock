@@ -16,7 +16,7 @@ fn unsigned_package(rig: &Rig, manifest: paddock_plugin_package::Manifest) -> Pa
 }
 
 #[test]
-fn a_signed_package_is_inspected_installed_and_read_back_with_what_the_user_granted() {
+fn build_a_signed_package_is_inspected_installed_and_read_back_with_what_the_user_granted() {
     let rig = Rig::new();
     let program = rig.program("paddock-plugin-fixture");
     let pkg = rig.package(
@@ -68,7 +68,7 @@ fn a_signed_package_is_inspected_installed_and_read_back_with_what_the_user_gran
 }
 
 #[test]
-fn the_package_must_be_the_one_the_user_reviewed_and_must_be_trusted() {
+fn build_the_package_must_be_the_one_the_user_reviewed_and_must_be_trusted() {
     let rig = Rig::new();
     let program = rig.program("paddock-plugin-fixture");
     let pkg = rig.package(
@@ -152,7 +152,7 @@ fn the_package_must_be_the_one_the_user_reviewed_and_must_be_trusted() {
 }
 
 #[test]
-fn an_update_keeps_the_switch_replaces_the_old_version_and_shows_permission_changes() {
+fn build_an_update_keeps_the_switch_replaces_the_old_version_and_shows_permission_changes() {
     let rig = Rig::new();
     let first = rig.install(READ_DOCS, Grants::none());
     rig.plugins.set_enabled(fixture::ID, false).unwrap();
@@ -196,7 +196,7 @@ fn an_update_keeps_the_switch_replaces_the_old_version_and_shows_permission_chan
 }
 
 #[test]
-fn what_this_app_cannot_serve_cannot_be_installed_and_the_text_says_who_updates() {
+fn build_what_this_app_cannot_serve_cannot_be_installed_and_the_text_says_who_updates() {
     let rig = Rig::new();
     let program = rig.program("paddock-plugin-fixture");
     let too_new = rig.package(
@@ -250,7 +250,7 @@ fn what_this_app_cannot_serve_cannot_be_installed_and_the_text_says_who_updates(
 }
 
 #[test]
-fn verification_notices_a_changed_or_deleted_program_and_a_changed_manifest() {
+fn build_verification_notices_a_changed_or_deleted_program_and_a_changed_manifest() {
     let rig = Rig::new();
     let installed = rig.install("", Grants::none());
     rig.plugins.verify(&installed).unwrap();
@@ -288,7 +288,7 @@ fn verification_notices_a_changed_or_deleted_program_and_a_changed_manifest() {
 }
 
 #[test]
-fn damaged_records_and_foreign_ids_are_reported_never_a_crash() {
+fn build_damaged_records_and_foreign_ids_are_reported_never_a_crash() {
     let rig = Rig::new();
     let installed = rig.install("", Grants::none());
     let record_file = rig.plugins.root().join(fixture::ID).join("install.json");
@@ -345,7 +345,7 @@ fn damaged_records_and_foreign_ids_are_reported_never_a_crash() {
 }
 
 #[test]
-fn removing_keeps_the_data_folder_on_request() {
+fn build_removing_keeps_the_data_folder_on_request() {
     let rig = Rig::new();
     let installed = rig.install("", Grants::none());
     std::fs::write(installed.data_dir.join("state"), "x").unwrap();
@@ -357,7 +357,7 @@ fn removing_keeps_the_data_folder_on_request() {
 }
 
 #[test]
-fn the_plugins_view_lists_installs_switches_grants_and_removes() {
+fn build_the_plugins_view_lists_installs_switches_grants_and_removes() {
     let rig = Rig::new();
     let host = PluginHost::load(rig.plugins.clone(), rig.cfg.clone());
     assert!(host.list().is_empty());
@@ -445,7 +445,7 @@ fn the_plugins_view_lists_installs_switches_grants_and_removes() {
 }
 
 #[test]
-fn removing_stops_the_process_and_stop_all_leaves_nothing_running() {
+fn build_removing_stops_the_process_and_stop_all_leaves_nothing_running() {
     let rig = Rig::new();
     let host = PluginHost::load(rig.plugins.clone(), rig.cfg.clone());
     let program = rig.program("paddock-plugin-fixture");
@@ -475,7 +475,7 @@ fn removing_stops_the_process_and_stop_all_leaves_nothing_running() {
 }
 
 #[test]
-fn a_key_the_user_trusts_installs_as_signed_and_an_unknown_one_needs_developer_mode() {
+fn build_a_key_the_user_trusts_installs_as_signed_and_an_unknown_one_needs_developer_mode() {
     let rig = Rig::new();
     let program = rig.program("paddock-plugin-fixture");
     let publisher = SecretKey::generate().unwrap();
@@ -535,7 +535,8 @@ fn a_key_the_user_trusts_installs_as_signed_and_an_unknown_one_needs_developer_m
 }
 
 #[test]
-fn a_failed_install_leaves_nothing_behind_and_a_plugins_folder_that_cannot_be_used_is_reported() {
+fn build_a_failed_install_leaves_nothing_behind_and_a_plugins_folder_that_cannot_be_used_is_reported()
+ {
     let rig = Rig::new();
     let program = rig.program("paddock-plugin-fixture");
     let pkg = rig.package(
@@ -596,7 +597,7 @@ fn a_failed_install_leaves_nothing_behind_and_a_plugins_folder_that_cannot_be_us
 }
 
 #[test]
-fn a_record_with_a_bad_hash_is_not_trusted_and_the_plugins_live_in_the_apps_data_folder() {
+fn build_a_record_with_a_bad_hash_is_not_trusted_and_the_plugins_live_in_the_apps_data_folder() {
     let rig = Rig::new();
     let installed = rig.install("", Grants::none());
     let file = rig.plugins.root().join(fixture::ID).join("install.json");

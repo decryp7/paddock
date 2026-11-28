@@ -7,8 +7,9 @@
 //!
 //! sccache gets `SCCACHE_*` only (the server's port and settings), never the job's tokens ([`ToolCall`]). Never fails the job.
 
-use super::{Step, on_path};
+use super::Step;
 use crate::ci_tool::ToolCall;
+use crate::pathfind::on_path;
 use std::collections::HashMap;
 use std::io::Write;
 use std::time::Duration;
