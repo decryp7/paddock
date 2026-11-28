@@ -285,7 +285,12 @@ fn supervised(
             if let Verdict::Hung(quiet) = w.observe(now, 0, || {
                 tree_cpu_time(id).map(|d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX))
             }) {
-                if run_state(id) == RunState::Stopped {
+                #[expect(
+                    clippy::disallowed_methods,
+                    reason = "a production read after the event that settles it: the hang verdict means the whole stall window passed with no CPU, and a stop lasts until the tool is resumed, so the read follows the window instead of racing a change; it only excuses a paused tool (App Tamer) and any other state ends it, as before"
+                )]
+                let paused = run_state(id) == RunState::Stopped;
+                if paused {
                     w.touch(now);
                 } else {
                     sinks.emit(&RunEvent::Stalled {

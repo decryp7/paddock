@@ -286,6 +286,7 @@ pub fn command(a: &TestCacheArgs) -> Result<Report, CliError> {
             None => audit(&local),
         }),
         "selfcheck" => selfcheck(shared.as_ref()),
+        "probe" => probe(shared.as_ref()),
         "blind" => blind_sites(&root, &a.workspace),
         "plan" => plan(a, &root, store),
         "shadow-run" => shadow_run(a, &root),
@@ -360,18 +361,18 @@ pub(super) fn run_with(
     let (decisions, notice) = match &read {
         Err(why) => (
             cands.iter().map(|_| Decision::Run(super::Why::Off(why.clone()))).collect(),
-            Some(why.clone()),
+            Some(format!("reuse is off for this run: {why}. Every target runs.")),
         ),
         Ok(()) => looked.clone(),
     };
     if let Some(n) = notice {
-        text.push(format!("::notice::test-cache: reuse is off for this run: {n}. Every target runs."));
+        text.push(format!("::notice::test-cache: {n}"));
     }
     // A run that may not read still looked the store up: a store that is down is told too, not hidden behind the other cause.
     if read.is_err()
         && let Some(down) = &looked.1
     {
-        text.push(format!("::notice::test-cache: the store could not be read either: {down}."));
+        text.push(format!("::notice::test-cache: the store could not be read either: {down}"));
     }
     let nightly = super::is_nightly(env);
     let skip = cfg.mode() == Mode::On || a.reuse;
@@ -401,10 +402,16 @@ pub(super) fn run_with(
     if a.action == "lookup" {
         // One line the first CI run shows: how many targets a valid record covers on this runner class (nothing is skipped here).
         let would = reused + matched.len();
+        let because = super::reasons::Tally::of(&decisions).ran_because();
         text.push(format!(
-            "test-cache: reused {would} of {} targets ({}; nothing is skipped by a lookup)",
+            "test-cache: reused {would} of {} targets ({}; nothing is skipped by a lookup){}",
             cands.len(),
-            class.0
+            class.0,
+            if because.is_empty() {
+                String::new()
+            } else {
+                format!("; ran because: {because}")
+            }
         ));
         return Ok(Report::new(
             serde_json::json!({"targets": cands.len(), "reused": would}),
@@ -491,16 +498,15 @@ pub(super) fn run_with(
             ));
         }
         // Write-once while trusted, as in the record step: a local pass never replaces a trusted record.
-        let (put, kept) = super::not_overwriting_trusted(put, cands, &looked.0);
+        let (put, held) = super::not_overwriting_trusted(put, cands, &looked.0);
         if let Err(w) = &writes {
             text.push(format!("test-cache: nothing stored ({w})"));
-        } else if let Err(e) = store.put_many(&put) {
-            text.push(format!("::warning::test-cache: records not stored: {e}"));
         } else {
-            text.push(format!(
-                "test-cache: stored {} pass(es); {kept} held back (a trusted record, or no definite answer, is not replaced)",
-                put.len()
-            ));
+            let wrote = super::store::Stored::of(&put, store.put_many(&put));
+            if let Some(lost) = wrote.lost_line() {
+                text.push(format!("::warning::test-cache: {lost}"));
+            }
+            text.push(format!("test-cache: stored {} pass(es); {}", wrote.stored, held.held_line()));
         }
         if !out.1 {
             // The whole output: the gate's row reads the failed tests and the first panic from it.
@@ -587,6 +593,31 @@ fn nextest(
     Ok((text, out.success()))
 }
 
+/// `ci test-cache probe --shared`: the scenarios of [`super::probe`] against the shared store, one line each; exit 5 when a scratch key was
+/// left behind, 6 (not measured) without a store. It never fails on a slow or refused request: it reports them.
+fn probe(shared: Option<&super::s3::S3Store>) -> Result<Report, CliError> {
+    let Some(s) = shared else {
+        return Ok(Report::new(
+            serde_json::json!({"verdict": "not_measured"}),
+            "::error::ci test-cache probe: no shared store. Next step: pass --shared and set the S3 credentials.".to_string(),
+        )
+        .with_exit(Exit::NotMeasured));
+    };
+    let (mut lines, left) = super::probe::run(s, &format!("probe-{}-{}", std::process::id(), now()));
+    let exit = if left.is_empty() {
+        lines.push("test-cache probe: every scratch key was deleted".to_string());
+        Exit::Ok
+    } else {
+        lines.push(format!(
+            "::error::ci test-cache probe: {} scratch key(s) left behind: {}. Next step: delete them under the bucket's `selfcheck` prefix.",
+            left.len(),
+            left.join(", ")
+        ));
+        Exit::Findings
+    };
+    Ok(Report::new(serde_json::json!({"left": left.len()}), lines.join("\n")).with_exit(exit))
+}
+
 /// `ci test-cache selfcheck --shared`: put, get, list and delete one scratch object in the shared store. Exit 5 when any step failed,
 /// 6 (not measured) when the store cannot be reached or has no credentials: never a pass (ER-33).
 pub(super) fn selfcheck(shared: Option<&super::s3::S3Store>) -> Result<Report, CliError> {
@@ -650,20 +681,26 @@ fn forget(cfg: &Config, cands: &[Candidate], store: &dyn Store, filter: &str) ->
             key: super::key_of(c, cfg, &class, filter),
         })
         .collect();
-    let gone = store
-        .delete_many(&asks)
-        .map_err(|e| fail(format!("::error::ci test-cache forget: {e}. Next step: check the store.")))?;
+    let answers = store.delete_many(&asks);
+    // Per key (ADR 0116 §5, amended 2026-11-28): a key that could not be deleted is named, the others are forgotten.
+    let bad: Vec<String> = answers.iter().filter_map(|a| a.as_ref().err().map(|e| e.0.clone())).collect();
+    let gone: Vec<Option<Record>> = answers.into_iter().flatten().collect();
     let n = gone.iter().flatten().count();
-    let text = gone
+    let mut lines: Vec<String> = gone
         .iter()
         .flatten()
         .map(|r| format!("test-cache: forgot target={} (from run {})", r.target, r.run))
-        .collect::<Vec<_>>()
-        .join("\n");
-    Ok(Report::new(
-        serde_json::json!({"forgot": n}),
-        format!("{text}\ntest-cache: {n} record(s) forgotten"),
-    ))
+        .collect();
+    lines.push(format!("test-cache: {n} record(s) forgotten"));
+    if let Some(first) = bad.first() {
+        lines.push(format!(
+            "::error::ci test-cache forget: {} of {} keys could not be deleted: {first}. Next step: check the store and run it again.",
+            bad.len(),
+            asks.len()
+        ));
+    }
+    let exit = if bad.is_empty() { Exit::Ok } else { Exit::Findings };
+    Ok(Report::new(serde_json::json!({"forgot": n, "failed": bad.len()}), lines.join("\n")).with_exit(exit))
 }
 
 /// The runner class to key for: `--class`, else this machine's.
@@ -765,21 +802,24 @@ pub(super) fn record_with(
     // soundness finding: the key missed an input). Read before this run's own records are stored, and only when the lookup answered.
     let mut lines: Vec<String> = Vec::new();
     let (decisions, notice) = decide(cands, cfg, class, filter, store, meta.at, trust);
-    // A lookup that failed leaves every record "not definite", so nothing is replaced: say why, or the held-back count has no cause
-    // (run 9265: the Windows leg printed only "recorded 0", ER-27).
-    if let Some(n) = &notice {
+    let judged = super::result::judge(log, &asked);
+    // A lookup that did not answer for a key measured nothing for it (ER-33), and the cause is said here (run 9335: every Linux and Windows
+    // record step held its records back without a word). The shadow line stays when at least one answer was read; with none it is not
+    // printed, so `shadow-run` reads this job as not measured.
+    if let Some(cause) = &notice {
         lines.push(format!(
-            "::warning::test-cache: the lookup failed, so no record is replaced and none is written: {n}. Next step: fix the store's answer (credentials, address, curl), the cache cannot record without it."
+            "::notice::test-cache: {cause} No record of a target without an answer is replaced. Next step: check the store's load and reachability from this runner."
         ));
     }
-    if notice.is_none() {
+    let tally = super::reasons::Tally::of(&decisions);
+    if tally.off < tally.total() || tally.total() == 0 {
         let matched: Vec<&Candidate> = cands
             .iter()
             .zip(&decisions)
             .filter(|(_, d)| matches!(d, Decision::Reuse(_)))
             .map(|(c, _)| c)
             .collect();
-        let shadow = super::shadow_outcome(&matched, &super::result::judge(log, &asked));
+        let shadow = super::shadow_outcome(&matched, &judged);
         lines.extend(shadow.findings.iter().map(|t| {
             format!("::error::test-cache soundness finding: {t} matched a valid record and then failed in this run. Next step: find the input its key misses (ADR 0116 section 8); the switch stays off.")
         }));
@@ -789,22 +829,28 @@ pub(super) fn record_with(
             None => shadow.line(),
         });
     }
-    let (put, kept) = super::not_overwriting_trusted(super::records_from_log(log, cands, cfg, class, filter, meta), cands, &decisions);
-    let stored = match store.put_many(&put) {
-        Ok(()) => {
-            lines.push(format!(
-                "test-cache: recorded {} packages ({} in the log; {kept} held back: a trusted record, or no definite answer, is not replaced)",
-                put.len(),
-                asked.len()
-            ));
-            put.len()
+    // What the lookup said of every candidate, counted by reason (the shadow report's "reused R; ran because: ...").
+    lines.push(format!("test-cache lookup: {}", tally.lookup_line()));
+    let (mut passed, mut not_in_leg, mut failed) = (0, 0, 0);
+    for c in cands {
+        match judged.outcome(&c.target.package) {
+            super::result::TestOutcome::Passed { .. } => passed += 1,
+            super::result::TestOutcome::NotSeen { .. } => not_in_leg += 1,
+            super::result::TestOutcome::Failed { .. } => failed += 1,
         }
-        Err(e) => {
-            lines.push(format!("::warning::test-cache: records not stored: {e}"));
-            0
-        }
-    };
-    (lines, stored)
+    }
+    let (put, held) = super::not_overwriting_trusted(super::records_from_log(log, cands, cfg, class, filter, meta), cands, &decisions);
+    let wrote = super::store::Stored::of(&put, store.put_many(&put));
+    if let Some(lost) = wrote.lost_line() {
+        lines.push(format!("::warning::test-cache: {lost}"));
+    }
+    lines.push(format!(
+        "test-cache: recorded {} packages of {} candidates ({passed} passed here; not in this leg's partition or without a test in the log: {not_in_leg}; failed or not clean: {failed}); {}",
+        wrote.stored,
+        cands.len(),
+        held.held_line()
+    ));
+    (lines, wrote.stored)
 }
 
 /// The filters the legs of `workspace` on `class` carry, normalized and without repeats: the whole package, and the filterset of a host
@@ -869,8 +915,16 @@ fn plan(a: &TestCacheArgs, root: &Path, store: &dyn Store) -> Result<Report, Cli
                 for filter in filters {
                     let (decisions, notice) = decide(&cands, &cfg, &class, &filter, store, now(), &trust);
                     if let Some(n) = notice {
-                        text.push(format!("::notice::test-cache: reuse is off for {} {ws}: {n}.", class.0));
+                        text.push(format!("::notice::test-cache: {} {ws}: {n}", class.0));
                     }
+                    // The shadow report says why the rest ran: a store that timed out reads `reuse off 61 (curl: (28) ...)`, never a bare 0
+                    // (run 9335: Linux-X64 went from 56 reused to 0 with the cause only in a notice).
+                    text.push(super::reasons::plan_line(
+                        &class.0,
+                        ws,
+                        &filter,
+                        &super::reasons::Tally::of(&decisions),
+                    ));
                     for (c, d) in cands.iter().zip(decisions) {
                         if let Decision::Reuse(r) = d {
                             would += 1;

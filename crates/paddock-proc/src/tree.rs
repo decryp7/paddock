@@ -1460,10 +1460,9 @@ mod tests {
         ready(&mut s);
         let id = s.process().unwrap();
         assert_eq!(ask_checked(id), (Holder::Same, true));
-        let gone =
-            paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
-                crate::run_state(id) != crate::RunState::Running
-            });
+        let gone = crate::statewait::wait_state(id, paddock_testkit::wait::HANG_GUARD, |s| {
+            s != crate::RunState::Running
+        });
         assert!(gone, "a polite process stops when asked");
         // A pid that was handed on is not signalled, and a process that is gone cannot be killed.
         let other = ProcessId::new(id.pid(), crate::StartTime::from_micros(1));
