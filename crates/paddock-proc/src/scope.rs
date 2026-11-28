@@ -1022,8 +1022,49 @@ mod unix_tests {
         );
     }
 
-    /// N members cost a fixed number of whole-table reads at the end, not N (review P2-3, ER-20). The counter is process-wide:
-    /// this needs one process per test (nextest's model; plain `cargo test` threads would count each other's reads).
+    /// The whole-table reads one scope end can make, by the path that makes them (`crate::table_reads` counts each). The end
+    /// is a fixed set of looks, shared by all members (ER-20); which of the later ones run depends on the state the kill leaves
+    /// (a member still listed when the marker look runs), so the budget is a bound over all paths, not one number.
+    /// The look every end makes in `Scope::end_children`: `OnceRead::now` = one snapshot and one read of the names.
+    const READS_SNAPSHOT_AND_NAMES: u64 = 2;
+    /// The marker look of `Scope::end_escaped`: `own::look` = a snapshot and its own read of environments and command lines.
+    const READS_LOOK: u64 = 2;
+    /// The second `OnceRead::now` of `end_escaped`, only when that look still lists a member (a kill is not seen at once).
+    const READS_AFTER_A_KILL: u64 = 2;
+    /// `tree::end_unreaped_group`'s snapshot, only for a member with no readable start time, once for the whole end.
+    const READS_UNREAPED_GROUP: u64 = 1;
+    const READS_AT_LEAST: u64 = READS_SNAPSHOT_AND_NAMES + READS_LOOK;
+    const READS_AT_MOST: u64 = READS_AT_LEAST + READS_AFTER_A_KILL + READS_UNREAPED_GROUP;
+
+    /// The invariant (review P2-3, ER-20): the cost of an end is the same bounded set of looks whatever the number of members,
+    /// so each member count stays inside `READS_AT_LEAST..=READS_AT_MOST`. A cost that grows by a read per member leaves
+    /// the range as soon as there are more members than the range is wide.
+    fn assert_fixed_table_reads(costs: &[(usize, u64)]) {
+        for &(members, reads) in costs {
+            assert!(
+                (READS_AT_LEAST..=READS_AT_MOST).contains(&reads),
+                "{members} member(s) cost {reads} table reads, outside the fixed {READS_AT_LEAST}..={READS_AT_MOST} (costs: {costs:?})"
+            );
+        }
+    }
+
+    /// Positive control (ER-33): the check fails on a cost that grows with the number of members (one snapshot and one read of
+    /// the names per member, as the single ends cost), and on a cost below the looks every end makes.
+    #[test]
+    #[should_panic(expected = "outside the fixed")]
+    fn the_table_read_check_fails_when_the_cost_grows_with_the_members() {
+        let per_member = |n: u64| READS_AT_LEAST + READS_SNAPSHOT_AND_NAMES * n;
+        assert_fixed_table_reads(&[(1, per_member(1)), (5, per_member(5))]);
+    }
+
+    #[test]
+    #[should_panic(expected = "outside the fixed")]
+    fn the_table_read_check_fails_when_the_end_reads_nothing() {
+        assert_fixed_table_reads(&[(1, 0), (5, 0)]);
+    }
+
+    /// N members cost a bounded number of whole-table reads at the end, not N (review P2-3, ER-20). The counter is
+    /// process-wide: this needs one process per test (nextest's model; plain `cargo test` threads would count each other's reads).
     #[test]
     fn the_end_of_a_scope_reads_the_table_a_fixed_number_of_times_whatever_its_size() {
         let reads = |n: usize| {
@@ -1040,15 +1081,9 @@ mod unix_tests {
                 held.iter()
                     .all(|id| poll_until_within(HANG_GUARD, || crate::own::has_ended(*id)))
             );
-            after - before
+            (n, after - before)
         };
-        let (one, five) = (reads(1), reads(5));
-        // A look at the table and the names for the ends, and the marker look (a snapshot and its environment read).
-        assert!(one <= 4, "one member cost {one} table reads");
-        assert_eq!(
-            one, five,
-            "five members cost {five} table reads, one cost {one}"
-        );
+        assert_fixed_table_reads(&[reads(1), reads(5)]);
     }
 }
 
