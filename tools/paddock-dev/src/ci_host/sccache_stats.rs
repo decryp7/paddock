@@ -89,10 +89,16 @@ const CAUSE_CHARS: usize = 200;
 fn masked(line: &str) -> String {
     use regex::Regex;
     use std::sync::LazyLock;
-    static QUERY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(https?://[^\s"'<>?,)}]+)\?[^\s"'<>,)}]*"#).expect("a valid pattern"));
+    // The patterns are literals of this file, run by the tests below.
+    #[allow(clippy::expect_used)]
+    fn re(pattern: &str) -> Regex {
+        Regex::new(pattern).expect("a valid pattern")
+    }
+    static QUERY: LazyLock<Regex> = LazyLock::new(|| re(r#"(https?://[^\s"'<>?,)}]+)\?[^\s"'<>,)}]*"#));
     static SECRET: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"(?i)((?:secret|token|password|signature|credential|authorization|access[_-]?key)[a-z_-]*["']?\s*[=:]\s*)("[^"]*"|[^\s,&"'}]+)"#)
-            .expect("a valid pattern")
+        re(
+            r#"(?i)((?:secret|token|password|signature|credential|authorization|access[_-]?key)[a-z_-]*["']?\s*[=:]\s*)("[^"]*"|[^\s,&"'}]+)"#,
+        )
     });
     let no_query = QUERY.replace_all(line, "${1}?...");
     SECRET.replace_all(&no_query, "${1}***").into_owned()
