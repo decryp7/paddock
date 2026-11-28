@@ -7,7 +7,7 @@ use paddock_throttle::gate::{
     CHEAP_LANE, CHEAP_SECS, MAX_AUTO_SLOTS, MEMORY_PER_SLOT_MB, MEMORY_RESERVE_MB, Pressure,
     allowed_slots, cheap_admitted,
 };
-use paddock_throttle::history::{History, KEEP_PER_ROW, MAX_LINES};
+use paddock_throttle::history::{History, KEEP_PER_ROW, Line, MAX_LINES, trimmed};
 use paddock_throttle::lock::{Acquirer, Poll, Request};
 
 fn rig_with(max: u32) -> (Rig, Config) {
@@ -393,8 +393,8 @@ fn the_history_is_bounded_oldest_first_and_a_row_cannot_push_the_others_out() {
     );
     assert_eq!(h.expected_secs("nothing"), None, "no history is not quick");
     assert_eq!(h.len(), 4);
-    // One row recorded many times keeps only its newest.
-    for i in 0..50 {
+    // One row recorded more often than it keeps holds only its newest lines.
+    for i in 0..(KEEP_PER_ROW as u64 + 2) {
         h.record("busy", 1.0, 2000 + i).unwrap();
     }
     let kept = std::fs::read_to_string(h.path())
@@ -408,18 +408,53 @@ fn the_history_is_bounded_oldest_first_and_a_row_cannot_push_the_others_out() {
         Some(3.0),
         "the busy row did not push the others out"
     );
-    // Many rows: the file stays within MAX_LINES and the oldest rows go first.
-    for i in 0..(MAX_LINES * 3) {
-        h.record(&format!("row-{i}"), 2.0, 3000 + i as u64).unwrap();
-    }
+    // The file over its limit: one record on a file of MAX_LINES + 20 lines leaves MAX_LINES, the oldest gone (the file is seeded in one
+    // write; the same rule is walked line by line in `trimmed_keeps_the_newest_per_row_and_overall_oldest_first`).
+    let seed: String = (0..(MAX_LINES + 20))
+        .map(|i| format!("{}\t2000\trow-{i}\n", 3000 + i))
+        .collect();
+    std::fs::write(h.path(), seed).unwrap();
+    h.record("last", 2.0, 9000).unwrap();
     assert_eq!(h.len(), MAX_LINES);
     assert_eq!(h.expected_secs("row-0"), None, "the oldest went first");
-    assert_eq!(
-        h.expected_secs(&format!("row-{}", MAX_LINES * 3 - 1)),
-        Some(2.0),
-        "the newest stays"
-    );
+    assert_eq!(h.expected_secs("row-20"), None, "21 lines had to go");
+    assert_eq!(h.expected_secs("row-21"), Some(2.0));
+    assert_eq!(h.expected_secs("last"), Some(2.0), "the newest stays");
     assert!(std::fs::metadata(h.path()).unwrap().len() < 256 * 1024);
+}
+
+/// The bounds themselves, on the pure function: no file, so many lines cost nothing (the real-file test above records through the OS a few
+/// times only; a Windows runner took over 60 s for the 1,600 atomic rewrites this used to make, run 9373).
+#[test]
+fn trimmed_keeps_the_newest_per_row_and_overall_oldest_first() {
+    // A row far over its limit keeps its newest KEEP_PER_ROW; the other rows are untouched.
+    let mut lines: Vec<Line> = vec![(1, 30_000, "clippy".into())];
+    lines.extend((0..50).map(|i| (100 + i, 1000, "busy".to_string())));
+    let kept = trimmed(lines);
+    assert_eq!(kept.iter().filter(|l| l.2 == "busy").count(), KEEP_PER_ROW);
+    assert!(
+        kept.iter().any(|l| l.2 == "clippy"),
+        "a busy row does not push another out"
+    );
+    assert_eq!(
+        kept.iter().filter(|l| l.2 == "busy").map(|l| l.0).min(),
+        Some(100 + 50 - KEEP_PER_ROW as u64),
+        "the newest of the busy row stay"
+    );
+    // Many rows: MAX_LINES stay, the oldest go first, the newest stays.
+    let lines: Vec<Line> = (0..(MAX_LINES * 3) as u64)
+        .map(|i| (3000 + i, 2000, format!("row-{i}")))
+        .collect();
+    let kept = trimmed(lines);
+    assert_eq!(kept.len(), MAX_LINES);
+    assert_eq!(
+        kept.first().map(|l| l.2.as_str()),
+        Some(format!("row-{}", MAX_LINES * 2).as_str())
+    );
+    assert_eq!(
+        kept.last().map(|l| l.2.clone()),
+        Some(format!("row-{}", MAX_LINES * 3 - 1))
+    );
 }
 
 #[test]
