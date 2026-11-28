@@ -12,7 +12,7 @@ them). The store is on a slow disk, so a timeout of one request is normal, and a
 
 - `Store::get_many` returns one `Result<Option<Record>, StoreError>` per key. A key whose request failed is an error for that key only;
   the other keys keep their answers (`decide`: that target is `Why::Off(cause)` and runs, the others are reused or run by their own
-  answer). Writes and deletes stay atomic: an error is for the call.
+  answer). Writes and deletes were atomic in this first text; the addendum below (user, 2026-11-28) makes them per key too.
 - The S3 store keeps what curl said per transfer even when curl exits non-zero, and tries each key that got no answer (status 0) or a
   5xx once more, alone. One retry, never a loop (ER-12: no longer limit). A call that failed whole (curl did not start, the 60 s call
   budget ended, a redirect) is every key's error and is not retried.
@@ -22,3 +22,12 @@ them). The store is on a slow disk, so a timeout of one request is normal, and a
   A target whose lookup failed is never replaced (no definite answer).
 
 The fail-open rule itself is unchanged: a target without an answer runs, never the other way round.
+
+## Addendum, 2026-11-28 (user): writes and deletes are per key too
+
+Run 9350 (crate, windows-latest): the selfcheck passed, then one record PUT timed out after 5015 ms and the one atomic write lost every record
+of the leg ("records not stored: curl failed: curl: (28)"). `Store::put_many` and `Store::delete_many` now return one result per key; a PUT or
+DELETE with no answer or a 5xx is tried once more alone (the same `fetch_each` as the lookup), and a record that still fails is the only one lost,
+with its cause counted in the warning (`N of M records not stored: K x <cause>`). Writes run after the tests, so their request limit
+(`WRITE_REQUEST_SECS`) and parallelism (`WRITE_PARALLEL`) are set apart from the reads', each with its measured cause beside the constant (ER-12),
+from `./dev ci test-cache probe --shared` (the workflow `test-cache-probe.yml` runs it on every OS by hand).
