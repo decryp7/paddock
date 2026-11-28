@@ -25,8 +25,9 @@
 //! base, so a test never reaches the network; the pinned checksum still decides).
 
 use crate::ci_isolation::{self, Ctx, Sinks, home};
-use crate::ci_tool::{NETWORK_ENV, Output, TAIL_LINES, ToolCall, error_line, tail};
+use crate::ci_tool::{NETWORK_ENV, Output, TAIL_LINES, ToolCall, tail};
 use crate::local_sccache::server_env;
+use crate::log_text::error_line;
 use clap::Args;
 use paddock_ci_config::settings::sccache::{S3Ci, S3Off};
 use paddock_env::Vars;
@@ -286,7 +287,7 @@ pub fn s3_write_probe_verdict(curl_stdout: &str) -> Result<(), String> {
         Ok(code) => Err(format!(
             "the store answered {code} to a write of {} KiB{}",
             S3_WRITE_PROBE_BYTES / 1024,
-            crate::test_cache::s3::s3_error(body)
+            crate::local_sccache::s3_error(body)
         )),
         Err(_) => Err("the store gave no status to a write probe".to_string()),
     }

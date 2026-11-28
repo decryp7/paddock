@@ -1,9 +1,9 @@
 // ci-runs-reader: escapes: the previous green nightly's commit and the nightly's own failed jobs; the monitor judges plans, not a release
 //! The edges of the escape monitor: the record a CI plan run saves and the nightly's `dev plan --escapes` (ADR 0117 WP-9). The
-//! judgement itself is [`super::judge`]; this file reads the tree, the run and the arguments.
+//! judgement itself is [`crate::escape::judge`]; this file reads the tree, the run and the arguments.
 
 use super::artifact::{ArtifactStore, FileSink};
-use super::{Failure, Record, Sel, WHOLE_JOB, register};
+use crate::escape::{Failure, Record, Sel, WHOLE_JOB, register};
 use crate::plan::{RepoGraph, Request};
 use crate::plan_ci::LINUX;
 use serde_json::Value;
@@ -107,7 +107,7 @@ pub fn save_ci(root: &Path, req: &Request, selected: BTreeMap<String, Sel>, reac
                 let mut c = crate::git_env::git();
                 c.arg("-C").arg(root).args(["rev-parse", "--verify", &format!("{b}^{{commit}}")]);
                 let o = c.output().map_err(|e| format!("git rev-parse: {e}"))?;
-                Some(String::from_utf8_lossy(&o.stdout).trim().to_string()).filter(|s| super::valid_commit(s))
+                Some(String::from_utf8_lossy(&o.stdout).trim().to_string()).filter(|s| crate::escape::valid_commit(s))
             }
             None => None,
         };
@@ -120,7 +120,7 @@ pub fn save_ci(root: &Path, req: &Request, selected: BTreeMap<String, Sel>, reac
             &reached,
             &projects,
         );
-        super::save(&FileSink { path: file.clone().into() }, &rec)?;
+        crate::escape::save(&FileSink { path: file.clone().into() }, &rec)?;
         Ok(commit)
     };
     match run() {
@@ -186,7 +186,7 @@ pub fn read_failures(text: &str) -> Result<Vec<Failure>, String> {
 
 /// The commit of the newest finished, green run of the nightly workflow other than `current` (ADR 0117 §8: the span runs from the last
 /// green nightly, across a weekend and a paused night). `Err` says what to pass instead.
-pub fn previous_green(http: &mut dyn crate::wait::Http, env: &dyn Fn(&str) -> Option<String>, current: u64) -> Result<String, String> {
+pub fn previous_green(http: &mut dyn crate::http::Http, env: &dyn Fn(&str) -> Option<String>, current: u64) -> Result<String, String> {
     let server = env("GITHUB_SERVER_URL").unwrap_or_else(|| "https://dev.decryptology.net".into());
     let repo = env("GITHUB_REPOSITORY").unwrap_or_else(|| "decryp7/paddock".into());
     let token = env("PLAN_TOKEN").unwrap_or_default();
@@ -251,7 +251,7 @@ pub fn command(root: &Path, args: &[String], env: &dyn Fn(&str) -> Option<String
         c.arg("-C").arg(root).args(["rev-parse", "--verify", &format!("{r}^{{commit}}")]);
         let o = c.output().map_err(|e| format!("git rev-parse: {e}"))?;
         let t = String::from_utf8_lossy(&o.stdout).trim().to_string();
-        if o.status.success() && super::valid_commit(&t) {
+        if o.status.success() && crate::escape::valid_commit(&t) {
             Ok(t)
         } else {
             Err(format!("{r} is not a commit here"))
@@ -278,14 +278,14 @@ pub fn command(root: &Path, args: &[String], env: &dyn Fn(&str) -> Option<String
             cmd.status().is_ok_and(|s| s.success())
         }
     };
-    let commits = super::chain(&store, &head, &reached);
-    let mut runner: Box<dyn super::Runner> = match &bisect {
-        Some(p) => Box::new(super::CommandRunner { program: p, root }),
-        None => Box::new(super::NoRunner),
+    let commits = crate::escape::chain(&store, &head, &reached);
+    let mut runner: Box<dyn crate::escape::Runner> = match &bisect {
+        Some(p) => Box::new(crate::escape::CommandRunner { program: p, root }),
+        None => Box::new(crate::escape::NoRunner),
     };
-    let mut judged = super::judge(&commits, &store, &failures, runner.as_mut());
+    let mut judged = crate::escape::judge(&commits, &store, &failures, runner.as_mut());
     for u in &unmapped {
-        judged.outcomes.push(super::Outcome::NotMeasured(
+        judged.outcomes.push(crate::escape::Outcome::NotMeasured(
             Failure {
                 project: "?".into(),
                 os: "?".into(),

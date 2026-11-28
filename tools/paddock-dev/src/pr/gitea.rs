@@ -2,7 +2,7 @@
 //! The Gitea API calls of the ledger: labels, pull requests and the CI runs of a commit. The token travels in a header only
 //! (the [`Http`] contract) and is in no message.
 
-use crate::wait::Http;
+use crate::http::Http;
 use serde_json::{Value, json};
 
 /// A label on the server.

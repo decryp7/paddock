@@ -11,9 +11,10 @@
 //!
 //! Names are compared without their file or module, so a test that moved is not lost.
 
-use super::diff::FileDiff;
-use super::{Ctx, Finding, Kind, testnames, trailers};
+use super::{Ctx, Finding, Kind, testnames};
 use crate::git::{Git, short};
+use crate::git_diff::FileDiff;
+use crate::trailers;
 use regex::Regex;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 

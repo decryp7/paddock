@@ -19,7 +19,7 @@ test feeds them invented runs. A replay feeds them what the server really answer
   and the fix items (`fix_items::lines`, `add_to_lessons`). The `SHAPES` table holds the answer of each, with a one-line reason.
 - The recorder also keeps a run's artifacts when it has any (2026-11-27, the escape monitor's `plan-record`): `artifacts-<run>.json` (the
   list as the API answers it), `artifact-<id>.redirect.txt` (where the download redirects, signature dropped) and `artifact-<id>.zip.hex`
-  (the zip, as hex so a recording stays text). `ARTIFACT_SHAPES` in `replay.rs` replays them through `escape::artifact::ArtifactStore`.
+  (the zip, as hex so a recording stays text). `ARTIFACT_SHAPES` in `replay.rs` replays them through `escape_ci::artifact::ArtifactStore`.
 - What a replay cannot hold is git. A shape declares what the change touched (`Touch`) and the first-parent line the reuse reader walks;
   the table says which.
 

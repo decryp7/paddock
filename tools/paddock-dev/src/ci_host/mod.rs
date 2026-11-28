@@ -39,7 +39,7 @@ pub mod sccache_stats;
 pub mod stable_workspace;
 
 use crate::ci_isolation::{self, Ctx, Sinks};
-use crate::ci_tool::error_line;
+use crate::log_text::error_line;
 use clap::Subcommand;
 use std::collections::HashMap;
 use std::io::Write;

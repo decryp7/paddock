@@ -49,7 +49,7 @@ fn is_main_name(name: &str) -> bool {
 /// message) or `remote-tracking branch 'origin/train/<name>'` (the remote prefix is dropped); a trailing `(sha)` is not part of it.
 fn remerged_line(subject: &str, trailers: &str) -> Option<String> {
     // A merge made by `merge member` says its member in a trailer, whatever its subject says; the subject is the fallback.
-    let said = super::trailers::merge_member(subject, trailers);
+    let said = crate::trailers::merge_member(subject, trailers);
     if said.from_trailer {
         return said.branch.to_ascii_lowercase().starts_with("train/").then_some(said.branch);
     }
@@ -94,7 +94,7 @@ pub fn base_of(git: &Git, head: &str, target_name: &str) -> Result<Base, String>
         "--first-parent".into(),
         "-n".into(),
         DEPTH.into(),
-        format!("--format=%H%x00%P%x00%s%x00{}%x01", super::trailers::TRAILERS_FORMAT),
+        format!("--format=%H%x00%P%x00%s%x00{}%x01", crate::trailers::TRAILERS_FORMAT),
         head.into(),
     ];
     args.extend(main.iter().chain(local_main.iter()).map(|m| format!("^{m}")));
