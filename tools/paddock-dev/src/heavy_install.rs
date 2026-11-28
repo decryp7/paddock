@@ -392,7 +392,7 @@ pub fn command(a: &InstallArgs) -> Result<Report, CliError> {
 
 /// The version in this checkout's `tools/throttle/Cargo.toml`.
 fn checkout_version(from: &Path) -> Result<String, CliError> {
-    let root = crate::worktree::git::Git::at(from)
+    let root = crate::worktree::git::git_at(from)
         .text(&["rev-parse", "--show-toplevel"])
         .map(|t| PathBuf::from(t.trim()))
         .map_err(|e| CliError::failure(format!("throttle-install: {e}; run it in a Paddock checkout or pass --version")))?;

@@ -252,7 +252,7 @@ mod tests {
         let mut child = paddock_proc::command(step.program()).spawn().unwrap();
         let id = ProcessId::of(child.id()).expect("the child's identity");
         let env: HashMap<String, String> = paddock_env::vars().collect();
-        let on_path = |p: &str| crate::throttle::on_path(&env, p);
+        let on_path = |p: &str| crate::pathfind::on_path(&env, p);
         let c = capture(this_os(), &[id.pid()], "stand-in hung", d.path(), "hangs", &env, &on_path);
         paddock_proc::kill_tree(id);
         let _ = child.wait();

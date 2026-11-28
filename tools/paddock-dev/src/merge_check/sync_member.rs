@@ -115,14 +115,14 @@ fn command_with(
         .map(|t| t.trim().to_string())
         .map_err(|e| {
             step(
-                e,
+                e.to_string(),
                 "run `git fetch origin` and give the train's full ref, for example origin/train/<date>-<n>",
             )
         })?;
     let head = git
         .text(&["rev-parse", "--verify", "HEAD^{commit}"])
         .map(|t| t.trim().to_string())
-        .map_err(|e| step(e, "run it inside the member's worktree"))?;
+        .map_err(|e| step(e.to_string(), "run it inside the member's worktree"))?;
     // After `git merge <train>` the train is in HEAD and `member..train` is empty: read from the train merge's first parent, the
     // member's pre-merge tip, and leave out what a later commit of HEAD already re-applied.
     let (basis, after) = if git.is_ancestor(&train_tip, &head).map_err(|e| step(e, "run `git status`"))? {
@@ -150,7 +150,7 @@ fn command_with(
                     &format!("This reverts commit {}", r.1),
                     &format!("{train_tip}..{head}"),
                 ])
-                .map_err(|e| step(e, "run `git log` to see why"))?;
+                .map_err(|e| step(e.to_string(), "run `git log` to see why"))?;
             if hits.trim().is_empty() {
                 open.push(r);
             } else {

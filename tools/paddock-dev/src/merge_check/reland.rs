@@ -72,6 +72,7 @@ fn files_of(git: &Git, sha: &str) -> Result<Vec<String>, String> {
         "--root",
         sha,
     ])
+    .map_err(String::from)
 }
 
 /// The target's revert commit `name` stands for, with its files: `None` when it is not a commit of `target` or not a revert.

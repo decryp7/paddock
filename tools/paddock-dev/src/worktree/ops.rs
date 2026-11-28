@@ -1,10 +1,11 @@
 //! The commands that change a worktree's ownership or existence: `add`, `claim`, `reassign`, `release` and `drop`
 //! (ADR 0083 §1). Each runs its read-check-write under the owner map's lock, so a refusal never leaves half a change.
 
-use super::git::{Git, GitError, Repo, WorkState, WorktreeInfo, is_under, key, worktrees};
+use super::git::{Repo, WorkState, WorktreeInfo, git_at, is_under, key, worktrees};
 use super::note::{Note, check_owner, format_utc, now_secs};
 use super::owners::{Claim, OwnerError, OwnerMap, OwnerStore, PENDING_TTL, same_path};
 use super::procs;
+use crate::git::{Git, GitError};
 use paddock_cli::{CliError, Report};
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -365,7 +366,7 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
     // install them here, bounded and logged; a failure is a warning with the next step, never a failed `add`.
     // A branch worktree and a full `--detach` copy get the same handling; only a `--sparse` review copy, which reads a few folders, is left.
     let deps_note = deps_note(Path::new(&k), req, &crate::deps_cache::warm_note, &npm_ci);
-    let head = Git::at(Path::new(&k))
+    let head = git_at(Path::new(&k))
         .text(&["rev-parse", "HEAD"])
         .map(|s| s.trim().to_string())
         .unwrap_or(base_sha);
@@ -401,7 +402,7 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
 /// overlaps.
 fn overlap_warning(repo: &Repo, branch: Option<&str>, base_sha: &str, k: &str) -> String {
     use super::overlap;
-    let run = |dir: &Path, args: &[&str]| Git::at(dir).text(args).map_err(|e| e.to_string());
+    let run = |dir: &Path, args: &[&str]| git_at(dir).text(args).map_err(|e| e.to_string());
     let list = match worktrees(repo) {
         Ok(l) => l,
         Err(e) => {
@@ -558,7 +559,7 @@ fn make_worktree(git: &Git, req: &AddRequest<'_>, attach: &Attach, k: &str, base
     if req.sparse.is_empty() {
         return Ok(());
     }
-    let at = Git::at(Path::new(k));
+    let at = git_at(Path::new(k));
     let mut s = vec!["sparse-checkout", "set", "--cone"];
     s.extend(req.sparse.iter().map(String::as_str));
     let steps = at.text(&s).and_then(|_| at.text(&["checkout", "--force", "HEAD"]));
@@ -887,7 +888,7 @@ mod root_tests {
 
     fn repo_with(config: Option<&str>) -> (tempfile::TempDir, Repo) {
         let d = tempfile::tempdir().unwrap();
-        let git = Git::at(d.path());
+        let git = git_at(d.path());
         git.text(&["init", "-q"]).unwrap();
         if let Some(v) = config {
             git.text(&["config", "paddock.worktreeRoot", v]).unwrap();

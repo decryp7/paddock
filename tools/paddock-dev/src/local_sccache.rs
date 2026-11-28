@@ -623,7 +623,7 @@ pub(crate) fn server_env(mut c: ToolCall, settings: &[(String, String)], survive
 /// the server started with and restarts it when a worktree came or went. Sorted: the same set is the same stamp. A folder that is
 /// gone (prunable) is left out; not a repository, or git failing, gives no bases.
 pub(crate) fn worktree_roots(cwd: &Path) -> Vec<String> {
-    let Ok(text) = crate::worktree::git::Git::at(cwd).text(&["worktree", "list", "--porcelain"]) else {
+    let Ok(text) = crate::worktree::git::git_at(cwd).text(&["worktree", "list", "--porcelain"]) else {
         return Vec::new();
     };
     let mut roots: Vec<String> = crate::worktree::git::parse_worktrees(&text)
@@ -2685,7 +2685,7 @@ mod tests {
     }
 
     fn git_in(dir: &Path, args: &[&str]) {
-        let out = crate::worktree::git::Git::at(dir).text(args).unwrap_or_else(|e| panic!("{e}"));
+        let out = crate::worktree::git::git_at(dir).text(args).unwrap_or_else(|e| panic!("{e}"));
         drop(out);
     }
 

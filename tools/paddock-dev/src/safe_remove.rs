@@ -21,7 +21,7 @@
 mod guard;
 
 use crate::disk::record;
-use crate::worktree::git::{Git, Repo, key, worktrees};
+use crate::worktree::git::{Repo, git_at, key, worktrees};
 use crate::worktree::owners::OwnerStore;
 use crate::worktree::procs;
 use paddock_env::winpath;
@@ -158,7 +158,7 @@ fn git_fail(repo: &Path, what: &str, e: impl std::fmt::Display) -> Refusal {
 /// The proof for one repository or worktree: clean, no stash, a remote, nothing unpushed; a linked worktree is also unlocked and
 /// unclaimed.
 fn repo_proof(repo_dir: &Path, top: &Path) -> Result<(), Refusal> {
-    let git = Git::at(repo_dir);
+    let git = git_at(repo_dir);
     let named = |m: &str| {
         format!(
             "{}{m}",
@@ -184,7 +184,7 @@ fn repo_proof(repo_dir: &Path, top: &Path) -> Result<(), Refusal> {
         return Err(named("it holds uncommitted or untracked files"));
     }
     let stash = git
-        .run(&["rev-parse", "--verify", "--quiet", "refs/stash"])
+        .output(&["rev-parse", "--verify", "--quiet", "refs/stash"])
         .map_err(|e| named(&git_fail(repo_dir, "a stash", e)))?;
     if stash.ok {
         return Err(named("it holds a stash"));

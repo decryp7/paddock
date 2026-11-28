@@ -255,9 +255,14 @@ fn changed_since(root: &Path, base: &str) -> Result<Vec<String>, CliError> {
             "::error::gen check NOT MEASURED: git could not list the change: {e}. Next step: give --base <rev> that exists, or --files a,b, or --all."
         ))
     };
-    let mb = git.text(&["merge-base", base, "HEAD"]).map_err(gap)?;
-    let mut paths = git.paths(&["diff", "--name-only", "-z", "--no-renames", mb.trim()]).map_err(gap)?;
-    paths.extend(git.paths(&["ls-files", "-z", "--others", "--exclude-standard"]).map_err(gap)?);
+    let mb = git.text(&["merge-base", base, "HEAD"]).map_err(|e| gap(e.to_string()))?;
+    let mut paths = git
+        .paths(&["diff", "--name-only", "-z", "--no-renames", mb.trim()])
+        .map_err(|e| gap(e.to_string()))?;
+    paths.extend(
+        git.paths(&["ls-files", "-z", "--others", "--exclude-standard"])
+            .map_err(|e| gap(e.to_string()))?,
+    );
     paths.sort();
     paths.dedup();
     Ok(paths)

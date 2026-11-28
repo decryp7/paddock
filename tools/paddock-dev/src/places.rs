@@ -308,7 +308,7 @@ pub(crate) fn test_abs(unix: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::worktree::git::Git;
+    use crate::worktree::git::git_at;
 
     use super::test_abs as abs;
 
@@ -376,7 +376,7 @@ mod tests {
     #[test]
     fn a_repository_derives_it_from_git_config_and_its_main_checkout_from_the_common_dir() {
         let d = tempfile::tempdir().unwrap();
-        let git = Git::at(d.path());
+        let git = git_at(d.path());
         git.text(&["init", "-q"]).unwrap();
         let none = |_: &str| None;
         assert!(dev_targets(d.path(), &none).is_err(), "no worktree root set: refused");
@@ -403,7 +403,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let main = d.path().join("main");
         std::fs::create_dir(&main).unwrap();
-        let git = Git::at(&main);
+        let git = git_at(&main);
         git.text(&["init", "-q"]).unwrap();
         git.text(&[
             "-c",
@@ -433,7 +433,7 @@ mod tests {
     #[test]
     fn the_layout_puts_the_vm_and_lock_folders_on_the_dev_disk_and_refuses_a_root_level_dev_targets_folder() {
         let d = tempfile::tempdir().unwrap();
-        Git::at(d.path()).text(&["init", "-q"]).unwrap();
+        git_at(d.path()).text(&["init", "-q"]).unwrap();
         let env = |k: &str| (k == DEV_TARGETS_ENV).then(|| abs("/srv/disk-e/dev-targets"));
         let l = Layout::derive(d.path(), &env, false);
         assert_eq!(l.get("dev-disk").unwrap(), Path::new(&abs("/srv/disk-e")));
@@ -476,8 +476,8 @@ mod tests {
     #[test]
     fn on_windows_pinned_is_refused() {
         let d = tempfile::tempdir().unwrap();
-        Git::at(d.path()).text(&["init", "-q"]).unwrap();
-        Git::at(d.path())
+        git_at(d.path()).text(&["init", "-q"]).unwrap();
+        git_at(d.path())
             .text(&["config", "paddock.worktreeRoot", &abs("/srv/disk-f/dev-targets/wt")])
             .unwrap();
         let why = pinned_unsupported().unwrap();
