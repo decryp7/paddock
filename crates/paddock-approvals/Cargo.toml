@@ -1,0 +1,20 @@
+[package]
+name = "paddock-approvals"
+version = "0.1.0"
+description = "Approvals of exceptions as one pure core: the typed record of each approval kind (the register's `approved` fields, a growth approval, an OS-removal approval), one verdict per thing that needs approval (approved, missing, mismatch, stale) and one stage policy that turns a verdict into a warning or an error."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
+[dependencies]
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+sha2 = "0.10"
+toml = "0.9"
+
+[dev-dependencies]
+# The never-panics test of every crate that parses text (conformance C36).
+paddock-testkit = { workspace = true }

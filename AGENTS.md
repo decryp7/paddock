@@ -85,9 +85,12 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 - **Merge queue: parked (user, 2026-11-24).** `./dev queue` and `./dev pr` (docs/plans/merge-queue.md) stay in the tool, but
   nothing runs them and CI does not test them; trains are built by hand with the member gate (`./dev merge check --gates`).
   A member merges current main and re-runs its member gate on that tip before it joins a train (rule 100). `./dev merge sync-member <train>`, run after the merge, runs the
-  fast static rows (conformance, gates-register, clippy, clippy-windows) on the sync tip first and fails on a bad row (`--no-static "<reason>"` skips them, logged);
-  once they pass it dispatches the member's own CI trial (the affected jobs on the train, `ci dispatch --trial` on `sync/<member>/<short sha>`, a new ref per synced commit that sync-member pushes with a plain push: integrator role only) and prints the run id, which
-  `./dev merge check --gates` reads later (red blocks, running is not a pass; `--no-trial "<reason>"` skips it, logged).
+  fast static rows (fmt, conformance, gates-register, clippy, clippy-windows, in the train lane: `--priority train`) on the sync tip first and fails on a bad row (`--no-static "<reason>"` skips them, logged);
+  the member's own CI trial (the affected jobs on the train, `ci dispatch --trial` on `sync/<member>/<short sha>`, a new ref per synced commit that sync-member pushes with a plain push: integrator role only) is dispatched
+  **only for a member with no green trial of its own on main** (a Linux trial with `--onto origin/main` on its current head, or on a head whose only differences are merges of main; user 2026-11-27).
+  A member that has one runs sync-member and joins with `--no-trial "trial <run id> green on main"` (logged); members without one join on the static rows, and **one trial of the
+  train tip** after they are merged covers them all (red: pull the member it points to, ER-8, and run it again). Where a member has its own trial, `./dev merge check --gates` reads it
+  (red blocks, running is not a pass; `--no-trial "<reason>"` skips it, logged). A train takes up to 8 ready members (user 2026-11-27, was 3 to 4); a red full run pulls the member its failure points to (ER-8) and the train runs again once. The final full CI run and `landing-held` are unchanged (ER-49).
 - **Train merges are made by `./dev merge member` (user decision 100, 2026-11-27).** In the train's worktree: `./dev merge member <member-branch-or-sync-ref> [--reland <revert>]...`
   does the `git merge --no-ff` itself with the fixed subject `Merge <member> into <train>` and the trailers `Paddock-Member`, `Paddock-Sync-Ref` (a
   `sync/<member>/<sha>` ref was given), `Paddock-Sync-Sha`, the `Reverted:` lines `merge check --write-reverted` would write and `Paddock-Reland`
@@ -162,6 +165,7 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   opt in (`windowsClippy`) and the developer tools `tools/paddock-dev` and `tools/throttle` (user, 2026-11-26: Windows-only dead code found
   only by CI four times in a day), as heavy rows in parallel with the others and through sccache; Windows tests stay CI's. The register (`NOT_RUN` in
   `pre_push/gates.rs`) names them CI-owned.
+  A builder may run its affected Linux tests as ONE CI trial of its own pushed branch (`./dev ci dispatch ci.yml --trial <branch> --onto origin/main`, never main or `train/*`; playbook ER-9 amendment, user 2026-11-27); locally only the fast static rows run.
 - The member gate (`./dev check --pre-push --member-gate`, run by `./dev merge check --gates`) also runs the full nextest `ci`
   profile of every touched Cargo workspace (the plan's reached packages, as CI's member run) on the host (`tests <ws>`). Inactive apps
   are skipped and named. A developer's push skips these rows.
@@ -173,6 +177,12 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   (6, not held, while a slow row is unfinished or missing). A run with `--set fast` or `--set slow` leaves no whole-run pass record. The
   Linux tests are CI's Linux jobs on d-gtr9. A push or member gate prints a per-row table (queued s, run s, concurrent) and writes
   `row-timings.tsv` in its log folder.
+- **Mutation-testing of the diff (user decision 127, 2026-11-27).** The member gate's `mutants` row (`./dev mutants gate --base <merge base>`,
+  tools/paddock-dev/src/mutants_gate.rs) runs the pinned cargo-mutants (`mutants_gate::PIN`; install it with `cargo install cargo-mutants
+  --version <PIN> --locked`, nothing installs it for you) `--in-diff` over the Rust functions changed in `tools/paddock-dev` and `crates/`, to find
+  a test or a guard that never reaches the code it claims to check. A MISSED mutant is a `::warning::` naming the function and the mutation;
+  timeouts, unviable mutants and a run cut by the cap are counted apart and never a pass. Report-only until its first green run (the
+  `row:mutants` entry of docs/gates.toml, `MODE`); skipped in a developer's push. Measured: docs/benchmarks.md.
 - Before committing, the gates of the affected projects, for example:
 
   ```sh
@@ -282,6 +292,7 @@ Apply these deliberately. They are not decoration:
 
 ## Working practices
 
+- Flaky or platform-dependent failures cite the vendor's documentation in the commit (ER-28; the bug-fix skill has the steps).
 - Research official sources before choosing libraries or relying on another program's behaviour, and record what you
   found and when in the ADR or doc comment. Prefer well-maintained, permissively licensed dependencies.
 - Navigate code with Serena's symbol tools (find symbol, references, overview) when they are available instead of

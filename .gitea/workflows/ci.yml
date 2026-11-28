@@ -85,6 +85,8 @@ permissions:
 env:
   # The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
   PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
+  # The ref this run is on: ./dev reads the stage of the approval checks from it (a train or trial ref is the member gate, else landing).
+  PADDOCK_APPROVAL_STAGE_FROM_REF: ${{ github.ref }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
@@ -205,12 +207,37 @@ jobs:
           PLAN_REUSE: ${{ steps.reuse.outputs.reuse }}
           # The test-result cache's plan (ADR 0116): read when the file is there.
           PLAN_TEST_CACHE_FILE: ${{ runner.temp }}/test-cache-plan.json
+          # The selection record (ADR 0117 D13 amendment): the plan writes it here and the next step uploads it as this run's artifact.
+          PLAN_RECORD_FILE: ${{ runner.temp }}/plan-record/record.json
           EVENT: ${{ github.event_name }}
         run: |
           ./dev plan --ci
           # A smoke or affected-only selection (the graph planner's `partial`) is never a full run; the mode line says so (P2-4).
           if grep -q '^partial=true$' "$GITHUB_OUTPUT"; then PLAN_MODE_FULL=false; fi
           echo "plan mode: full=$PLAN_MODE_FULL"
+
+      # The escape monitor's record of this plan (ADR 0117 §8, D13 amended 2026-11-27): an artifact of this run, so this workflow writes
+      # nothing to the repository (`permissions: contents: read`). The nightly reads it through the Actions API, which lists only v4
+      # artifacts (Gitea 28: routers/api/v1/repo/action.go), so this is the Gitea fork of the v4 action (docs/research/2026-11-ci-artifacts-v4.md). `retention-days` is escape::RETENTION_DAYS (a paddock-dev test ties them). A missing file is a warning: the commit is
+      # then `not measured` at night, never clean.
+      - name: Save the selection record
+        uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
+        with:
+          name: plan-record
+          path: ${{ runner.temp }}/plan-record/record.json
+          retention-days: 14
+          if-no-files-found: warn
+
+      # ADR 0123 §7: the one check at the source of the job layout (the model builds, every job keeps the conventions, `render` is
+      # injective over the legs the planner emits). Every run, whatever the change (ER-41); the member gate runs it too (`job-model`
+      # row). Report-only (warnings, exit 0) until its first green run on the real tree is recorded in
+      # tools/paddock-dev/src/ci_job_model.rs (`BLOCKING`); `continue-on-error` goes with that change. Review by 2027-02-27.
+      - name: Job model check
+        continue-on-error: true
+        env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+          PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
+        run: ./dev ci job-model check
 
   # The developer and CI tool (ADR 0022): its own Cargo workspace and lockfile, tested on every OS it runs on. Linux runs in the
   # paddock-ci image (git, Node for the golden test's live oracle, nextest); Windows and macOS run on the host.
@@ -450,6 +477,73 @@ jobs:
             ./dev ci test-cache lookup --workspace crates --class "$class" --shared || true
             echo "::endgroup::"
           done
+
+  # Mutation testing of the diff (user decision 127, 2026-11-27): cargo-mutants `--in-diff` over the Rust functions changed in
+  # tools/paddock-dev and crates/ since the train's base, to find a test or a guard that never reaches the code it claims to check
+  # (`./dev mutants gate`, tools/paddock-dev/src/mutants_gate.rs). Trains and manual runs only (a push to main never runs it), and only
+  # when the plan reaches paddock-dev or crates. Report-only (ER-41): a MISSED mutant is a `::warning::` naming the function and the
+  # mutation, the step exits 0 while `MODE` is ReportOnly (review 2026-12-11), so no `continue-on-error` is needed. Eight shards of the
+  # diff's mutants (`--shard k/8`, consecutive slices): a shard with none says so after its listing and builds nothing, a shard over its
+  # budget (MAX_PER_SHARD) is "not measured" and asks for more shards; measured in docs/benchmarks.md ("Mutation testing of the diff").
+  mutants:
+    name: mutants (shard ${{ matrix.shard }})
+    needs: [plan]
+    if: ${{ (needs.plan.outputs.paddock_dev == 'true' || needs.plan.outputs.crates == 'true') && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["mutants"]'), 'mutants') }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["0/8", "1/8", "2/8", "3/8", "4/8", "5/8", "6/8", "7/8"]
+    env:
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
+      # Trains and manual runs only. The job's own `if` can read only the plan's outputs (the run's expected jobs are listed from them,
+      # `run_scope::expected`, and the job model reads them), so on a push to main the four legs start, set Rust up and end their two
+      # working steps at once.
+      MUTANTS_RUN: ${{ (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/heads/train/')) && 'true' || 'false' }}
+    steps:
+      # The whole history: the base is a merge base or a train's last green commit.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
+      # The pinned cargo-mutants (ER-26): the version is `mutants_gate::PIN`, read through `./dev mutants pin` (one definition), built
+      # with `cargo install --locked` on every run (compiled through sccache; no Actions cache, so no cache step to report).
+      - name: Install the pinned cargo-mutants
+        if: ${{ env.MUTANTS_RUN == 'true' }}
+        run: |
+          pin=$(./dev mutants pin)
+          if [ "$(cargo mutants --version 2>/dev/null | cut -d' ' -f2)" != "$pin" ]; then
+            cargo install cargo-mutants --version "$pin" --locked
+          fi
+      # The inputs and generator tests read the cargo metadata of tools/throttle offline: its packages must be in the job's cargo home
+      # (as the paddock-dev job fetches them); without them the unmutated tree's tests fail ("no matching package named `utf_types`", trial 9334).
+      - name: Fetch the other tools' dependencies
+        if: ${{ env.MUTANTS_RUN == 'true' }}
+        working-directory: tools
+        run: |
+          for t in throttle; do
+            (cd "$t" && cargo fetch --locked) || { echo "::error::cargo fetch --locked failed in tools/$t, so the offline metadata tests cannot read it. Next step: run it on the runner to see why"; exit 1; }
+          done
+      - name: Mutants in the changed functions (report-only)
+        if: ${{ env.MUTANTS_RUN == 'true' }}
+        env:
+          BASE: ${{ github.event.inputs.base }}
+          LANDING_BASE: ${{ github.event.inputs.landing_base }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          base="${BASE:-$LANDING_BASE}"
+          if [ -z "$base" ]; then base=$(git merge-base HEAD origin/main) || { echo "::error::mutants: no base to diff from (no base input and no merge base with origin/main). Next step: dispatch with a base"; exit 1; }; fi
+          case "$base" in -*) echo "::error::mutants: base '$base' is not a commit"; exit 1 ;; esac
+          ./dev mutants gate --base "$base" --shard "$SHARD"
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
 
   ui:
     needs: [plan]
@@ -697,7 +791,7 @@ jobs:
 
       # The traces of failed tests (retain-on-failure, paddockTrace) and each failure's error context: nightly 9103's chart spec failed with
       # only its timeout in the log and nothing kept to show why.
-      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+      - uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         if: failure()
         with:
           name: e2e-webkit-results
@@ -821,8 +915,8 @@ jobs:
           # The image from v3 on has it (system packages belong to the image, not to a job). Until then: the same pinned package, checked
           # by SHA-256 (the Dockerfile's ARGs are the one source) and unpacked beside the job, not installed; its libraries are the image's.
           if command -v drawio >/dev/null 2>&1; then exit 0; fi
-          v=$(sed -n 's/^ARG DRAWIO_VERSION=//p' ci-image/Dockerfile | head -n 1)
-          sum=$(sed -n 's/^ARG DRAWIO_SHA256_AMD64=//p' ci-image/Dockerfile | head -n 1)
+          v=$(sed -n 's/^ARG DRAWIO_VERSION=//p' ci-image/Dockerfile); v=${v%%$'\n'*}
+          sum=$(sed -n 's/^ARG DRAWIO_SHA256_AMD64=//p' ci-image/Dockerfile); sum=${sum%%$'\n'*}
           echo "::notice::the CI image has no draw.io yet (it comes with the next image rebuild, ci-image/README.md); unpacking the pinned $v"
           bash ci-image/fetch-verified.sh "https://github.com/jgraph/drawio-desktop/releases/download/v${v}/drawio-amd64-${v}.deb" "$sum" "$RUNNER_TEMP/drawio.deb" \
             || { echo "::error::could not fetch the pinned draw.io $v (see the line above). Fix: re-run, or check the release still exists and the SHA-256 in ci-image/Dockerfile."; exit 1; }
@@ -900,7 +994,7 @@ jobs:
         env:
           PADDOCK_REQUIRE_TEST_BROWSER: "1"
         run: ./dev ci run crates coverage
-      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+      - uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         if: failure()
         with:
           name: crates-lcov
@@ -1099,6 +1193,21 @@ jobs:
           fi
           cargo nextest run "${sel[@]}" --all-features --profile ci ${filter[@]+"${filter[@]}"} 2>&1 | tee "$RUNNER_TEMP/nextest-crates.log"
 
+      # ADR 0116 amendment (ER-33): the positive control of the record step below. One put, get, list and delete of a scratch object in the
+      # shared store, from this runner, on every OS and every ref (it writes only its own scratch key and removes it). A store that cannot
+      # answer here prints its cause and ends this step red (never the job: continue-on-error); the record step then holds every record
+      # back, and this line says why: the leg's test cache is "not measured". Run 9265's Windows leg recorded nothing and printed no cause.
+      - name: Test cache store check
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && (runner.os != 'Linux' || !(inputs.os_full == true || inputs.os_full == 'true' || github.event.inputs.os_full == 'true' || inputs.release == true || startsWith(github.ref, 'refs/tags/'))) && !matrix.filter }}
+        continue-on-error: true
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
+        env:
+          PADDOCK_TEST_CACHE_KEY_ID: ${{ secrets.PADDOCK_TEST_CACHE_KEY_ID }}
+          PADDOCK_TEST_CACHE_SECRET: ${{ secrets.PADDOCK_TEST_CACHE_SECRET }}
+          PADDOCK_SCCACHE_S3_ENDPOINT: ${{ vars.PADDOCK_SCCACHE_S3_ENDPOINT }}
+        run: |
+          "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci test-cache selfcheck --shared
+
       # ADR 0116, report-only (ER-41): stores the pass of every package this run proved (whole, first try, no flake) in the shared test-result
       # store, keyed by the leg's `test_filter` (a host leg's pass counts only for a later leg with the same filter; user decision 97). Only a main or train run writes (`./dev ci test-cache record` refuses any other ref and any rerun itself). Never fails the job.
       - name: Record test results (test cache)
@@ -1118,7 +1227,7 @@ jobs:
           [ -s "$RUNNER_TEMP/nextest-crates.log" ] || { echo "::notice::test-cache: no nextest output to record"; exit 0; }
           "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci test-cache record --workspace crates --shared --filter "$LEG_FILTER" --log "$RUNNER_TEMP/nextest-crates.log"
 
-      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+      - uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         if: failure() && runner.os == 'Windows'
         with:
           name: chrome-logs-${{ runner.os }}
@@ -1303,8 +1412,8 @@ jobs:
           e2e-checks: ${{ matrix.e2e_checks }}
           e2e-shard: ${{ matrix.e2e_shard }}
 
-      # The failure report of the app's browser tests (paddock.ci.json `e2eArtifacts`, a folder from the repo root); Gitea has the v3 artifact actions.
-      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+      # The failure report of the app's browser tests (paddock.ci.json `e2eArtifacts`, a folder from the repo root); Gitea lists only v4 artifacts, so these are the Gitea fork of the v4 action.
+      - uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         if: failure() && matrix.e2e_artifacts != ''
         with:
           name: ${{ matrix.app }}-${{ matrix.e2e_leg || 'ui' }}-results-${{ strategy.job-index }}
@@ -1456,7 +1565,7 @@ jobs:
             # A here-string, not a pipe into `grep -q` (which stops at its first match and, under `pipefail`, can turn the writer's SIGPIPE into a
             # failure); on a miss the first lines of the graph are printed, so a broken probe says what it saw (ER-27).
             grep '^paddock-proc ' <<<"$tree" >/dev/null || {
-              echo "$tree" | head -n 5 >&2 || true
+              sed -n '1,5p' <<<"$tree" >&2
               echo "::error::check broken: the dependency graph of tools/$tool has no paddock-proc, so a GTK crate there would not be seen."
               rc=1; continue; }
             hits=$(echo "$tree" | grep -E '^(gtk|gdk|gio|glib|gobject|pango|cairo|atk|gdk-pixbuf|soup|webkit2gtk|javascriptcore-rs)[a-z0-9-]*-(sys|sys-rs) ' | sort -u || true)

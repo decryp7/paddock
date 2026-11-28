@@ -29,8 +29,8 @@ serde_json = { version = "1", features = ["preserve_order"] }
 regex = "1"
 # ci_isolation: the {src} key of a kept build folder (ADR 0025 amendment); release_isolation: SHA-256 of the .crate archives.
 sha2 = "0.10"
-# escape: the job token as the basic `http.extraheader` actions/checkout sends, for the push of the plan records.
-base64 = "0.23"
+# escape/artifact: the zip an Actions artifact download is (one stored or deflated entry): inflate only, no archive library.
+miniz_oxide = { version = "0.9", default-features = false, features = ["with-alloc"] }
 # The repository graph's TypeScript and JavaScript import edges (repo_model/ts.rs, ADR 0117 §10): oxc's parser and resolver resolve
 # tsconfig paths and package exports, which a text scan cannot. They live here, not in paddock-repo-graph: as optional crate deps
 # they changed paddock-workspace-hack, and oxc_resolver turns on serde_json's preserve_order, which --all-features unified into
@@ -46,6 +46,7 @@ syn = { version = "2", default-features = false, features = ["full", "parsing", 
 proc-macro2 = { version = "1", features = ["span-locations"] }
 # pre_push/reuse: the time a reused row was green, in RFC 3339 (jiff is the one date and time crate).
 jiff = { version = "0.2", default-features = false, features = ["std"] }
+paddock-approvals = { path = "../../crates/paddock-approvals" }
 paddock-ci-config = { path = "../../crates/paddock-ci-config" }
 paddock-cli = { path = "../../crates/paddock-cli" }
 paddock-env = { path = "../../crates/paddock-env" }

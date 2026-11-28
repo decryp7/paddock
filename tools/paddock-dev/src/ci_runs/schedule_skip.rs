@@ -582,7 +582,6 @@ mod tests {
         );
         http.log(270, "2026-11-10T05:03:10Z run=true\n");
         let mut client = Client::new(&mut http, "https://gitea.invalid", "o/r", "t");
-        client.backoff_ms = 0;
         let p = read_past(&mut client, "nightly.yml").unwrap();
         assert_eq!(
             p.iter().map(|x| (x.id, x.train_skip)).collect::<Vec<_>>(),
@@ -612,7 +611,6 @@ mod tests {
             "::notice::skipped: train train/x in CI (runs ci.yml 1); runs on the next schedule after it lands\n",
         );
         let mut client = Client::new(&mut http, "https://gitea.invalid", "o/r", "t");
-        client.backoff_ms = 0;
         let d = decide_scheduled(&mut client, "schedule", "nightly.yml", now(), 36.0);
         assert!(!d.skip(), "{d:?}");
         assert!(d.annotation().unwrap().contains("never skipped twice"), "{d:?}");
@@ -632,13 +630,11 @@ mod tests {
         http.json(&format!("{api}&page=2"), page(50, "2026-11-12T04:00:00+08:00"));
         http.json(&format!("{api}&page=3"), page(3, "2026-11-12T03:00:00+08:00"));
         let mut client = Client::new(&mut http, "https://gitea.invalid", "o/r", "t");
-        client.backoff_ms = 0;
         assert_eq!(read(&mut client, now()).unwrap().len(), 103);
         let mut http = Fake::default();
         http.json(&format!("{api}&page=1"), page(50, "2026-11-10T05:00:00+08:00"));
         http.json(&format!("{api}&page=2"), page(50, "2026-11-10T04:00:00+08:00"));
         let mut client = Client::new(&mut http, "https://gitea.invalid", "o/r", "t");
-        client.backoff_ms = 0;
         assert_eq!(
             read(&mut client, now()).unwrap().len(),
             50,

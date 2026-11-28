@@ -1,5 +1,5 @@
 //! The per-step watchdog of the push gate: what ends a step that has stopped making progress (the hang detector), apart from the
-//! gate's one row cap ([`super::exec::ROW_CAP`]), which is only the last resort.
+//! gate's one row cap ([`crate::throttle::ROW_CAP`]), which is only the last resort.
 //!
 //! This file is the plumbing; the detection rule is a separate design and plugs in here. A [`Watchdog`] is asked once per step
 //! whether it wants to watch it ([`Watchdog::watch`]); the [`StepWatch`] it returns is then shown an [`Observation`] of the running

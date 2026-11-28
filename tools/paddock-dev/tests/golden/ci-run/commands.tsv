@@ -144,7 +144,8 @@ job	conformance			SUM=505324daad5fcbb1a3cab5d57d26ef42baf4d10b236df7de93a008196f
 job	conformance			SUM=c9f6c5a3ae84d9da0956b28c357a365827bda33f3383647fc0b67484c74a5ea9
 job	conformance			SUM=ca500a01139e9af8d5f5a5e69b6a0dd941ed79ed3399a91cc35bba484fe732fa
 job	conformance			SUM=d2658c9a24bab25a24fdc1917cb5b614b7c20a4ce8f363e5303d37b7e699d5ec
-job	conformance			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
+job	conformance			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin"
+job	conformance			TOOLCHAIN=${TOOLCHAIN%%$'\n'*
 job	conformance			TOOLCHAIN=${TOOLCHAIN:-stable
 job	conformance			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
 job	conformance			TOTAL="${PADDOCK_CI_SCCACHE_GB:-60}"
@@ -251,14 +252,12 @@ job	conformance			npm ci --ignore-scripts -w conformance
 job	conformance			out="$("${DEVCMD[@]}" ci slot check --slot "$PADDOCK_CI_SLOT" --root "$PADDOCK_CI_LANE_ROOT" ${PADDOCK_CI_LANE_LOCK:+--lock "$PADDOCK_CI_LANE_LOCK"} 2>&1)"
 job	conformance			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	conformance			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
-job	conformance			printf '%s\n' "$installed"
 job	conformance			printf 'server_startup_timeout_ms = 30000\n' > "$CONF" 2>/dev/null
 job	conformance			redis
 job	conformance			rm -f "$LANE_ERR"
 job	conformance			rm -rf "$dl"
 job	conformance			rustc --version
 job	conformance			rustup default ""
-job	conformance			rustup toolchain list 2>/dev/null
 job	conformance			sccache --show-stats >/dev/null 2>&1
 job	conformance			sccache --start-server
 job	conformance			sccache --stop-server >/dev/null 2>&1
@@ -268,6 +267,7 @@ job	conformance			settle "$name"
 job	conformance			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --install-toolchain "" "" ""
 job	conformance			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
 job	conformance			then
+job	conformance			toolchains=$(rustup toolchain list 2>/dev/null || true
 job	conformance			unzip -q "$dl/$NAME.$EXT" -d "$dl"
 job	conformance			{
 job	conformance			} >> "$GITHUB_ENV"
@@ -332,7 +332,8 @@ job	crates			SUM=505324daad5fcbb1a3cab5d57d26ef42baf4d10b236df7de93a008196f1f223
 job	crates			SUM=c9f6c5a3ae84d9da0956b28c357a365827bda33f3383647fc0b67484c74a5ea9
 job	crates			SUM=ca500a01139e9af8d5f5a5e69b6a0dd941ed79ed3399a91cc35bba484fe732fa
 job	crates			SUM=d2658c9a24bab25a24fdc1917cb5b614b7c20a4ce8f363e5303d37b7e699d5ec
-job	crates			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
+job	crates			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin"
+job	crates			TOOLCHAIN=${TOOLCHAIN%%$'\n'*
 job	crates			TOOLCHAIN=${TOOLCHAIN:-stable
 job	crates			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
 job	crates			TOTAL="${PADDOCK_CI_SCCACHE_GB:-60}"
@@ -436,14 +437,12 @@ job	crates			mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
 job	crates			out="$("${DEVCMD[@]}" ci slot check --slot "$PADDOCK_CI_SLOT" --root "$PADDOCK_CI_LANE_ROOT" ${PADDOCK_CI_LANE_LOCK:+--lock "$PADDOCK_CI_LANE_LOCK"} 2>&1)"
 job	crates			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	crates			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
-job	crates			printf '%s\n' "$installed"
 job	crates			printf 'server_startup_timeout_ms = 30000\n' > "$CONF" 2>/dev/null
 job	crates			redis
 job	crates			rm -f "$LANE_ERR"
 job	crates			rm -rf "$dl"
 job	crates			rustc --version
 job	crates			rustup default ""
-job	crates			rustup toolchain list 2>/dev/null
 job	crates			sccache --show-stats >/dev/null 2>&1
 job	crates			sccache --start-server
 job	crates			sccache --stop-server >/dev/null 2>&1
@@ -453,6 +452,7 @@ job	crates			settle "$name"
 job	crates			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --install-toolchain "" "" ""
 job	crates			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
 job	crates			then
+job	crates			toolchains=$(rustup toolchain list 2>/dev/null || true
 job	crates			unzip -q "$dl/$NAME.$EXT" -d "$dl"
 job	crates			{
 job	crates			} >> "$GITHUB_ENV"
@@ -524,7 +524,8 @@ job	e2e			SUM=505324daad5fcbb1a3cab5d57d26ef42baf4d10b236df7de93a008196f1f2230
 job	e2e			SUM=c9f6c5a3ae84d9da0956b28c357a365827bda33f3383647fc0b67484c74a5ea9
 job	e2e			SUM=ca500a01139e9af8d5f5a5e69b6a0dd941ed79ed3399a91cc35bba484fe732fa
 job	e2e			SUM=d2658c9a24bab25a24fdc1917cb5b614b7c20a4ce8f363e5303d37b7e699d5ec
-job	e2e			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
+job	e2e			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin"
+job	e2e			TOOLCHAIN=${TOOLCHAIN%%$'\n'*
 job	e2e			TOOLCHAIN=${TOOLCHAIN:-stable
 job	e2e			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
 job	e2e			TOTAL="${PADDOCK_CI_SCCACHE_GB:-60}"
@@ -636,7 +637,6 @@ job	e2e			npm ci
 job	e2e			out="$("${DEVCMD[@]}" ci slot check --slot "$PADDOCK_CI_SLOT" --root "$PADDOCK_CI_LANE_ROOT" ${PADDOCK_CI_LANE_LOCK:+--lock "$PADDOCK_CI_LANE_LOCK"} 2>&1)"
 job	e2e			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	e2e			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
-job	e2e			printf '%s\n' "$installed"
 job	e2e			printf 'server_startup_timeout_ms = 30000\n' > "$CONF" 2>/dev/null
 job	e2e			r="conformance/ci/cache-report.sh"
 job	e2e			redis
@@ -644,7 +644,6 @@ job	e2e			rm -f "$LANE_ERR"
 job	e2e			rm -rf "$dl"
 job	e2e			rustc --version
 job	e2e			rustup default ""
-job	e2e			rustup toolchain list 2>/dev/null
 job	e2e			sccache --show-stats >/dev/null 2>&1
 job	e2e			sccache --start-server
 job	e2e			sccache --stop-server >/dev/null 2>&1
@@ -655,6 +654,7 @@ job	e2e			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --install-toolchain "
 job	e2e			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
 job	e2e			tee -a "$GITHUB_STEP_SUMMARY"
 job	e2e			then
+job	e2e			toolchains=$(rustup toolchain list 2>/dev/null || true
 job	e2e			unzip -q "$dl/$NAME.$EXT" -d "$dl"
 job	e2e			{
 job	e2e			} >> "$GITHUB_ENV"
@@ -721,7 +721,8 @@ job	tools			SUM=505324daad5fcbb1a3cab5d57d26ef42baf4d10b236df7de93a008196f1f2230
 job	tools			SUM=c9f6c5a3ae84d9da0956b28c357a365827bda33f3383647fc0b67484c74a5ea9
 job	tools			SUM=ca500a01139e9af8d5f5a5e69b6a0dd941ed79ed3399a91cc35bba484fe732fa
 job	tools			SUM=d2658c9a24bab25a24fdc1917cb5b614b7c20a4ce8f363e5303d37b7e699d5ec
-job	tools			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
+job	tools			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin"
+job	tools			TOOLCHAIN=${TOOLCHAIN%%$'\n'*
 job	tools			TOOLCHAIN=${TOOLCHAIN:-stable
 job	tools			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
 job	tools			TOTAL="${PADDOCK_CI_SCCACHE_GB:-60}"
@@ -835,14 +836,12 @@ job	tools			node scripts/svg-drift.mjs
 job	tools			out="$("${DEVCMD[@]}" ci slot check --slot "$PADDOCK_CI_SLOT" --root "$PADDOCK_CI_LANE_ROOT" ${PADDOCK_CI_LANE_LOCK:+--lock "$PADDOCK_CI_LANE_LOCK"} 2>&1)"
 job	tools			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	tools			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
-job	tools			printf '%s\n' "$installed"
 job	tools			printf 'server_startup_timeout_ms = 30000\n' > "$CONF" 2>/dev/null
 job	tools			redis
 job	tools			rm -f "$LANE_ERR"
 job	tools			rm -rf "$dl"
 job	tools			rustc --version
 job	tools			rustup default ""
-job	tools			rustup toolchain list 2>/dev/null
 job	tools			sccache --show-stats >/dev/null 2>&1
 job	tools			sccache --start-server
 job	tools			sccache --stop-server >/dev/null 2>&1
@@ -850,11 +849,14 @@ job	tools			sccache --version
 job	tools			settle ""
 job	tools			settle "$name"
 job	tools			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --install-toolchain "" "" ""
-job	tools			sum=$(sed -n 's/^ARG DRAWIO_SHA256_AMD64=//p' ci-image/Dockerfile | head -n 1
+job	tools			sum=$(sed -n 's/^ARG DRAWIO_SHA256_AMD64=//p' ci-image/Dockerfile
+job	tools			sum=${sum%%$'\n'*
 job	tools			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
 job	tools			then
+job	tools			toolchains=$(rustup toolchain list 2>/dev/null || true
 job	tools			unzip -q "$dl/$NAME.$EXT" -d "$dl"
-job	tools			v=$(sed -n 's/^ARG DRAWIO_VERSION=//p' ci-image/Dockerfile | head -n 1
+job	tools			v=$(sed -n 's/^ARG DRAWIO_VERSION=//p' ci-image/Dockerfile
+job	tools			v=${v%%$'\n'*
 job	tools			{
 job	tools			} >> "$GITHUB_ENV"
 job	ui			"$PADDOCK_DEV" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || 's3' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
@@ -916,7 +918,8 @@ job	ui			SUM=505324daad5fcbb1a3cab5d57d26ef42baf4d10b236df7de93a008196f1f2230
 job	ui			SUM=c9f6c5a3ae84d9da0956b28c357a365827bda33f3383647fc0b67484c74a5ea9
 job	ui			SUM=ca500a01139e9af8d5f5a5e69b6a0dd941ed79ed3399a91cc35bba484fe732fa
 job	ui			SUM=d2658c9a24bab25a24fdc1917cb5b614b7c20a4ce8f363e5303d37b7e699d5ec
-job	ui			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
+job	ui			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin"
+job	ui			TOOLCHAIN=${TOOLCHAIN%%$'\n'*
 job	ui			TOOLCHAIN=${TOOLCHAIN:-stable
 job	ui			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
 job	ui			TOTAL="${PADDOCK_CI_SCCACHE_GB:-60}"
@@ -1028,7 +1031,6 @@ job	ui			npm ci
 job	ui			out="$("${DEVCMD[@]}" ci slot check --slot "$PADDOCK_CI_SLOT" --root "$PADDOCK_CI_LANE_ROOT" ${PADDOCK_CI_LANE_LOCK:+--lock "$PADDOCK_CI_LANE_LOCK"} 2>&1)"
 job	ui			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	ui			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
-job	ui			printf '%s\n' "$installed"
 job	ui			printf 'server_startup_timeout_ms = 30000\n' > "$CONF" 2>/dev/null
 job	ui			r="conformance/ci/cache-report.sh"
 job	ui			redis
@@ -1036,7 +1038,6 @@ job	ui			rm -f "$LANE_ERR"
 job	ui			rm -rf "$dl"
 job	ui			rustc --version
 job	ui			rustup default ""
-job	ui			rustup toolchain list 2>/dev/null
 job	ui			sccache --show-stats >/dev/null 2>&1
 job	ui			sccache --start-server
 job	ui			sccache --stop-server >/dev/null 2>&1
@@ -1047,6 +1048,7 @@ job	ui			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --install-toolchain ""
 job	ui			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
 job	ui			tee -a "$GITHUB_STEP_SUMMARY"
 job	ui			then
+job	ui			toolchains=$(rustup toolchain list 2>/dev/null || true
 job	ui			unzip -q "$dl/$NAME.$EXT" -d "$dl"
 job	ui			{
 job	ui			} >> "$GITHUB_ENV"

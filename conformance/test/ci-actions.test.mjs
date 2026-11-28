@@ -126,7 +126,7 @@ test('in a job that moves the checkout (stable-workspace), every upload-artifact
   for (const file of readdirSync(WORKFLOWS).filter((x) => /\.ya?ml$/.test(x))) {
     for (const job of parseJobs(read(join(WORKFLOWS, file)))) {
       if (!stable.test(job.text)) continue;
-      for (const step of parseSteps(job.text).filter((st) => /actions\/upload-artifact@/.test(st.uses ?? ''))) {
+      for (const step of parseSteps(job.text).filter((st) => /(actions\/|gitea-)upload-artifact@/.test(st.uses ?? ''))) {
         const path = /^\s+path: (.+)$/m.exec(step.text)?.[1] ?? '';
         // A path that is not a build output (a failure report under the app, uploaded `if: failure()`) is judged by its step.
         if (/if: failure\(\)/.test(step.text)) continue;
@@ -501,7 +501,7 @@ test('the sccache-stats action prints the statistics and tolerates a missing scc
     }
     return found;
   };
-  const rustJobs = ['paddock-dev', 'ui', 'e2e', 'e2e-webkit', 'conformance', 'tools', 'crates', 'crate', 'app', 'quick']; // quick: ./dev audit compare and the heavy tool; conformance: ./dev gates check (C100, ADR 0060)
+  const rustJobs = ['paddock-dev', 'mutants', 'ui', 'e2e', 'e2e-webkit', 'conformance', 'tools', 'crates', 'crate', 'app', 'quick']; // quick: ./dev audit compare and the heavy tool; conformance: ./dev gates check (C100, ADR 0060)
   assert.deepEqual(jobsUsing('setup-rust'), rustJobs, 'setup-rust in every job that builds Rust');
   assert.deepEqual(jobsUsing('sccache-stats'), rustJobs, 'stats after each');
   assert.doesNotMatch(ci, /setup-rust\n\s+if: runner\.os/, 'no OS leg is left out');
@@ -1248,7 +1248,7 @@ test('the real-browser tests of the crates and of Debrief take turns under nexte
 test("a kit app's end-to-end legs and failure report: ci.yml forwards the shard, the webkit input and uploads the report from the stable workspace", () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   assert.match(ci, /e2e-checks: \$\{\{ matrix\.e2e_checks \}\}\n\s+e2e-shard: \$\{\{ matrix\.e2e_shard \}\}/);
-  const step = /- uses: actions\/upload-artifact@\S+ # v3\n\s+if: failure\(\) && matrix\.e2e_artifacts != ''\n[\s\S]*?\n\n/.exec(ci)?.[0] ?? '';
+  const step = /- uses: ChristopherHX\/gitea-upload-artifact@\S+ # v4\n\s+if: failure\(\) && matrix\.e2e_artifacts != ''\n[\s\S]*?\n\n/.exec(ci)?.[0] ?? '';
   assert.match(step, /path: \$\{\{ env\.PADDOCK_WORKSPACE \|\| github\.workspace \}\}\/\$\{\{ matrix\.e2e_artifacts \}\}/, 'under the stable workspace');
   assert.match(step, /name: \$\{\{ matrix\.app \}\}-\$\{\{ matrix\.e2e_leg \|\| 'ui' \}\}-results-\$\{\{ strategy\.job-index \}\}/, 'one name per leg');
   // `./dev ci run` derives E2E_INDEX (i of i/N) from E2E_SHARD (tools/paddock-dev/src/ci_run/tests.rs); the step hands it the shard.
@@ -2433,7 +2433,7 @@ test('a release or installer job never runs a downloaded ./dev: PADDOCK_DEV_DOWN
     assert.match(job.text, /PADDOCK_DEV_DOWNLOAD: \$\{\{ \(inputs\.release == true \|\| startsWith\(github\.ref, 'refs\/tags\/'\)\) && '0' \|\| '' \}\}/, `ci.yml:${job.id}: a run for a tag builds the tool from source`);
     tagJobs += 1;
   }
-  assert.equal(tagJobs, 6, 'the ci.yml jobs that read the prebuilt tool with the credential at job level: the three that take a host slot, conformance, crates and quick (the heavy tool and audit steps; setup-rust runs ./dev); ui (with the ESLint preset and icons steps), e2e, e2e-webkit (on Linux since 2026-11-25, ADR 0120) and tools (`./dev ci run`) set it on their ./dev steps only (WP-3 review)');
+  assert.equal(tagJobs, 7, 'the ci.yml jobs that read the prebuilt tool with the credential at job level: the three that take a host slot, conformance, crates, mutants (setup-rust runs ./dev) and quick (the heavy tool and audit steps; setup-rust runs ./dev); ui (with the ESLint preset and icons steps), e2e, e2e-webkit (on Linux since 2026-11-25, ADR 0120) and tools (`./dev ci run`) set it on their ./dev steps only (WP-3 review)');
 });
 
 test('dev-tool.yml publishes only from main, in every job (ADR 0022: the store is written only by main)', () => {
