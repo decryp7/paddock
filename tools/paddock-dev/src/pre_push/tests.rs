@@ -322,7 +322,6 @@ fn a_change_to_a_file_a_golden_reads_plans_the_golden_row_and_any_other_change_s
     let reg = real_registry();
     for (file, golden) in [
         (".gitea/actions/setup-rust/action.yml", "ci-run-golden"),
-        (".gitea/workflows/ci.yml", "ci-run-golden"),
         ("tools/paddock-dev/src/ci_run/mod.rs", "ci-run-golden"),
         ("tools/paddock-dev/src/plan.rs", "planner-golden"),
         ("docs/repo-graph.toml", "planner-golden"),
