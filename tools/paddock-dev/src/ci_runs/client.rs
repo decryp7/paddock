@@ -99,6 +99,8 @@ pub struct TimedJob {
     pub html_url: String,
     /// The names of its steps whose conclusion is `failure` (the jobs API lists each step with `name`, `number` and `conclusion`).
     pub failed_steps: Vec<String>,
+    /// The names of its steps whose conclusion is anything but `success` (failure, skipped, cancelled, or no conclusion at all).
+    pub unpassed_steps: Vec<String>,
     /// `queued`, `waiting`, `in_progress`, `completed`... (empty when the server did not say).
     pub status: String,
     /// The runner labels it runs on (`macos-latest`): its `runs-on`, with a matrix value filled in.
@@ -154,6 +156,16 @@ impl TimedJob {
                         .iter()
                         .filter(|s| s["conclusion"] == "failure")
                         .filter_map(|s| s["name"].as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            unpassed_steps: j["steps"]
+                .as_array()
+                .map(|steps| {
+                    steps
+                        .iter()
+                        .filter(|s| s["conclusion"] != "success")
+                        .map(|s| s["name"].as_str().unwrap_or("").to_string())
                         .collect()
                 })
                 .unwrap_or_default(),

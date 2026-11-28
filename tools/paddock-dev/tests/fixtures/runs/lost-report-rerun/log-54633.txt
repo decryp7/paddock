@@ -1,0 +1,15 @@
+2026-11-28T06:29:05.1538760Z Job: paddock-dev
+2026-11-28T06:31:13.1153204Z [32;1m    Starting[0m [1m980[0m tests across [1m3[0m binaries ([1m2097[0m tests [33;1mskipped[0m, including [1m113[0m tests via [1mprofile.ci.default-filter[0m)
+2026-11-28T06:33:42.3089498Z [32;1m     Summary[0m [ 149.194s] [1m980[0m tests run: [1m980[0m [32;1mpassed[0m, [1m2097[0m [33;1mskipped[0m
+2026-11-28T06:33:44.9452706Z Success - Post ./.gitea/actions/job-isolation
+2026-11-28T06:33:44.9970146Z Success - Post ./.gitea/actions/sccache-stats
+2026-11-28T06:33:45.0467328Z Success - Post ./.gitea/actions/host-tools
+2026-11-28T06:33:45.1099688Z Success - Post ./dev tool cache
+2026-11-28T06:33:45.1746361Z Success - Post ./.gitea/actions/setup-rust
+2026-11-28T06:33:45.2338375Z Success - Post ./.gitea/actions/build-folder
+2026-11-28T06:33:45.2921370Z Success - Post ./.gitea/actions/job-isolation
+2026-11-28T06:33:45.3512291Z Success - Post ./dev tool cache
+2026-11-28T06:33:45.3913041Z Success - Post ./.gitea/actions/build-jobs
+2026-11-28T06:33:45.8083695Z Success - Post actions/checkout@v4
+2026-11-28T06:33:46.0986240Z Cleaning up container for job paddock-dev (ubuntu-latest, 2/3)
+2026-11-28T06:33:47.6426092Z Job succeeded

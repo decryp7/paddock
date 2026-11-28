@@ -1,0 +1,23 @@
+2026-11-28T06:31:31.4138841Z Job: crate
+2026-11-28T06:35:00.2162626Z [32;1m    Starting[0m [1m1117[0m tests across [1m28[0m binaries
+2026-11-28T06:35:35.6903017Z [32;1m     Summary[0m [  35.473s] [1m1117[0m tests run: [1m1117[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-28T06:36:07.9410888Z [32;1m    Starting[0m [1m147[0m tests across [1m4[0m binaries
+2026-11-28T06:36:16.5545083Z [32;1m     Summary[0m [   8.613s] [1m147[0m tests run: [1m147[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-28T06:36:22.2801973Z [32;1m    Starting[0m [1m199[0m tests across [1m7[0m binaries
+2026-11-28T06:36:24.0553464Z [32;1m     Summary[0m [   1.776s] [1m199[0m tests run: [1m199[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-28T06:36:26.7425975Z [32;1m    Starting[0m [1m119[0m tests across [1m2[0m binaries
+2026-11-28T06:36:28.1433327Z [32;1m     Summary[0m [   1.401s] [1m119[0m tests run: [1m119[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-28T06:36:31.3899115Z [32;1m    Starting[0m [1m124[0m tests across [1m2[0m binaries
+2026-11-28T06:36:31.5293276Z [32;1m     Summary[0m [   0.140s] [1m124[0m tests run: [1m124[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-28T06:36:32.1265166Z Success - Post ./.gitea/actions/job-isolation
+2026-11-28T06:36:32.1611625Z Success - Post ./.gitea/actions/sccache-stats
+2026-11-28T06:36:32.1920424Z Success - Post ./.gitea/actions/host-tools
+2026-11-28T06:36:32.2312677Z Success - Post ./dev tool cache
+2026-11-28T06:36:32.2567154Z Success - Post ./.gitea/actions/setup-rust
+2026-11-28T06:36:32.2906531Z Success - Post ./.gitea/actions/build-folder
+2026-11-28T06:36:32.3265008Z Success - Post ./.gitea/actions/job-isolation
+2026-11-28T06:36:32.3670868Z Success - Post ./dev tool cache
+2026-11-28T06:36:32.3944194Z Success - Post ./.gitea/actions/build-jobs
+2026-11-28T06:36:32.6407923Z Success - Post actions/checkout@v4
+2026-11-28T06:36:32.8313597Z Cleaning up container for job crate (ubuntu-latest, 1/3)
+2026-11-28T06:36:33.7325509Z Job succeeded

@@ -1,0 +1,5 @@
+2026-11-27T15:27:06.7807145Z Job: test-cache-shadow
+2026-11-27T15:27:47.5980764Z Success - Post ./.gitea/actions/dev-tool-cache
+2026-11-27T15:27:47.8348080Z Success - Post actions/checkout@v4
+2026-11-27T15:27:47.9155142Z Cleaning up container for job test cache (shadow report)
+2026-11-27T15:27:49.3856847Z Job succeeded

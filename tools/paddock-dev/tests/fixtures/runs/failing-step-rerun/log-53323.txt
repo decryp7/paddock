@@ -1,0 +1,6 @@
+2026-11-27T15:27:27.7230501Z Job: ui
+2026-11-27T15:32:39.6873780Z Success - Post ./.gitea/actions/sccache-stats
+2026-11-27T15:32:39.7185333Z Success - Post ./dev tool cache
+2026-11-27T15:32:39.7383558Z Success - Post ./.gitea/actions/setup-rust
+2026-11-27T15:32:39.9412724Z Success - Post actions/checkout@v4
+2026-11-27T15:32:40.6374260Z Cleaning up container for job ui (tokens, contrast, components, entry points, publish dry run, ESLint preset, icons)

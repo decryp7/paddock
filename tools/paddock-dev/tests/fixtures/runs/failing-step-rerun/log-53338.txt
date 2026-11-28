@@ -1,0 +1,23 @@
+2026-11-27T15:34:03.1228943Z Job: crate
+2026-11-27T15:37:48.2193461Z [32;1m    Starting[0m [1m5097[0m tests across [1m108[0m binaries ([1m2[0m tests and [1m15[0m binaries [33;1mskipped[0m)
+2026-11-27T15:39:55.1404702Z [32;1m     Summary[0m [ 126.921s] [1m5097[0m tests run: [1m5097[0m [32;1mpassed[0m ([1m1[0m [33;1mslow[0m), [1m2[0m [33;1mskipped[0m
+2026-11-27T15:40:11.5509560Z [32;1m    Starting[0m [1m147[0m tests across [1m4[0m binaries
+2026-11-27T15:40:16.5634485Z [32;1m     Summary[0m [   5.013s] [1m147[0m tests run: [1m147[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-27T15:40:19.8858802Z [32;1m    Starting[0m [1m199[0m tests across [1m7[0m binaries
+2026-11-27T15:40:21.6369380Z [32;1m     Summary[0m [   1.751s] [1m199[0m tests run: [1m199[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-27T15:40:23.6464434Z [32;1m    Starting[0m [1m119[0m tests across [1m2[0m binaries
+2026-11-27T15:40:25.8000296Z [32;1m     Summary[0m [   2.154s] [1m119[0m tests run: [1m119[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-27T15:40:31.4848301Z [32;1m    Starting[0m [1m124[0m tests across [1m2[0m binaries
+2026-11-27T15:40:31.6683147Z [32;1m     Summary[0m [   0.184s] [1m124[0m tests run: [1m124[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-27T15:40:32.3460608Z Success - Post ./.gitea/actions/job-isolation
+2026-11-27T15:40:32.3796226Z Success - Post ./.gitea/actions/sccache-stats
+2026-11-27T15:40:32.4155813Z Success - Post ./.gitea/actions/host-tools
+2026-11-27T15:40:32.4596613Z Success - Post ./dev tool cache
+2026-11-27T15:40:32.4904573Z Success - Post ./.gitea/actions/setup-rust
+2026-11-27T15:40:32.5275156Z Success - Post ./.gitea/actions/build-folder
+2026-11-27T15:40:32.5663684Z Success - Post ./.gitea/actions/job-isolation
+2026-11-27T15:40:32.6090223Z Success - Post ./dev tool cache
+2026-11-27T15:40:32.6387406Z Success - Post ./.gitea/actions/build-jobs
+2026-11-27T15:40:32.9854348Z Success - Post actions/checkout@v4
+2026-11-27T15:40:33.7358167Z Cleaning up container for job crate (ubuntu-latest)
+2026-11-27T15:40:36.7278421Z Job succeeded

@@ -18,7 +18,12 @@
 //!   printed as a `::notice::` (`scope_decisive`, [`verdict_with`]). The earlier line (`plan mode: full=`) states the scope for the rerun
 //!   planner only and proves nothing here.
 //! - Gitea's in-place "rerun failed jobs" keeps the run id: a deciding run with `run_attempt > 1` reads its earlier attempts,
-//!   and any failed job there is red (an unreadable attempt is not measured).
+//!   and any failed job there is red (an unreadable attempt is not measured). One exception (user decision 137, 2026-11-28): a job of an
+//!   earlier attempt that is a proven lost report does not count. The proof is read from that attempt, never assumed: the job's own step
+//!   records list steps and every one ended `success`, and its own log shows no failure line and ends with the job's container
+//!   clean-up, yet the job was marked failed (the runner's final report was lost; run 9388's `ui` job). One `::notice::` line names each
+//!   such job. A failing, cancelled, skipped or missing step, a failure line, an unfinished or empty log is red; a log that cannot be
+//!   read is not measured ([`read_earlier`], [`lost_report_proof`]). FLAKY grading is unchanged.
 //! - One definition of green (ADR 0117 WP-4, [`super::green`]): a full run whose only failures are FLAKY tests of targets the change
 //!   did not touch is [`Verdict::GreenWithFixItems`] (a landing and a push reuse accept it; a tag needs [`Verdict::Green`], exit 5),
 //!   a FLAKY test in a touched target, a test that failed both tries or a failed step that is no test is red, an unreadable test
@@ -35,9 +40,10 @@
 //! Exit codes: 0 full green (with `--landing` also green with fix items), 5 red, green with fix items (for a tag or without
 //! `--landing`), or only partial runs exist, 6 not measured.
 
-use super::client::{Client, RunInfo};
+use super::client::{Client, RunInfo, TimedJob};
 use super::green::{self, GradedResult, Touched};
 use crate::job_outcome::JobOutcome;
+use crate::log_text::plain;
 use crate::plan_since::{COMPLETE_LINE, read_complete, workflow_file};
 use crate::run_scope::{self, SCOPE_LINE};
 use paddock_cli::outcome::{
@@ -111,19 +117,85 @@ fn earlier_failed(o: &JobOutcome) -> bool {
     }
 }
 
-/// The failed jobs of the earlier attempts of a run (1 up to `run_attempt - 1`).
+/// Every step of the job's own records ended `success`, and there is at least one.
+fn steps_proof(job: &TimedJob) -> Result<(), String> {
+    if job.steps.is_empty() {
+        return Err("it lists no steps".into());
+    }
+    match job.unpassed_steps.first() {
+        Some(s) => Err(format!("step {s:?} did not pass")),
+        None => Ok(()),
+    }
+}
+
+/// Whether the first attempt's failed `job` is a proven lost report (user decision 137, 2026-11-28): the runner's own record lists
+/// steps and every one of them ended `success`, and `log` (the attempt's own log) shows the job ran to its end with no failure marker,
+/// yet the job was marked failed, so the runner's final report was lost. `Err` says what is missing: anything short of proof blocks.
+///
+/// The raw Gitea log has no per-step result line for a main step (only `Success - Post ...` for the post steps), so the per-step
+/// result is the job's own step records and the log is read for what contradicts them: a `Failure - ` line, an `##[error]` or
+/// a `Job failed` line, a log without the job's final container clean-up (it ended in the middle), or an empty log.
+fn lost_report_proof(job: &TimedJob, log: &str) -> Result<(), String> {
+    steps_proof(job)?;
+    let mut cleaned_up = false;
+    let mut any = false;
+    for l in log.lines() {
+        let l = plain(l);
+        any |= !l.trim().is_empty();
+        // Not `##[error]` or `::error::`: a passing job's tests print them (run 9388's svg-drift test) and its steps all passed.
+        if l.starts_with("Failure - ") || l.starts_with("Job failed") {
+            return Err(format!("its log has a failure line ({})", l.chars().take(80).collect::<String>()));
+        }
+        cleaned_up |= l.starts_with("Cleaning up container for job");
+    }
+    if !any {
+        return Err("its log is empty".into());
+    }
+    if !cleaned_up {
+        return Err("its log ends before the job's clean-up".into());
+    }
+    Ok(())
+}
+
+/// The failed jobs of the earlier attempts of a run (1 up to `run_attempt - 1`). A job that failed in an attempt but is a proven lost
+/// report ([`lost_report_proof`], read from that attempt's own log) is not a failure: one `::notice::` line names it. A failed job
+/// whose log cannot be read makes the answer unknown, never clean (ER-33).
 pub(super) fn read_earlier(client: &mut Client, run: &RunInfo) -> Earlier {
+    let mut accepted = Vec::new();
     for n in 1..run.run_attempt {
         match client.attempt_jobs(run.id, Some(n)) {
             Ok(Some(jobs)) => {
-                if let Some(j) = jobs.iter().find(|j| earlier_failed(&j.outcome)) {
-                    return Earlier::Failed(format!("attempt {n}: job {:?} was {}", j.name, j.outcome));
+                for j in jobs.iter().filter(|j| earlier_failed(&j.outcome)) {
+                    let was = |why: &str| Earlier::Failed(format!("attempt {n}: job {:?} was {}{why}", j.name, j.outcome));
+                    if j.outcome != JobOutcome::Failed {
+                        return was("");
+                    }
+                    // The step records settle most cases without a request: the log is fetched only for a job that could be proven.
+                    if let Err(why) = steps_proof(j) {
+                        return was(&format!(" ({why})"));
+                    }
+                    match client.log(j.id) {
+                        Ok(Some(log)) => match lost_report_proof(j, &log) {
+                            Ok(()) => accepted.push(format!(
+                                "run {}: job {:?}, attempt {n}: every step passed in its log; report lost",
+                                run.id, j.name
+                            )),
+                            Err(why) => return was(&format!(" ({why})")),
+                        },
+                        Ok(None) => {
+                            return Earlier::Unknown(format!("attempt {n}: job {:?} was failure and has no log on the server", j.name));
+                        }
+                        Err(e) => {
+                            return Earlier::Unknown(format!("attempt {n}: job {:?} was failure and its log cannot be read: {e}", j.name));
+                        }
+                    }
                 }
             }
             Ok(None) => return Earlier::Unknown(format!("the server has no job list for attempt {n}")),
             Err(e) => return Earlier::Unknown(format!("attempt {n}: {e}")),
         }
     }
+    accepted.iter().for_each(|l| super::green::notice(l));
     Earlier::Clean
 }
 
@@ -1359,6 +1431,105 @@ mod tests {
         let v = ask(&mut f);
         assert!(matches!(v, Verdict::NotMeasured(_)), "{v:?}");
         assert_eq!(code(&v), 6);
+    }
+
+    /// A job of an earlier attempt that the server marked `failure`, with steps that all ended as `steps` say.
+    fn failed_job(id: u64, steps: &[&str]) -> serde_json::Value {
+        let steps: Vec<_> = steps
+            .iter()
+            .enumerate()
+            .map(|(i, c)| json!({"name": format!("step {i}"), "number": i, "conclusion": c}))
+            .collect();
+        json!({"id": id, "name": "ui", "conclusion": "failure", "steps": steps})
+    }
+
+    const LOST_LOG: &str = "2026-11-28T06:27:22.6Z Job: ui\n2026-11-28T06:36:13.9Z Success - Post actions/checkout@v4\n2026-11-28T06:36:14.3Z Cleaning up container for job ui\n";
+
+    fn rerun_of_ui(job: serde_json::Value, log: Option<Result<&str, &str>>) -> Fake {
+        let mut f = server(vec![rerun(main_push(5, "success"), 2)], &[]);
+        attempt(&mut f, 5, 1, json!([job.clone()]));
+        match log {
+            Some(Ok(t)) => f.log(job["id"].as_u64().unwrap(), t),
+            Some(Err(e)) => f.fail(job["id"].as_u64().unwrap(), e),
+            None => {}
+        }
+        f
+    }
+
+    #[test]
+    fn a_first_attempt_that_is_a_proven_lost_report_is_accepted_and_named_once_per_job() {
+        // Decision 137 (user, 2026-11-28): every step passed in the attempt's own log, the job was still marked failed.
+        green::take_notices();
+        let mut f = rerun_of_ui(failed_job(11, &["success", "success"]), Some(Ok(LOST_LOG)));
+        assert_eq!(ask(&mut f), Verdict::Green { run: 5 });
+        let notes = green::take_notices();
+        assert_eq!(notes.iter().filter(|n| n.contains("report lost")).count(), 1, "{notes:?}");
+        assert!(
+            notes[0].contains("\"ui\"") && notes[0].contains("attempt 1") && notes[0].contains("every step passed in its log; report lost"),
+            "{notes:?}"
+        );
+    }
+
+    #[test]
+    fn a_first_attempt_with_a_failing_cancelled_skipped_or_missing_step_still_blocks() {
+        for steps in [&["success", "failure"][..], &["success", "cancelled"], &["success", "skipped"], &[]] {
+            let mut f = rerun_of_ui(failed_job(11, steps), Some(Ok(LOST_LOG)));
+            let v = ask(&mut f);
+            assert!(
+                matches!(v, Verdict::Red { run: Some(5), ref reason } if reason.contains("rerun")),
+                "{steps:?}: {v:?}"
+            );
+            assert!(
+                f.requested().iter().all(|u| !u.contains("/jobs/11/logs")),
+                "no log is read once a step already disproves it"
+            );
+        }
+    }
+
+    #[test]
+    fn a_log_that_contradicts_the_steps_or_stops_early_still_blocks() {
+        for log in [
+            "Job: ui\nFailure - Main ./dev ci run ui\nCleaning up container for job ui\n",
+            "Job: ui\nJob failed\nCleaning up container for job ui\n",
+            "Job: ui\nSuccess - Post actions/checkout@v4\n",
+            "",
+        ] {
+            let v = ask(&mut rerun_of_ui(failed_job(11, &["success"]), Some(Ok(log))));
+            assert!(matches!(v, Verdict::Red { run: Some(5), .. }), "{log:?}: {v:?}");
+        }
+    }
+
+    #[test]
+    fn an_error_annotation_printed_by_a_passing_tests_output_does_not_disprove_the_steps() {
+        // Run 9388's log holds `::error::ci-image/Dockerfile: svg-drift: ...`, the expected output of a passing test.
+        let log = format!("2026-11-28T06:30:00.1Z ::error::ci-image/Dockerfile: svg-drift: draw.io drifted\n{LOST_LOG}");
+        assert_eq!(
+            ask(&mut rerun_of_ui(failed_job(11, &["success"]), Some(Ok(&log)))),
+            Verdict::Green { run: 5 }
+        );
+    }
+
+    #[test]
+    fn an_unreadable_or_missing_first_attempt_log_is_not_measured_never_a_pass() {
+        for log in [Some(Err("curl exited with 28: timed out")), None] {
+            let v = ask(&mut rerun_of_ui(failed_job(11, &["success"]), log));
+            assert!(matches!(v, Verdict::NotMeasured(_)), "{log:?}: {v:?}");
+            assert_eq!(code(&v), 6);
+        }
+    }
+
+    #[test]
+    fn one_unproven_job_among_proven_ones_blocks_the_run() {
+        let mut f = server(vec![rerun(main_push(5, "success"), 2)], &[]);
+        attempt(
+            &mut f,
+            5,
+            1,
+            json!([failed_job(11, &["success"]), failed_job(12, &["success", "failure"])]),
+        );
+        f.log(11, LOST_LOG);
+        f.log(12, LOST_LOG);
+        assert!(matches!(ask(&mut f), Verdict::Red { run: Some(5), .. }));
     }
 
     #[test]
