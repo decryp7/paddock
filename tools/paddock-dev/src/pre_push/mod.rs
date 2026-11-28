@@ -91,8 +91,9 @@ pub struct PrePushArgs {
     /// per line) and check exactly that commit in a throw-away worktree, not the working tree. The hook passes it.
     #[arg(long)]
     pub refs_from_stdin: bool,
-    /// Also run the repository-wide audits (`member-audits`): set by the member gate of `./dev merge check --gates`
-    /// on the merge commit, not by a developer's push, whose time budget it would grow.
+    /// The member gate of `./dev merge check --gates`, run on the merge commit: the repository-wide audits (`member-audits`) and the
+    /// whole-tree rows run whatever changed. A developer's push runs the source audits (no `graph_`, `tree_` class) unless the change
+    /// is prose no audit reads.
     #[arg(long)]
     pub member_gate: bool,
     /// Run every app's rows, whatever `docs/ci-active-apps.toml` says: for a release, or for the person bringing an app back. Without
@@ -545,6 +546,7 @@ fn command_in(
             (ws.clone(), hit)
         })
         .collect();
+    facts.goldens = crate::generators::golden_due_in(&work, &history, &graph, &change.files);
     let mut planned = gates::plan_gates(&plan, &change, &facts);
     planned = select_rows(planned, &args.only)?;
     planned = train_split::select(planned, args.set);
@@ -1570,6 +1572,7 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>, ex: &dyn
         test_filters: Default::default(),
         nextest_config,
         reached: Default::default(),
+        goldens: Ok(Vec::new()),
     }
 }
 

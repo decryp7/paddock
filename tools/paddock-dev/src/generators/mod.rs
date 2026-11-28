@@ -63,6 +63,41 @@ pub fn load(root: &Path) -> Result<Registry, CliError> {
     })
 }
 
+/// The ids of the golden entries `changed` makes due, as the pre-push `goldens` row asks (ER-21), over the tree at `root` with the graph
+/// the planner already built: what the hand paths mark and, for an entry that names `reads`, what the model reaches. The model is built
+/// only when a golden with `reads` is not already marked by a path; when it cannot be built every such golden is due (a check that
+/// could not look is never a pass, ER-33).
+pub fn golden_due_in(
+    root: &Path,
+    history: &dyn paddock_repo_graph::History,
+    graph: &crate::plan::RepoGraph,
+    changed: &[String],
+) -> Result<Vec<String>, String> {
+    let reg = load(root).map_err(|e| format!("{e:?}"))?;
+    let by_hand = reg.golden_due(changed, &BTreeSet::new());
+    let open: Vec<&registry::Generator> = reg
+        .generators
+        .iter()
+        .filter(|g| g.golden && !g.reads.is_empty() && !by_hand.contains(&g.id))
+        .collect();
+    if open.is_empty() {
+        return Ok(by_hand);
+    }
+    let reached = match crate::repo_model::build_world(root, history, graph, None) {
+        Ok(mut world) => {
+            graph::with_generators(&mut world, &reg);
+            graph::due(&world, &reg, changed).into_iter().map(|d| d.id).collect()
+        }
+        Err(why) => {
+            eprintln!(
+                "::warning::goldens: the repository model could not be built ({why}), so every golden with `reads` is due. Next step: fix the cause above; `./dev plan --compare` shows the model."
+            );
+            open.iter().map(|g| g.id.clone()).collect()
+        }
+    };
+    Ok(reg.golden_due(changed, &reached))
+}
+
 /// The exit of a set of results, folded by the shared [`Verdict`] (broken 7, stale 5, not measured 6, current 0). No result at
 /// all is a run in which nothing was due: it checked nothing and says so, and is exit 0 (a whole-tree run with nothing to check
 /// is [`check_with`]'s not-measured).

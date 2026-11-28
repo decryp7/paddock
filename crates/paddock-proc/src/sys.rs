@@ -497,6 +497,43 @@ pub fn start_time(pid: u32) -> Option<crate::StartTime> {
     }
 }
 
+/// Whether the process `id` has ended, by its own handle and not by the process table: a terminated process stays in the table (and
+/// `OpenProcess` still opens it) while any handle to it is open, the test's own, a monitor's or the runner's (Microsoft,
+/// "Terminating a process"; Raymond Chen, 2018-03-02), so "no longer listed" is not a sign of the end. `true` when the pid names no
+/// process, names another process (the creation time differs, rule 53), or the handle is signaled; `false` while it runs and when the
+/// answer cannot be had (never a guess).
+#[cfg(windows)]
+pub fn has_ended_by_handle(id: crate::ProcessId) -> bool {
+    use crate::identity::{Holder, holder};
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, ERROR_INVALID_PARAMETER, GetLastError, WAIT_OBJECT_0,
+    };
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, WaitForSingleObject,
+    };
+    // SAFETY: OpenProcess takes plain values; the handle is used only while open and closed below. A zero timeout makes the wait a
+    // look at the signal.
+    unsafe {
+        let h = OpenProcess(
+            PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+            0,
+            id.pid(),
+        );
+        if h.is_null() {
+            // The OS says "no such pid" with ERROR_INVALID_PARAMETER; any other refusal (rights) is not an answer.
+            return GetLastError() == ERROR_INVALID_PARAMETER;
+        }
+        let ended = match creation_time(h) {
+            None => false,
+            Some(t) => {
+                holder(id, Some(t)) != Holder::Same || WaitForSingleObject(h, 0) == WAIT_OBJECT_0
+            }
+        };
+        CloseHandle(h);
+        ended
+    }
+}
+
 /// The creation time of the process behind `h`.
 #[cfg(windows)]
 pub(crate) fn creation_time(h: windows_sys::Win32::Foundation::HANDLE) -> Option<crate::StartTime> {

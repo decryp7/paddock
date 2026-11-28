@@ -49,6 +49,7 @@
 pub mod ambient;
 pub mod boot_volume;
 mod broken_server;
+pub mod build_cost;
 pub mod cargo_layout;
 pub mod cases;
 pub mod env;

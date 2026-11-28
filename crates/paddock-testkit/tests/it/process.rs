@@ -640,7 +640,8 @@ fn git_for_windows_found_through_mingw64_brings_its_usr_bin() {
 /// child cargo must not reach a tool planted in the `CARGO_HOME` it was given.
 #[cfg(unix)]
 #[test]
-fn a_child_cargos_build_script_does_not_reach_the_tools_of_cargo_home() {
+fn build_a_child_cargos_build_script_does_not_reach_the_tools_of_cargo_home() {
+    paddock_testkit::build_cost::charge("a real `cargo build` of a one-file crate");
     let d = paddock_testkit::tempdir();
     let crate_dir = d.path().join("probe");
     std::fs::create_dir_all(crate_dir.join("src")).unwrap();

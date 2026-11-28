@@ -31,6 +31,7 @@
  },
  "packages": {},
  "cargoOnly": [],
+ "gradePackages": {},
  "why": {
   "app:x": [
    "global .gitea/workflows/ci.yml"

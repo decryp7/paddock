@@ -52,6 +52,8 @@ impl Touch {
 #[derive(Debug)]
 enum V {
     Green(u64),
+    /// Green with fix items: the run and a phrase the first fix item's test holds.
+    FixItems(u64, &'static str),
     Red(Option<u64>, &'static str),
     NotMeasured(&'static str),
 }
@@ -233,6 +235,19 @@ const SHAPES: &[Shape] = &[
         why: "the push 9181 asks about the commit train run 9180 fully tested: it skips and reuses 9180 (ER-49)",
     },
     Shape {
+        name: "flaky-noncargo-reach",
+        workflow: "ci.yml",
+        run: 9329,
+        asking: None,
+        touched: Touch::Nothing,
+        on_scope: V::Red(None, "only partial: 9329"),
+        on_line: V::Red(None, "plan verdict: complete="),
+        on_landing: V::FixItems(9329, "the_queue_model_has_no_wait_cycle"),
+        reuse: None,
+        trial: None,
+        why: "train aa before its fix (landing run, smoke icons): a FLAKY paddock-throttle test; with nothing touched it is a fix item and the landing is green; the grade on a real plan is the test below",
+    },
+    Shape {
         name: "member-trial-v3",
         workflow: "ci.yml",
         run: 9179,
@@ -307,6 +322,7 @@ fn matches(got: &verdict::Verdict, want: &V) -> bool {
     use verdict::Verdict as G;
     match (got, want) {
         (G::Green { run }, V::Green(w)) => run == w,
+        (G::GreenWithFixItems { run, items }, V::FixItems(w, phrase)) => run == w && items.iter().any(|i| i.test.contains(phrase)),
         (G::Red { run, reason }, V::Red(w, phrase)) => run == w && reason.contains(phrase),
         (G::NotMeasured(why), V::NotMeasured(phrase)) => why.contains(phrase),
         _ => false,
@@ -527,6 +543,77 @@ fn a_flaky_test_is_a_fix_item_in_untouched_code_and_red_in_reached_code_and_not_
     // Reached code: red, naming the test. Unread: not measured, never a pass.
     assert!(matches!(grade(Touch::Everything), GradedResult::Red(why) if why.contains("a FLAKY test")));
     assert!(matches!(grade(Touch::Unread), GradedResult::NotMeasured(why) if why.contains("cannot be read")));
+}
+
+#[test]
+fn a_flaky_test_on_train_aas_real_plan_is_a_fix_item_and_a_code_change_to_its_package_blocks() {
+    // Run 9329 (train aa before its fix): the plan reached crates through ci.yml's plan job and artifact-upload steps, and the grade read
+    // that as "every test of crates is touched" (a throttle test blocked a train no member of which changed throttle's code). Every
+    // reason the planner gives now says whether it can alter a test (`Alters`); the grade reads that. The log is the real one.
+    use super::green::{FailedJob, GradedResult, grade_failures};
+    let dir = dir_of("flaky-noncargo-reach");
+    let jobs: Value = serde_json::from_slice(&std::fs::read(dir.join("jobs-9329.json")).unwrap()).unwrap();
+    let job = jobs["jobs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|j| j["conclusion"] == "failure")
+        .unwrap();
+    let id = job["id"].as_u64().unwrap();
+    let failed = FailedJob {
+        name: job["name"].as_str().unwrap().to_string(),
+        id,
+        url: job["html_url"].as_str().unwrap().to_string(),
+        failed_steps: job["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|s| s["conclusion"] == "failure")
+            .map(|s| s["name"].as_str().unwrap().to_string())
+            .collect(),
+        log: Some(std::fs::read_to_string(dir.join(format!("log-{id}.txt"))).unwrap()),
+    };
+    let plan_log = std::fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(|e| std::fs::read_to_string(e.unwrap().path()).ok())
+        .find(|t| t.contains("plan scope: "))
+        .unwrap();
+    let expected = crate::run_scope::read(&plan_log).unwrap().unwrap().expected;
+    // The plan the planner makes for train aa's diff (`./dev plan e7e278361 f59145624`, recorded as plan-9329.json): crates is
+    // `packageGraded` (ci.yml's plan job and upload steps), and `gradePackages` holds paddock-ci-config alone: the manifests that gained
+    // `test-reads = []` (paddock-throttle's among them) changed metadata only.
+    let recorded: Value = serde_json::from_slice(&std::fs::read(dir.join("plan-9329.json")).unwrap()).unwrap();
+    assert_eq!(recorded["gradePackages"]["crates"], json!(["paddock-ci-config"]), "{recorded}");
+    let members: std::collections::BTreeSet<String> = ["paddock-ci-config", "paddock-throttle", "paddock-slots"].map(String::from).into();
+    let grade = |plan: Value| {
+        let mut t = Touched::from_plan(&plan);
+        t.members = [("crates".to_string(), members.clone())].into();
+        t.expected = expected.clone();
+        grade_failures("ci.yml", std::slice::from_ref(&failed), &expected, &mut || Some(t.clone()))
+    };
+    let with_crates = |changed: Value, key: &str| {
+        let mut p = recorded.clone();
+        p[key]["crates"] = changed;
+        p
+    };
+    // Train aa's real plan: the throttle test does not block; it is a fix item and the train lands.
+    let GradedResult::GreenWithFixItems(items) = grade(recorded.clone()) else {
+        panic!("a fix item expected")
+    };
+    assert!(items[0].test.contains("the_queue_model_has_no_wait_cycle"), "{:?}", items[0]);
+    // Control: a real change to paddock-throttle (code, so in `gradePackages`) still blocks.
+    let r = grade(with_crates(json!(["paddock-ci-config", "paddock-throttle"]), "gradePackages"));
+    assert!(matches!(&r, GradedResult::Red(why) if why.contains("touched code")), "{r:?}");
+    // Control: the same plan read the old way (manifest-only crates in `packages`, as an older recording has no `gradePackages`) blocks.
+    let mut old = with_crates(json!(["paddock-ci-config", "paddock-throttle"]), "packages");
+    old.as_object_mut().unwrap().remove("gradePackages");
+    let r = grade(old);
+    assert!(matches!(&r, GradedResult::Red(why) if why.contains("touched code")), "{r:?}");
+    // Control: without `packageGraded` the project is reached for a reason beyond Cargo and every test of it is touched.
+    let mut whole = recorded.clone();
+    whole.as_object_mut().unwrap().remove("packageGraded");
+    let r = grade(whole);
+    assert!(matches!(&r, GradedResult::Red(why) if why.contains("not a Cargo reach")), "{r:?}");
 }
 
 #[test]

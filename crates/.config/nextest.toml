@@ -10,6 +10,20 @@
 [test-groups]
 real-browser = { max-threads = 1 }
 
+# Class build (crates/paddock-testkit/src/build_cost.rs): a test that starts a compiler or a `cargo build` has the name prefix `build_`.
+# `paddock_testkit::build_cost::charge` fails a test of another name under nextest, and tools/paddock-dev/tests/it/build_cost.rs checks the
+# places that start a build and this override. A build in a test costs what a cold compile costs, not what the test's own work costs: in CI
+# run 9371 (a cold cache after a rustflags change) ten plugin tests that build the fixture in the test reached the 60 s limit together.
+# In the default profile, so every profile inherits it; a setting from the first override that sets it wins, so this one is the first.
+# waiver: the build class's budget, a hang backstop and not a performance limit (ER-12), from the cold times of docs/benchmarks.md "2026-11-28,
+# test build cost class" (a fresh build folder, no sccache, Mac mini of 14 cores at a 1-minute load of 7 to 20): the plugin fixture's
+# `cargo build -p paddock-plugin-test` 40.7 s, every test that needs it waiting 39.6 to 41.0 s on that one build (CI run 9371: stopped at 60.0 s
+# on try 1, 37 to 46 s on try 2 over the first try's work, so a cold CI build is about 100 s); the other builds in the class (a one-file
+# crate, the CLI's tiny project) 0.4 to 1.2 s. 300 s is 7x the local cold time and 3x the CI one.
+[[profile.default.overrides]]
+filter = 'test(/(^|::)build_[^:]*$/)'
+slow-timeout = { period = "60s", terminate-after = 5 }
+
 # waiver: a real browser's start is judged on its run state and may wait up to 120 s of CPU (see the ci profile's waiver below); two
 # minutes in total would stop it first, so the default profile gives it 180 s.
 [[profile.default.overrides]]
@@ -78,12 +92,3 @@ success-output = "final"
 [[profile.ci.overrides]]
 filter = "package(paddock-service) & binary(it) & test(/^model::the_crash_model_/)"
 slow-timeout = { period = "30s", terminate-after = 4 }
-
-# waiver: ADR 0103's size class "cpu-heavy": paddock-throttle's queue model runs 1200 seeded explorations (3 limits x 400 seeds) of waiters and holders
-# against the real lock folder, so its cost is file-system work, not time (it asserts no elapsed time, and its clock is fake).
-# Measured: 16 s to 28 s on the Mac under the agents' load (2026-11-27, three runs), and stopped at 60 s on the Windows CI runner (run 9242, job
-# 52621, TMT at 60.4 s); it passed in run 9244 under the same limit, so n = 1 for the stop, and the log does not record the runner's load
-# (not measured). The class gives it 180 s.
-[[profile.ci.overrides]]
-filter = "package(paddock-throttle) & binary(it) & test(the_queue_model_has_no_wait_cycle_and_never_exceeds_the_maximum)"
-slow-timeout = { period = "30s", terminate-after = 6 }

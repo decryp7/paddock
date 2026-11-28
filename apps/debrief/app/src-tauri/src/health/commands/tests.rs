@@ -148,6 +148,8 @@ fn an_error_names_a_service_outage_only_while_that_service_is_down() {
 /// limit. It is built only when it is missing (a
 /// `cargo test -p debrief-app` without a workspace build).
 fn built_store_worker() -> std::path::PathBuf {
+    // Before the look for a built worker: a warm run must judge the test's name as a cold one does (the build cost class).
+    paddock_testkit::build_cost::charge("debrief-store-worker (cargo build)");
     let profile_dir = paddock_testkit::cargo_layout::profile_dir();
     let release = profile_dir.file_name().is_some_and(|n| n == "release");
     store_worker_in(&profile_dir, || {
@@ -219,7 +221,7 @@ impl Drop for StopOnDrop {
 }
 
 #[test]
-fn a_real_store_worker_killed_over_and_over_is_quarantined_then_repair_restarts_it() {
+fn build_a_real_store_worker_killed_over_and_over_is_quarantined_then_repair_restarts_it() {
     use crate::test_support::test_app_with_commands;
     use debrief_ipc::supervisor::ChildState;
     let app = test_app_with_commands(None);

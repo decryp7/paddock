@@ -27,6 +27,8 @@ toml = "0.9"
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
+# The build class of the tests that start the real cargo (`paddock_testkit::build_cost`).
+paddock-testkit = { workspace = true }
 # The tampered-package test rewrites an archive with one program changed.
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 

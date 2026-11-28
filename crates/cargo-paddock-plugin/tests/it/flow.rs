@@ -212,7 +212,7 @@ fn build_pack_sign_and_verify_with_the_real_cargo() {
 }
 
 #[test]
-fn a_program_that_does_not_compile_fails_the_build_with_cargos_messages_and_a_next_step() {
+fn build_a_program_that_does_not_compile_fails_the_build_with_cargos_messages_and_a_next_step() {
     let dir = tempfile::tempdir().unwrap();
     let root = tiny_project(dir.path());
     std::fs::write(

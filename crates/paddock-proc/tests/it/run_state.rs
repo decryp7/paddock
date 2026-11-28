@@ -9,6 +9,15 @@ use paddock_proc::{
 use std::process::Child;
 use std::time::{Duration, Instant};
 
+/// The one read in this file: it tests `run_state` itself, so the reads are the thing under test.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "this file tests run_state itself: the read is the thing under test"
+)]
+fn state(id: ProcessId) -> RunState {
+    run_state(id)
+}
+
 /// A child that sleeps; killed and reaped when dropped.
 struct Sleeper(Child);
 
@@ -49,14 +58,14 @@ fn until(what: &str, mut ok: impl FnMut() -> bool) {
 fn a_child_is_running_then_stopped_then_running_and_a_killed_one_is_exited() {
     let child = Sleeper::new();
     let id = child.id();
-    assert_eq!(run_state(id), RunState::Running);
+    assert_eq!(state(id), RunState::Running);
     child.signal(libc::SIGSTOP);
-    until("stopped", || run_state(id) == RunState::Stopped);
+    until("stopped", || state(id) == RunState::Stopped);
     child.signal(libc::SIGCONT);
-    until("running again", || run_state(id) == RunState::Running);
+    until("running again", || state(id) == RunState::Running);
     child.signal(libc::SIGKILL);
     drop(child);
-    assert_eq!(run_state(id), RunState::Exited);
+    assert_eq!(state(id), RunState::Exited);
 }
 
 #[test]
@@ -66,7 +75,7 @@ fn a_pid_that_names_another_process_is_exited() {
         me.pid(),
         paddock_proc::StartTime::from_micros(me.started().as_micros() + 1_000_000),
     );
-    assert_eq!(run_state(other), RunState::Exited);
+    assert_eq!(state(other), RunState::Exited);
 }
 
 /// Names only the process: the run state comes from the default `run_state`. A constant CPU time, so only a pause can keep
@@ -103,7 +112,7 @@ fn a_watch_over_a_stopped_child_says_paused_once_and_never_calls_it_stuck() {
     let child = Sleeper::new();
     let id = child.id();
     child.signal(libc::SIGSTOP);
-    until("stopped", || run_state(id) == RunState::Stopped);
+    until("stopped", || state(id) == RunState::Stopped);
     let patience = Patience {
         idle: Duration::from_millis(5),
         tick: Duration::from_millis(1),
@@ -149,6 +158,6 @@ fn liveness_of_a_stopped_child_is_paused_and_of_a_running_one_running() {
     let id = child.id();
     assert_eq!(liveness_of(id, None), Liveness::Running);
     child.signal(libc::SIGSTOP);
-    until("stopped", || run_state(id) == RunState::Stopped);
+    until("stopped", || state(id) == RunState::Stopped);
     assert_eq!(liveness_of(id, None), Liveness::Paused);
 }
