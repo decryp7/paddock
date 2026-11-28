@@ -5,9 +5,16 @@
 # The store settings are the crate legs' (ci.yml, "Test cache store check"). Why: run 9350 lost every record of a Windows leg to one timed-out PUT,
 # and the write limit and parallelism are set from these numbers (ER-12).
 name: test-cache-probe
+# A run dispatched through ./dev ci dispatch shows its dispatch_id in its title, so the tool finds that exact run (guard A6, ER-51).
+run-name: ${{ github.event.inputs.dispatch_id && format('{0} [dispatch {1}]', github.workflow, github.event.inputs.dispatch_id) || '' }}
 
 on:
   workflow_dispatch:
+    inputs:
+      dispatch_id:
+        description: "Set by ./dev ci dispatch: the token it finds this run by (shown in the run's title). Leave empty."
+        required: false
+        default: ""
 
 env:
   # The fallback switch of conformance/ci/kit.sh, as in ci.yml: the shared actions call kit.sh.
