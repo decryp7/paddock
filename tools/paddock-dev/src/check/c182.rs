@@ -3,9 +3,12 @@
 //! moves: whoever controls the action's repository changes what runs in a job, with the runner's secrets, and a build is no longer
 //! reproducible (the same reason ER-57 gives for waiting before an update).
 //!
-//! What is read, and how: every workflow under `.gitea/workflows/` and every composite action under `.gitea/actions/`, through
+//! What is read, and how: every workflow under `.gitea/workflows/`, every composite action under `.gitea/actions/` and every template, through
 //! `paddock_ci_config::yaml` (ER-42), at `jobs.<id>.uses` (a reusable workflow), `jobs.<id>.steps[].uses` and `runs.steps[].uses`.
 //! Never matched as text: a comment or a `run:` body that names `uses:` is no step.
+//!
+//! Also read: `.gitea/workflow-templates/` (the templates other repositories copy). Exempt there and everywhere: Paddock's own
+//! released actions `decryp7/paddock/<path>@v<semver>`, which are immutable releases we cut.
 //!
 //! What is exempt: a local path (`./.gitea/actions/...`, `./.paddock/...`, any value starting with `.`) and a `docker://` image
 //! (a digest there is `@sha256:...`, a different reference form that this check does not judge). The trailing `# v4.4.0` comment that
@@ -26,12 +29,23 @@ const RULE: u32 = 0;
 /// Where the pinned workflows and actions live: a root-relative path starts with one of these.
 fn is_ci_file(rel: &str) -> bool {
     let yaml = rel.ends_with(".yml") || rel.ends_with(".yaml");
-    yaml && (rel.starts_with(".gitea/workflows/") || rel.starts_with(".gitea/actions/"))
+    yaml && (rel.starts_with(".gitea/workflows/") || rel.starts_with(".gitea/actions/") || rel.starts_with(".gitea/workflow-templates/"))
 }
 
-/// Whether a `uses:` value needs no pin: a local path or a container image.
+/// Whether a `uses:` value needs no pin: a local path, a container image, or one of Paddock's own released actions
+/// (`decryp7/paddock/<path>@v<semver>`): a release tag of ours is an immutable release that we cut, not a tag a third party can move.
 pub fn is_exempt(uses: &str) -> bool {
-    uses.starts_with('.') || uses.starts_with("docker://")
+    uses.starts_with('.') || uses.starts_with("docker://") || is_own_release(uses)
+}
+
+/// `decryp7/paddock/<path>@v<major>.<minor>.<patch>` with digits only.
+fn is_own_release(uses: &str) -> bool {
+    let Some(rest) = uses.strip_prefix("decryp7/paddock/") else {
+        return false;
+    };
+    let Some((_, v)) = rest.rsplit_once("@v") else { return false };
+    let parts: Vec<&str> = v.split('.').collect();
+    parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// Whether a remote reference ends in `@` and a full 40-hex commit SHA (lower case, as `git` prints it).
@@ -219,7 +233,19 @@ mod tests {
         for ok in ["./.gitea/actions/plan", "./.paddock/.gitea/actions/x", "../x", "docker://alpine:3"] {
             assert!(is_exempt(ok), "{ok}");
         }
-        assert!(!is_exempt("decryp7/paddock/.gitea/actions/plan@v0.3.0"));
+        assert!(
+            is_exempt("decryp7/paddock/.gitea/actions/plan@v0.3.0"),
+            "our own release tag is immutable"
+        );
+        for bad in [
+            "decryp7/paddock/.gitea/actions/plan@main",
+            "decryp7/paddock/.gitea/actions/plan@v0.3",
+            "decryp7/paddock/x@v1.2.3-rc1",
+            "decryp7/other/x@v1.2.3",
+            "actions/checkout@v1.2.3",
+        ] {
+            assert!(!is_exempt(bad), "{bad}");
+        }
     }
 
     #[test]

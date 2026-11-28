@@ -134,3 +134,18 @@ fn live_c182_the_real_tree_has_no_unpinned_remote_action() {
     assert_eq!(r.errors(), 0, "report-only: {:?}", r.findings);
     assert!(r.findings.is_empty(), "an unpinned remote `uses:`: {:?}", r.findings);
 }
+
+/// A template (copied into other repositories) with a moving GitHub tag is flagged; Paddock's own release tags and a pinned SHA are not.
+#[test]
+fn c182_reads_workflow_templates_and_exempts_own_release_tags() {
+    let t = "jobs:\n  a:\n    runs-on: x\n    steps:\n      - uses: actions/checkout@v4\n      - uses: decryp7/paddock/.gitea/actions/plan@v0.3.0\n      - uses: decryp7/paddock/.gitea/actions/plan@main\n";
+    let tree = tree_of(&[(".gitea/workflow-templates/t.yml", t)]);
+    let r = run_checks(&options(tree.path(), "fixture"), &registry()).unwrap();
+    let got: Vec<(&str, usize)> = r.findings.iter().map(|f| (f.file.as_str(), f.line)).collect();
+    assert_eq!(
+        got,
+        vec![(".gitea/workflow-templates/t.yml", 5), (".gitea/workflow-templates/t.yml", 7)],
+        "{:?}",
+        r.findings
+    );
+}
