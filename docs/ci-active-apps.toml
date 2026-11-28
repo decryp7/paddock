@@ -8,6 +8,6 @@
 decided = "2026-11-24"
 by = "user"
 reason = "Foundation first, then the apps one at a time (user, 2026-11-24: \"Focus on foundation first then slowly turn the products on one by one\")."
-active = []
+active = ["dyno", "debrief", "shell-demo", "workbench-demo"]
 # The planned order (for people; the planner reads only `active`).
 next = ["dyno", "pitwall", "debrief", "pitcrew"]
