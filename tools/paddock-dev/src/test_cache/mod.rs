@@ -19,6 +19,7 @@ pub mod config;
 mod declared_tests;
 pub mod key;
 pub mod plan;
+pub mod probe;
 pub mod reasons;
 pub mod result;
 pub mod s3;
@@ -315,7 +316,11 @@ pub fn is_nightly(env: &dyn Fn(&str) -> Option<String>) -> bool {
 /// run can name each cached pass the world no longer supports (an environment drift, or a test that reads something its key lacks) and
 /// open a fix item for the key's definition. A target with no record under its key is not in the answer.
 pub fn invalidate(store: &dyn Store, failed: &[Lookup]) -> Result<Vec<Record>, store::StoreError> {
-    Ok(store.delete_many(failed)?.into_iter().flatten().collect())
+    let mut gone = Vec::new();
+    for answer in store.delete_many(failed) {
+        gone.extend(answer?);
+    }
+    Ok(gone)
 }
 
 /// Where a record came from.

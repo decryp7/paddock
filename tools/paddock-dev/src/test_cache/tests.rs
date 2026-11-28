@@ -232,16 +232,28 @@ fn a_run_cut_short_or_without_the_package_is_not_a_pass() {
     assert!(not_seen(judge("nothing here", &names(&["nxflaky"])), "nxflaky"));
 }
 
+/// `put_many` answers per record; a test that expects every record stored says `.unwrap()`.
+trait AllStored {
+    fn unwrap(self);
+}
+impl AllStored for Vec<Result<(), StoreError>> {
+    fn unwrap(self) {
+        for r in self {
+            r.expect("a record was not stored");
+        }
+    }
+}
+
 struct Down;
 impl Store for Down {
     fn get_many(&self, l: &[Lookup]) -> Vec<Result<Option<Record>, StoreError>> {
         l.iter().map(|_| Err(StoreError("connection refused".into()))).collect()
     }
-    fn put_many(&self, _: &[Record]) -> Result<(), StoreError> {
-        Err(StoreError("connection refused".into()))
+    fn put_many(&self, r: &[Record]) -> Vec<Result<(), StoreError>> {
+        r.iter().map(|_| Err(StoreError("connection refused".into()))).collect()
     }
-    fn delete_many(&self, _: &[Lookup]) -> Result<Vec<Option<Record>>, StoreError> {
-        Err(StoreError("connection refused".into()))
+    fn delete_many(&self, l: &[Lookup]) -> Vec<Result<Option<Record>, StoreError>> {
+        l.iter().map(|_| Err(StoreError("connection refused".into()))).collect()
     }
 }
 
@@ -269,7 +281,7 @@ fn a_failed_lookup_in_the_record_step_is_named_and_writes_nothing() {
     assert_eq!(stored, 0);
     let all = lines.join("\n");
     assert!(
-        all.contains("::notice::test-cache: the store lookup failed for 1 of 1 keys") && all.contains("connection refused"),
+        all.contains("::notice::test-cache: the store lookup failed for 1 of 1 keys: connection refused"),
         "{all}"
     );
 }
@@ -553,10 +565,10 @@ impl Store for OneKeyTimesOut {
         }
         out
     }
-    fn put_many(&self, r: &[Record]) -> Result<(), StoreError> {
+    fn put_many(&self, r: &[Record]) -> Vec<Result<(), StoreError>> {
         self.inner.put_many(r)
     }
-    fn delete_many(&self, l: &[Lookup]) -> Result<Vec<Option<Record>>, StoreError> {
+    fn delete_many(&self, l: &[Lookup]) -> Vec<Result<Option<Record>, StoreError>> {
         self.inner.delete_many(l)
     }
 }
@@ -668,12 +680,12 @@ impl Store for BlindStore {
     fn get_many(&self, l: &[Lookup]) -> Vec<Result<Option<Record>, StoreError>> {
         l.iter().map(|_| Err(StoreError("read timed out".into()))).collect()
     }
-    fn put_many(&self, r: &[Record]) -> Result<(), StoreError> {
+    fn put_many(&self, r: &[Record]) -> Vec<Result<(), StoreError>> {
         self.put.set(self.put.get() + r.len());
-        Ok(())
+        r.iter().map(|_| Ok(())).collect()
     }
-    fn delete_many(&self, _: &[Lookup]) -> Result<Vec<Option<Record>>, StoreError> {
-        Ok(Vec::new())
+    fn delete_many(&self, l: &[Lookup]) -> Vec<Result<Option<Record>, StoreError>> {
+        l.iter().map(|_| Ok(None)).collect()
     }
 }
 
@@ -1884,4 +1896,298 @@ fn a_crate_that_depends_on_a_blind_crate_is_blind_through_it_and_an_independent_
     a.blind = got["crates/a"].clone();
     let d = decide(std::slice::from_ref(&a), &cfg(), &class, "", &s, NOW, OK).0.remove(0);
     assert!(d_text(&d).contains("blind through crates/c"), "{}", d_text(&d));
+}
+
+/// A write that times out for the record of one target (RustFS on a slow disk, user decision 136; run 9350: one PUT of the leg timed out
+/// and the leg stored 0 records). `bad` fails `fail_times` times, then answers.
+struct OnePutTimesOut {
+    inner: FsStore,
+    bad: String,
+    fail_times: std::cell::Cell<usize>,
+}
+impl Store for OnePutTimesOut {
+    fn get_many(&self, l: &[Lookup]) -> Vec<Result<Option<Record>, StoreError>> {
+        self.inner.get_many(l)
+    }
+    fn put_many(&self, r: &[Record]) -> Vec<Result<(), StoreError>> {
+        let mut out = self
+            .inner
+            .put_many(&r.iter().filter(|x| x.target != self.bad).cloned().collect::<Vec<_>>())
+            .into_iter();
+        r.iter()
+            .map(|x| {
+                if x.target != self.bad {
+                    return out.next().unwrap();
+                }
+                if self.fail_times.get() > 0 {
+                    self.fail_times.set(self.fail_times.get() - 1);
+                    return Err(StoreError(
+                        "curl failed: curl: (28) Operation timed out after 5015 milliseconds".into(),
+                    ));
+                }
+                self.inner.put_many(std::slice::from_ref(x)).remove(0)
+            })
+            .collect()
+    }
+    fn delete_many(&self, l: &[Lookup]) -> Vec<Result<Option<Record>, StoreError>> {
+        self.inner.delete_many(l)
+    }
+}
+
+fn pass_log(names: &[&str]) -> String {
+    let n = names.len();
+    let mut l = vec![format!("    Starting {n} tests across {n} binaries")];
+    l.extend(
+        names
+            .iter()
+            .enumerate()
+            .map(|(i, p)| format!("        PASS [   0.010s] ({}/{n}) {p} t::ok", i + 1)),
+    );
+    l.push(format!("     Summary [   0.050s] {n} tests run: {n} passed, 0 failed, 0 skipped"));
+    l.join("\n")
+}
+
+fn run_meta() -> RunMeta {
+    RunMeta {
+        run: "1".into(),
+        job: "j".into(),
+        attempt: 1,
+        git_ref: "refs/heads/train/x".into(),
+        commit: "c".into(),
+        at: NOW,
+        os_build: String::new(),
+    }
+}
+
+/// ADR 0116 §5 as amended 2026-11-28, for writes: one PUT that times out loses that record only; the other N-1 are stored and the
+/// warning names the one and its cause (run 9350 stored 0 of the leg's records).
+#[test]
+fn a_write_that_times_out_for_one_record_loses_that_record_only() {
+    let (_d, s) = scratch();
+    let class = RunnerClass::here();
+    let cands: Vec<Candidate> = ["a", "b", "c", "d"].iter().map(|n| cand(n, "h")).collect();
+    let store = OnePutTimesOut {
+        inner: s,
+        bad: "rust:b".into(),
+        fail_times: std::cell::Cell::new(usize::MAX),
+    };
+    let (lines, stored) = super::cmd::record_with(
+        &pass_log(&["a", "b", "c", "d"]),
+        &cands,
+        &cfg(),
+        &class,
+        "",
+        &run_meta(),
+        &store,
+        OK,
+    );
+    assert_eq!(stored, 3, "{lines:?}");
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("::warning::test-cache: 1 of 4 records not stored: 1 x curl failed: curl: (28)")),
+        "{lines:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("test-cache: recorded 3 packages of 4 candidates")),
+        "{lines:?}"
+    );
+    let look = |c: &Candidate| Lookup {
+        target: c.target.id.clone(),
+        class: class.clone(),
+        key: super::key_of(c, &cfg(), &class, ""),
+    };
+    let got = store.inner.get_many(&cands.iter().map(look).collect::<Vec<_>>());
+    let found: Vec<bool> = got.iter().map(|r| r.as_ref().unwrap().is_some()).collect();
+    assert_eq!(found, [true, false, true, true]);
+}
+
+/// The S3 store's write: a PUT with no answer gets one more try, alone; if that answers, all N are stored; if it never answers, only that
+/// record is lost with curl's words, and a refusal (403) is that record's too.
+#[test]
+fn the_s3_write_retries_a_timed_out_put_once_and_loses_only_the_record_that_still_fails() {
+    use super::s3::{Block, S3Store};
+    let d = tempfile::tempdir().unwrap();
+    let env: HashMap<String, String> = [
+        ("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE"),
+        ("AWS_SECRET_ACCESS_KEY", "s3cr3t-value"),
+        ("PADDOCK_SCCACHE_ENV_FILE", d.path().join("absent.env").to_str().unwrap()),
+        ("PADDOCK_SCCACHE_S3_ENDPOINT", "127.0.0.1:9"),
+    ]
+    .iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect();
+    let s3 = S3Store::from_env(&env, d.path().join("scratch")).unwrap();
+    let class = RunnerClass::here();
+    let recs: Vec<Record> = ["a", "b", "c", "d"].iter().map(|n| rec(&cand(n, "h"), &class, NOW)).collect();
+    let bad = recs[1].target.clone();
+    let slug = bad.replace(':', "_");
+    let is_bad = |b: &Block| b.0.contains(&slug);
+    // The retry answers: one try for four, one more for the timed-out one alone, all four stored.
+    let mut calls: Vec<usize> = Vec::new();
+    let got = s3.put_with(
+        &recs,
+        &mut |bs: &[Block]| {
+            calls.push(bs.len());
+            let first = calls.len() == 1;
+            Ok((
+                bs.iter()
+                    .map(|b| (if is_bad(b) && first { 0 } else { 200 }, b.1.display().to_string()))
+                    .collect(),
+                Some("curl failed: curl: (28) Operation timed out after 5015 milliseconds".to_string()),
+            ))
+        },
+        &[std::time::Duration::ZERO],
+        &|_| {},
+    );
+    assert_eq!(calls, [4, 1]);
+    assert!(got.iter().all(|r| r.is_ok()), "{got:?}");
+    // It never answers: three are stored, the fourth is lost with its cause, after one retry only.
+    let mut calls = 0;
+    let got = s3.put_with(
+        &recs,
+        &mut |bs: &[Block]| {
+            calls += 1;
+            Ok((
+                bs.iter()
+                    .map(|b| (if is_bad(b) { 0 } else { 200 }, b.1.display().to_string()))
+                    .collect(),
+                Some("curl failed: curl: (28) Operation timed out after 5015 milliseconds".to_string()),
+            ))
+        },
+        &[std::time::Duration::ZERO],
+        &|_| {},
+    );
+    assert_eq!(calls, 2);
+    assert_eq!(got.iter().filter(|r| r.is_ok()).count(), 3, "{got:?}");
+    assert!(matches!(&got[1], Err(e) if e.0.contains("(28)")), "{got:?}");
+    // A refusal is that record's error and is not retried.
+    let mut calls = 0;
+    let got = s3.put_with(
+        &recs,
+        &mut |bs: &[Block]| {
+            calls += 1;
+            Ok((
+                bs.iter()
+                    .map(|b| (if is_bad(b) { 403 } else { 200 }, b.1.display().to_string()))
+                    .collect(),
+                None,
+            ))
+        },
+        &[std::time::Duration::ZERO],
+        &|_| {},
+    );
+    assert_eq!(calls, 1);
+    assert!(matches!(&got[1], Err(e) if e.0.contains("403")), "{got:?}");
+    assert_eq!(got.iter().filter(|r| r.is_ok()).count(), 3);
+}
+
+/// ER-12: the write limit is raised with its measured cause (run 9350, the constant's doc); reads keep their own. A GET block carries the
+/// read limit and a PUT or DELETE block the write limit, so a lookup the run waits on still fails open at once.
+#[test]
+fn a_write_request_has_the_write_limit_and_a_read_request_keeps_the_read_limit() {
+    use super::s3::{REQUEST_SECS, S3Store, WRITE_REQUEST_SECS};
+    const { assert!(WRITE_REQUEST_SECS > REQUEST_SECS) };
+    let d = tempfile::tempdir().unwrap();
+    let env: HashMap<String, String> = [
+        ("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE"),
+        ("AWS_SECRET_ACCESS_KEY", "s3cr3t-value"),
+        ("PADDOCK_SCCACHE_ENV_FILE", d.path().join("absent.env").to_str().unwrap()),
+        ("PADDOCK_SCCACHE_S3_ENDPOINT", "127.0.0.1:9"),
+    ]
+    .iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect();
+    let s3 = S3Store::from_env(&env, d.path().join("scratch")).unwrap();
+    let p = |n: &str| d.path().join(n);
+    let cfg_of = |m: &'static str| s3.config(&[("http://x/a".to_string(), p("o"), None, m)]);
+    assert!(cfg_of("GET").contains(&format!("max-time = {REQUEST_SECS}\n")));
+    for m in ["PUT", "DELETE"] {
+        assert!(cfg_of(m).contains(&format!("max-time = {WRITE_REQUEST_SECS}\n")), "{m}");
+    }
+}
+
+/// The probe's pure parts: curl's per-transfer line, the percentiles, the one line per scenario and the key's percent-encoding.
+#[test]
+fn the_probe_reads_curls_lines_and_prints_one_line_per_scenario() {
+    use super::probe::{Req, encode_key, line, parse_timed, percentiles};
+    let got = parse_timed("200||/s/a|0.512|0\n000||/s/b|5.015|28\n503||/s/c|1.2|0\n").unwrap();
+    assert_eq!(
+        got[1].1,
+        Req {
+            code: 0,
+            ms: 5015,
+            exit: 28
+        }
+    );
+    assert!(parse_timed("garbage").is_err());
+    assert_eq!(percentiles(&[10, 20, 30, 40, 50, 60, 70, 80, 90, 100]), (50, 90, 100));
+    assert_eq!(percentiles(&[]), (0, 0, 0));
+    let reqs: Vec<Req> = got.into_iter().map(|(_, r)| r).collect();
+    let l = line("4 put x3", &reqs, "; parallel 4");
+    assert!(
+        l.starts_with("probe 4 put x3: n=3 p50 1200 ms, p90 5015 ms, max 5015 ms; status 0 x1, 200 x1, 503 x1; curl exit 0 x2, 28 x1;"),
+        "{l}"
+    );
+    assert!(l.contains("over 5 s: 1, over 30 s: 0; parallel 4"), "{l}");
+    assert_eq!(
+        encode_key("v2/selfcheck/t/esc ape\\back.json"),
+        "v2/selfcheck/t/esc%20ape%5Cback.json"
+    );
+}
+
+/// RustFS answers 503 (SlowDown) to PUTs in flight together: a write that got 503 is tried again after a wait, up to the schedule's three
+/// retries and only for the requests that still failed; a record that answers on the way is stored and one that never does is lost with the 503.
+#[test]
+fn the_s3_write_backs_off_and_retries_a_503_and_loses_only_the_record_that_never_answers() {
+    use super::s3::{Block, S3Store, WRITE_RETRY_WAITS};
+    let d = tempfile::tempdir().unwrap();
+    let env: HashMap<String, String> = [
+        ("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE"),
+        ("AWS_SECRET_ACCESS_KEY", "s3cr3t-value"),
+        ("PADDOCK_SCCACHE_ENV_FILE", d.path().join("absent.env").to_str().unwrap()),
+        ("PADDOCK_SCCACHE_S3_ENDPOINT", "127.0.0.1:9"),
+    ]
+    .iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect();
+    let s3 = S3Store::from_env(&env, d.path().join("scratch")).unwrap();
+    let class = RunnerClass::here();
+    let recs: Vec<Record> = ["a", "b", "c"].iter().map(|n| rec(&cand(n, "h"), &class, NOW)).collect();
+    let slug = |i: usize| recs[i].target.replace(':', "_");
+    // b answers 503 on the first two tries, then 200; c never answers anything but 503.
+    let (mut round, mut sizes) = (0, Vec::new());
+    let waits = std::cell::RefCell::new(Vec::new());
+    let got = s3.put_with(
+        &recs,
+        &mut |bs: &[Block]| {
+            round += 1;
+            sizes.push(bs.len());
+            Ok((
+                bs.iter()
+                    .map(|b| {
+                        let code = if b.0.contains(&slug(2)) || (b.0.contains(&slug(1)) && round <= 2) {
+                            503
+                        } else {
+                            200
+                        };
+                        (code, b.1.display().to_string())
+                    })
+                    .collect(),
+                None,
+            ))
+        },
+        &WRITE_RETRY_WAITS,
+        &|w| waits.borrow_mut().push(w),
+    );
+    assert_eq!(
+        sizes,
+        [3, 2, 2, 1],
+        "all three, then b and c, then b (answers) and c again, then c alone"
+    );
+    assert_eq!(*waits.borrow(), WRITE_RETRY_WAITS, "a growing wait before each retry");
+    assert!(got[0].is_ok() && got[1].is_ok(), "{got:?}");
+    assert!(matches!(&got[2], Err(e) if e.0.contains("503")), "{got:?}");
 }
