@@ -100,6 +100,29 @@ uses it, results in
 - **Reach of the real-folder seeds:** the in-memory sweep reaches 20 kinds of operation on the folder (take, probe, read, write, rename, remove, each on the slot lock, the slot record, tickets, high and drain markers and the temporary files). With 1 seed per maximum 4 are missed (the high marker's write, read, rename and the log removal); with 2 per maximum none; the test uses 4 and fails naming what a smaller number would miss.
 - **Notes:** 7 ms per seed on the Mac and about 110 ms to 150 ms per seed on Windows (132 s to 180 s for 1200): file-system work, as the old waiver said. The cost moved from 1200 real runs to 12.
 
+### 2026-11-28, the throttle tests off the real folder (fix/throttle-tests-windows-io)
+
+- **Commit:** base a3d3d98ee against this branch.
+- **Machine:** Windows before: the `crate` job's Windows leg of trial run 9373, job 54434 (nextest's own per-test time, the runner loaded by the other jobs: the same queue-model tests took 3.1 s and 4.6 s in run 9333); macOS after: Mac mini, debug test build, one run through `./dev throttle`.
+- **Command:** `cargo nextest run -p paddock-throttle --test it` (the per-test times of the whole `it` binary).
+- **Numbers:** every paddock-throttle test over 5 s in job 54434, and what each is now.
+
+  | Test (`paddock-throttle::it`) | Windows before (run 9373) | Change | macOS after |
+  |---|---|---|---|
+  | `admission::the_history_is_bounded_oldest_first_and_a_row_cannot_push_the_others_out` | over 60 s on both tries (TMT) | 1,600 atomic file rewrites become 7 real records and one seeded file; the bounds walk the pure `history::trimmed` (`trimmed_keeps_the_newest_per_row_and_overall_oldest_first`, 0.01 s) | 0.15 s |
+  | `priority::a_queue_that_makes_no_progress_ends_stalled_and_names_the_holder` | try 1 over 60 s, try 2 passed at 40.3 s (FLAKY) | in memory (`Rig::mem`) | 0.08 s |
+  | `priority::a_waiter_behind_a_holder_past_its_cap_stalls_after_the_limit` | 53.2 s | in memory | 0.04 s |
+  | `slots::the_queue_model_on_the_real_folder_reaches_every_operation_the_full_sweep_reaches` | 47.0 s | 6 real seeds instead of 12 (2 per maximum reach all 20 kinds; 1 does not) | 1.27 s |
+  | `slots::the_queue_model_has_no_wait_cycle_and_never_exceeds_the_maximum` | 15.8 s | in memory already; the per-agent file-system query (a path resolve and a drive query on Windows) is skipped; the 180 s waiver is deleted | 1.18 s |
+  | `slots::the_queue_models_checks_see_an_over_maximum_and_a_container_run_beside_another_step` | 8.8 s | same | 0.44 s |
+  | `priority::a_waiter_behind_a_live_holder_inside_its_cap_is_not_stalled` | 8.7 s | in memory, the 5 s poll workaround is gone | 0.17 s |
+  | `priority::a_queue_that_keeps_moving_is_waited_for_past_the_stall_limit` | 7.7 s | same | 0.18 s |
+  | `props::guard_paths_never_panic`, `props::the_real_process_table_never_panics_on_any_pid` | 6.3 s, 4.5 s | not changed: a property test of a pure path rule and a real process table probe, not queue logic | 3.8 s, not measured |
+
+- **Windows after:** not measured yet; the trial that proves it has not been dispatched (held by the user, 2026-11-28). The Windows leg of that trial fills this in.
+- **Controls:** with the stall rule changed in `paddock-proc` (no live-holder exemption, or no reset on a changed picture) the in-memory `inside_its_cap` and `keeps_moving` tests fail; with the history's per-row or overall bound off by one the pure test and the file test both fail.
+- **Notes:** the cause is the same as for the queue model (2026-11-28, above): a fake-clock poll does real lock-folder calls, and the stall tests poll for 300 to 1200 s of fake time at 200 ms. A real-folder test of each operation kind stays in the real-folder sweep.
+
 ### 2026-11-27, the tool's own build through sccache (ci/dev-selfbuild-sccache)
 
 - **Commit:** origin/main 7da64dedb plus this branch (the `dev` launcher's `selfbuild_cached`). Evidence: CI run 9248 (the plan job's cold `./dev` build took 90 s on Linux, 183 s on the Windows paddock-dev leg, 47 s on macOS; the Mac and Windows sccache "0%" is a kept build folder, not a fault: 3 requests executed, 96 to 101 non-cacheable).
