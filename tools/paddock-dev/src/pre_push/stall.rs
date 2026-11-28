@@ -111,6 +111,7 @@ impl Watchdog for StallWatchdog {
             started: None,
             last_progress: 0,
             last_change: None,
+            last_look: None,
             cpu_then: None,
             max_gap: Duration::ZERO,
             events: 0,
@@ -139,6 +140,8 @@ struct StallWatch {
     started: Option<Instant>,
     last_progress: u64,
     last_change: Option<Instant>,
+    /// When the step was last looked at: a wait moves `last_change` on by the time since, so it is never quiet time.
+    last_look: Option<Instant>,
     cpu_then: Option<Duration>,
     max_gap: Duration,
     events: u64,
@@ -182,6 +185,15 @@ impl StepWatch for StallWatch {
             // the first look: the CPU the step had then is what the report compares with
             self.cpu_then = o.cpu;
         }
+        // A wait (for another cargo's lock, for a throttle slot) is not silence: the quiet the report names and the gap the history
+        // learns leave it out, so `last_change` moves on by the time the wait took.
+        if o.waiting_on.is_some()
+            && let (Some(look), Some(change)) = (self.last_look, self.last_change)
+        {
+            self.last_change = Some(change + o.now.saturating_duration_since(look));
+        }
+        self.last_look = Some(o.now);
+        let last_change = self.last_change.unwrap_or(last_change);
         if o.progress > self.last_progress {
             self.max_gap = self.max_gap.max(o.now.saturating_duration_since(last_change));
             self.last_progress = o.progress;
@@ -362,6 +374,27 @@ mod tests {
             }
         }
         assert!(stuck_after.is_some_and(|i| (25..=35).contains(&i)), "{stuck_after:?}");
+    }
+
+    /// The quiet a report names and the gap the history learns are time the step was not waiting: an hour queued for a slot is not an
+    /// hour of silence (the goldens row was reported "no unit finished for 313 s" while its child queued behind the train's rows).
+    #[test]
+    fn the_time_a_step_waits_is_not_in_the_quiet_its_report_names() {
+        let mut r = Run::new(&dog(Mode::Enforce, 60));
+        for _ in 0..30 {
+            assert!(r.tick(1, None, None).is_none());
+        }
+        for _ in 0..3600 {
+            assert!(r.tick(1, Some("a throttle slot"), Some(0)).is_none());
+        }
+        let stuck = (0..100)
+            .find_map(|_| r.tick(1, None, None))
+            .expect("stuck after the rest of the gap");
+        assert!(
+            (58..=66).contains(&stuck.quiet.as_secs()),
+            "the hour of waiting is not quiet: {:?}",
+            stuck.quiet
+        );
     }
 
     #[test]

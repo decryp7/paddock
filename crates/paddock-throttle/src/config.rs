@@ -55,6 +55,9 @@ pub struct Config {
     pub runs: Option<PathBuf>,
     /// The hang detector's default (`THROTTLE_STALL`, seconds; `--stall` wins): off unless set.
     pub stall: Option<Duration>,
+    /// The queue status file of the caller's row (`THROTTLE_STATUS_FILE`, [`crate::status`]): every run appends its queued, admitted
+    /// and done events to it. `None`: nothing is written.
+    pub status_file: Option<PathBuf>,
 }
 
 /// Problems found while reading settings (shown once, then the default is used).
@@ -193,6 +196,7 @@ impl Config {
                 secs(get, &["THROTTLE_DRAIN_MS"], 500.0, 0.0, &mut w) as u64
             ),
             runs: None,
+            status_file: first(get, &[crate::status::STATUS_FILE_VAR]).map(PathBuf::from),
             stall: match first(get, &["THROTTLE_STALL"]) {
                 None => None,
                 Some(v) => match v.trim().parse::<f64>() {

@@ -52,6 +52,10 @@ pub struct Gate {
     /// The row runs CI's own tests (the member gate's `tests <ws>`): its child gets CI's job environment
     /// ([`crate::ci_run::job_env`]) less the secrets, not the [`crate::child_env::PASS`] list of the other rows.
     pub ci_env: bool,
+    /// The row starts a `./dev` child that queues for a `throttle` slot of its own ([`SLOT_TAKING_DEV_COMMANDS`]): the executor names a
+    /// queue status file for it ([`paddock_throttle::status`]) so its wait is told from its run. Never set with [`Gate::heavy`]: a row that
+    /// holds a slot while its child waits for another breaks ER-43.
+    pub children_queue: bool,
 }
 
 impl Gate {
@@ -150,6 +154,9 @@ pub struct Facts {
     pub goldens: Result<Vec<String>, String>,
     /// The packages both the member and main changed, when `merge sync-member` asked (`--overlap-since`; [`super::overlap`]).
     pub overlap: super::overlap::Overlap,
+    /// Who this run's steps are for: a train run's rows pass it on to every `./dev` child that takes a `throttle` slot of its own
+    /// ([`SLOT_TAKING_DEV_COMMANDS`]), so the child queues in the lane of its row and not behind it.
+    pub priority: crate::priority::Priority,
 }
 
 /// The reason of every row an inactive app's set leaves out: a skip with this reason is never a pass ([`super::render_timed`]
@@ -218,6 +225,22 @@ pub const PER_WORKSPACE_PREFIXES: &[&str] = &["fmt ", "lockfile ", "clippy ", "c
 /// Workspaces whose lints are not a push gate: they have a CI job of their own that is not part of a branch run.
 const OWN_JOB: &[&str] = &["/fuzz", "/templates/"];
 
+/// The `./dev` subcommands whose own steps take a `throttle` slot (they start builds through [`crate::heavy_tool`]): the one list of
+/// the rows that have to pass the run's priority on and that are watched by the queue status channel ([`Gate::children_queue`]). A
+/// subcommand is added here when it starts `throttle run`; `./dev gen check` does (its heavy generators, generators/run.rs). A test
+/// reads the planner's rows against it, so a row added with a slot-taking child and no priority is a red test, not a slow gate.
+pub const SLOT_TAKING_DEV_COMMANDS: &[&[&str]] = &[&["gen", "check"]];
+
+/// `g`, a `./dev` row whose child takes a `throttle` slot of its own: the run's priority is passed on (`--priority train`, nothing for a
+/// normal run) so the child queues in the lane of the row's run, and the executor is told to watch its queue
+/// ([`Gate::children_queue`]). The row is never heavy itself (ER-43: it would hold a slot while its child waits for another).
+fn slot_child(facts: &Facts, mut g: Gate) -> Gate {
+    debug_assert!(!g.heavy, "a row with a slot-taking child must not hold a slot itself (ER-43)");
+    g.args.extend(facts.priority.args().iter().map(|a| a.to_string()));
+    g.children_queue = true;
+    g
+}
+
 /// `g` run by this program ([`Facts::dev_exe`]), or not measured when it cannot be started again: never a guessed `./dev`, never
 /// a test program (whose harness would take the arguments as test filters and run its tests again).
 fn dev_run(facts: &Facts, g: Gate) -> Planned {
@@ -250,6 +273,7 @@ fn gate(id: String, cwd: &str, program: &str, args: &[&str], rank: u8, next: Str
         progress: super::progress::Progress::Lines,
         build_dir: None,
         ci_env: false,
+        children_queue: false,
     }
 }
 
@@ -960,20 +984,23 @@ fn goldens(facts: &Facts) -> Planned {
         },
         Ok(ids) => dev_run(
             facts,
-            Gate {
-                args: strs(&["gen", "check", "--only", &ids.join(",")]),
-                ..gate(
-                    "goldens".into(),
-                    "",
-                    "",
-                    &[],
-                    3,
-                    format!(
-                        "a golden is stale: the line above names the test and its bless command (the `regenerate` of {} in docs/generators.toml); run it on your machine, review the diff and commit it with the change",
-                        ids.join(", ")
-                    ),
-                )
-            },
+            slot_child(
+                facts,
+                Gate {
+                    args: strs(&["gen", "check", "--only", &ids.join(",")]),
+                    ..gate(
+                        "goldens".into(),
+                        "",
+                        "",
+                        &[],
+                        3,
+                        format!(
+                            "a golden is stale: the line above names the test and its bless command (the `regenerate` of {} in docs/generators.toml); run it on your machine, review the diff and commit it with the change",
+                            ids.join(", ")
+                        ),
+                    )
+                },
+            ),
         ),
     }
 }

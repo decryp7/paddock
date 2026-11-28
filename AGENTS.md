@@ -150,7 +150,8 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   that waits says why (`waiting behind train work: <who>`) and ends at its `--queue-max`. Only the coordinator's `./dev load` decides
   whether to *start another agent*. Integrators mark train steps with `--priority train` (`./dev check --pre-push --member-gate
   --priority train [--set slow]`, `./dev gen check --priority train`; `./dev merge check --gates` passes it itself): the step goes before
-  normal waiters (tools/throttle/README.md, "Train priority").
+  normal waiters (tools/throttle/README.md, "Train priority"). A gate row whose `./dev` child takes a slot of its own (`goldens`: `gen check`) passes the priority on and
+  gets a status file (`THROTTLE_STATUS_FILE`, `paddock_throttle::status`): the child's queue is waiting, never stuck, and is told from run time in `row-timings.tsv`.
 - **E2E and screenshots run on fresh code (guidance; a binding rule is proposed).** A running dev server is reused only with `PW_REUSE_SERVER=1`; default ports derive from the worktree path (`e2ePort` in `@decryp7/paddock-e2e`); a config that consumes `ui/dist` or the css fails at load with "rebuild ui: npm run build -w ui" when they were built from older sources (`build-guard.ts`, content stamps; lessons.md). New Playwright configs use these.
 - **A test that starts a compiler or `cargo build` is in the build class.** Its function name starts with `build_`, and a call to
   `paddock_testkit::build_cost::charge` stands before the code that looks for or starts the build (a test of another name fails under
