@@ -545,6 +545,7 @@ fn command_in(
             (ws.clone(), hit)
         })
         .collect();
+    facts.goldens = crate::generators::golden_due_in(&work, &history, &graph, &change.files);
     let mut planned = gates::plan_gates(&plan, &change, &facts);
     planned = select_rows(planned, &args.only)?;
     planned = train_split::select(planned, args.set);
@@ -1578,6 +1579,7 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>, ex: &dyn
         test_filters: Default::default(),
         nextest_config,
         reached: Default::default(),
+        goldens: Ok(Vec::new()),
     }
 }
 

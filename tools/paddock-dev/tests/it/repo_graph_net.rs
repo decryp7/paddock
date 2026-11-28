@@ -431,6 +431,18 @@ mod generators {
         assert!(!ids(&[".gitea/workflows/ci.yml"], &bare, &world2).contains(&"ci-run-golden".to_string()));
     }
 
+    /// The pre-push `goldens` row asks the registry and the model together (`golden_due_in`): ci.yml is no hand path of the ci-run golden,
+    /// the graph's `reads` makes it due, and a documentation change reaches no golden (ER-21).
+    #[test]
+    fn graph_a_workflow_edit_makes_the_ci_run_golden_due_for_the_push_row_and_a_docs_edit_none() {
+        let root = repo_root();
+        let history = GitHistory::new(&root, Duration::from_secs(60));
+        let graph_ = read_graph(&root, &history).unwrap();
+        let due = |file: &str| paddock_dev::generators::golden_due_in(&root, &history, &graph_, &[file.to_string()]).unwrap();
+        assert!(due(".gitea/workflows/ci.yml").contains(&"ci-run-golden".to_string()));
+        assert!(due("docs/x.md").is_empty(), "{:?}", due("docs/x.md"));
+    }
+
     #[test]
     fn graph_every_file_the_hand_lists_named_before_the_move_still_marks_its_generator() {
         // The two paths WP-7 moved out of `paths` into `reads` (docs/generators.toml history: scripts/notices.sh in the three notices
