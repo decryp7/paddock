@@ -389,3 +389,28 @@ test('C99 dependency scan finds SecKeychainSetUserInteractionAllowed in the real
   assert.ok(!sourceScan(g).findings.some((f) => /security-framework/.test(f.what)), 'with the binding allowed it is not reported');
   assert.deepEqual(graphFindings(g), [], 'and Pitwall has no unreviewed parent');
 });
+
+// A dead network must fail in minutes, not hold the job for the 15 minutes of one spawn limit (CI run 9395). The probe gives
+// cargo its own network limits and fetches both Apple targets in one call (ER-12, ER-27, ER-33).
+test('C99 probe: one cargo fetch for all targets with cargo network limits, and a dead network is a named not-measured', () => {
+  const calls = [];
+  const spawn = (cmd, args, opts) => (calls.push({ cmd, args, opts }), { status: 0, stdout: '{}', stderr: '' });
+  probeWorkspace('/x', { spawn, env: { PATH: '/bin' } });
+  const fetches = calls.filter((c) => c.args[0] === 'fetch');
+  assert.equal(fetches.length, 1, 'one fetch call, not one per target');
+  assert.deepEqual(fetches[0].args.filter((a, i, all) => all[i - 1] === '--target'), MACOS_TARGETS);
+  assert.equal(fetches[0].opts.env.CARGO_NET_RETRY, '1');
+  assert.equal(fetches[0].opts.env.CARGO_HTTP_TIMEOUT, '20');
+  assert.ok(fetches[0].opts.timeout <= 120_000, 'the fetch limit is a hang detector of about two minutes');
+  // A value the caller already set wins (ER-47: the child inherits, and only fills what is missing).
+  calls.length = 0;
+  probeWorkspace('/x', { spawn, env: { CARGO_NET_RETRY: '5' } });
+  assert.equal(calls.find((c) => c.args[0] === 'fetch').opts.env.CARGO_NET_RETRY, '5');
+  // Both ways a dead network shows: the spawn limit ends cargo, or cargo gives up after its retries.
+  for (const r of [{ status: null, error: Object.assign(new Error('spawnSync cargo ETIMEDOUT'), { code: 'ETIMEDOUT' }) }, { status: 101, stderr: 'warning: spurious network error (1 try remaining): transfer too slow\nerror: failed to get `serde`' }]) {
+    const p = probeWorkspace('/x', { spawn: () => r, env: {} });
+    assert.match(p.broken, /^cargo fetch: network timeout talking to the registry \(crates\.io, dev\.decryptology\.net\); retry the job/);
+  }
+  // Any other failure keeps its own cause.
+  assert.match(probeWorkspace('/x', { spawn: () => ({ status: 101, stderr: 'error: the lock file needs to be updated' }), env: {} }).broken, /needs to be updated/);
+});

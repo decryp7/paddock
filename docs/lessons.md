@@ -4669,3 +4669,25 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   `::notice::` line names each accepted job; a failing, cancelled, skipped or missing step, a failure line, a log that stops early, or an unreadable
   log (not measured, never a pass: ER-33) still blocks. Replay shapes `lost-report-rerun` (9388) and `failing-step-rerun` (9280). Gitea's raw log has no
   per-step result line for a main step (only `Success - Post ...`), so the step results come from the job's step records.
+
+## Files moved and the path registers still named the old path (2026-11-28, feat/moved-path-check, C183)
+- **What happened.** During the paddock-dev split, files moved twice and registers keyed by path kept the old path: conformance's `mention` lines and
+  `conformance/ci/checkout-profiles.txt`, the `ci-runs-reader:` test list and paddock.ci.json `hostTests` entries. Only a full conformance run saw it, and each
+  time it cost a gate round (user, 2026-11-28, in chat). The conformance engine's allow lists and baselines already follow a rename
+  (`baseline::renames`); the hand-kept registers did not.
+- **Fix.** C183 (report-only, ER-41) reads git's own rename detection for the change range once (`git diff --name-status -M`, `Git::moves`, ER-42) and
+  names every line of the declared path registers (`c183::REGISTERS`, one list, ER-22) that still has an old path: "moved to <new path>" or "deleted", with
+  file:line. The push gate's `moved-paths` row runs it only when the push renames or deletes a file. Cost: docs/benchmarks.md, "the moved-path row in the
+  push gate".
+
+## A row's child queued behind the rows that spawned it, and the gate called it run time (2026-11-28, fix/gate-rows-child-queue)
+- **What happened.** The member gate's `goldens` row took 424 to 589 s although its build was 12 to 23 s. The row starts `./dev gen check`
+  without the gate's `--priority train`, so the child's throttled build queued at normal priority while every train-lane row overtook it.
+  The row is not heavy, so no `throttle` timed it: `row-timings.tsv` counted the queue as run time, and the watchdog (a build's output is
+  buffered by `gen check`) saw "no unit finished for ~313 s, 0.1 s CPU" and could have stopped a row that was only waiting. The class is
+  "throttle queue time counted as run time": train i's row study (64% queue) and member-audits' 156 s and 370 s queues are earlier instances.
+- **Fix.** Every row whose `./dev` child takes a slot (`gates::SLOT_TAKING_DEV_COMMANDS`) passes `Priority::args()` on; a test reads the
+  planner's rows against that list. Such a row gets a per-row status file (`THROTTLE_STATUS_FILE`); throttle appends queued, admitted and done
+  as JSON lines (`paddock_throttle::status`, one definition for writer and reader, no text parsing, ER-42). The watchdog judges a queued child
+  as waiting, the row cap and the table leave the queue out of run time, and a wait is not quiet time in the stall report. Such a row is never
+  heavy itself (a test asserts it, ER-43). Cost and numbers: docs/benchmarks.md, "Gate rows whose child queues".

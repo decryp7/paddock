@@ -55,6 +55,15 @@ through sccache waits idle while the sccache server (not in the tree) compiles, 
 and then waits, and a test waiting on a network or a container is idle. A caller sets `--stall` from the longest quiet gap it measured
 for its step, with a wide margin (several times that gap; minutes, not seconds), and records the measurement next to the value.
 
+**Queue status, `THROTTLE_STATUS_FILE`.** A caller that wraps a command whose children queue for a slot of their own (the push gate's
+`goldens` row starts `./dev gen check`, whose builds go through throttle) names a file in this variable. Every `throttle run` below it
+appends one JSON line per event: `{"event":"queued","id","agent","at_ms"}` when it asks for a slot, `{"event":"admitted","id","queued_secs","at_ms"}`
+when it holds one, `{"event":"done","id","ran_secs","code","at_ms"}` when it ends (a run that never got a slot ends with `ran_secs` 0 and its
+exit code). The caller reads the file through `paddock_throttle::status::read` (the one definition of the lines, no log text is parsed,
+ER-42): a child that is `queued` is waiting for a slot, never stuck, and the queue seconds are told from the run seconds. A file that cannot be
+written is skipped and the run goes on; a reader that cannot read it says "not measured", never "waiting" (ER-33). A run inside a held slot
+(`THROTTLE_HELD`) queues for nothing and writes nothing.
+
 ## The slot locks: kernel file locks held by handle (user decision, 2026-11-26)
 
 A slot is an open file with an exclusive advisory lock: `std::fs::File::try_lock`, which is `flock` on macOS and Linux and `LockFileEx` on
@@ -225,6 +234,7 @@ the user installs, or a stable path the wrapper finds). `HEAVY_LOCK_DIR` is igno
 | a run inside a run | `THROTTLE_HELD` (`<run id>:<pid>`), set by throttle for its command: a throttle run that inherits it while that holder lives runs inside its slot, with no ticket and no queue (ER-43: `./dev throttle -- ./dev gen check` once held the only slot for 36 min while its inner steps queued for it) | not set |
 | cores counted against the load | `THROTTLE_CPUS` | the OS's count |
 | wait for the command's output pipes after it exited (ms) | `THROTTLE_DRAIN_MS` | 500 |
+| the queue status file of the caller's row: every run below it appends `queued`, `admitted` and `done` as JSON lines | `THROTTLE_STATUS_FILE` | not set: nothing is written |
 | hang detector: no output and no CPU for this many seconds ends the command (exit 81) | `THROTTLE_STALL` (`--stall`) | off |
 | the folder of the run logs is `<this>/runs` | `PADDOCK_DEV_TARGETS`, else git config `paddock.worktreeRoot`'s parent, else `PADDOCK_WORKTREE_ROOT`'s | `<lock folder>/runs` |
 | correlation id | `DEVKIT_RUN_ID` is reused as the run id and passed to the command | made per run |

@@ -528,6 +528,34 @@ enum MutantsCommand {
     Plan(MutantsPlanArgs),
     /// Print the pinned cargo-mutants version (`mutants_gate::PIN`): the one definition mutants.yml installs it from.
     Pin,
+    /// The record job of mutants.yml: per planned shard, whether it measured all of its slice, part or nothing (read from each shard job's
+    /// result line through the Actions API; token PLAN_TOKEN or GITEA_TOKEN). Exit 0 whatever it finds (report-only).
+    Record(MutantsRecordArgs),
+}
+
+#[derive(Args)]
+struct MutantsRecordArgs {
+    /// The run whose shard jobs are read (default: GITHUB_RUN_ID).
+    #[arg(long)]
+    run: Option<u64>,
+    /// The base of the run's diff.
+    #[arg(long)]
+    base: String,
+    /// The run's head commit.
+    #[arg(long)]
+    head: String,
+    /// The plan's mutant count.
+    #[arg(long)]
+    count: usize,
+    /// The mutants the plan chose (at most `mutants_gate::MAX_PER_LANDING`).
+    #[arg(long)]
+    selected: usize,
+    /// The plan's slice count (`n` of every `k/n`).
+    #[arg(long)]
+    slices: usize,
+    /// The plan's shards, its JSON list of `k/n` (the matrix of mutants.yml).
+    #[arg(long)]
+    shards: String,
 }
 
 #[derive(Args)]
@@ -936,6 +964,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Mutants {
             command: MutantsCommand::Plan(a),
         } => mutants_gate::command_plan(a.root, &a.base),
+        Command::Mutants {
+            command: MutantsCommand::Record(a),
+        } => mutants_gate::record::command_record(a.run, &a.base, &a.head, a.count, a.selected, a.slices, &a.shards),
         Command::Mutants {
             command: MutantsCommand::Pin,
         } => Ok(Report::new(serde_json::json!({"pin": mutants_gate::PIN}), mutants_gate::PIN)),

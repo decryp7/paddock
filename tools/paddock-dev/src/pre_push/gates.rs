@@ -52,6 +52,10 @@ pub struct Gate {
     /// The row runs CI's own tests (the member gate's `tests <ws>`): its child gets CI's job environment
     /// ([`crate::ci_run::job_env`]) less the secrets, not the [`crate::child_env::PASS`] list of the other rows.
     pub ci_env: bool,
+    /// The row starts a `./dev` child that queues for a `throttle` slot of its own ([`SLOT_TAKING_DEV_COMMANDS`]): the executor names a
+    /// queue status file for it ([`paddock_throttle::status`]) so its wait is told from its run. Never set with [`Gate::heavy`]: a row that
+    /// holds a slot while its child waits for another breaks ER-43.
+    pub children_queue: bool,
 }
 
 impl Gate {
@@ -150,6 +154,9 @@ pub struct Facts {
     pub goldens: Result<Vec<String>, String>,
     /// The packages both the member and main changed, when `merge sync-member` asked (`--overlap-since`; [`super::overlap`]).
     pub overlap: super::overlap::Overlap,
+    /// Who this run's steps are for: a train run's rows pass it on to every `./dev` child that takes a `throttle` slot of its own
+    /// ([`SLOT_TAKING_DEV_COMMANDS`]), so the child queues in the lane of its row and not behind it.
+    pub priority: crate::priority::Priority,
 }
 
 /// The reason of every row an inactive app's set leaves out: a skip with this reason is never a pass ([`super::render_timed`]
@@ -193,6 +200,9 @@ pub struct Change {
     pub ranges: Vec<String>,
     /// The commit the files were measured from. `None`: unknown, and the checks that judge only what the push adds run in full.
     pub base: Option<String>,
+    /// The change renames or deletes at least one file (git's `-M` against the base): the `moved-paths` row runs only then. `false` for a
+    /// list of files the caller gave (`--files`), which has no base to measure from.
+    pub moved: bool,
 }
 
 /// The rows that do not depend on a workspace, as the pass record stores them (`known::write_record`): a record made by a tool with
@@ -207,6 +217,7 @@ pub const ROW_SET: &[&str] = &[
     "job-model",
     "locks-guard",
     "member-audits",
+    "moved-paths",
     "pitwall-deny",
     "pitwall-scripts",
 ];
@@ -217,6 +228,22 @@ pub const PER_WORKSPACE_PREFIXES: &[&str] = &["fmt ", "lockfile ", "clippy ", "c
 
 /// Workspaces whose lints are not a push gate: they have a CI job of their own that is not part of a branch run.
 const OWN_JOB: &[&str] = &["/fuzz", "/templates/"];
+
+/// The `./dev` subcommands whose own steps take a `throttle` slot (they start builds through [`crate::heavy_tool`]): the one list of
+/// the rows that have to pass the run's priority on and that are watched by the queue status channel ([`Gate::children_queue`]). A
+/// subcommand is added here when it starts `throttle run`; `./dev gen check` does (its heavy generators, generators/run.rs). A test
+/// reads the planner's rows against it, so a row added with a slot-taking child and no priority is a red test, not a slow gate.
+pub const SLOT_TAKING_DEV_COMMANDS: &[&[&str]] = &[&["gen", "check"]];
+
+/// `g`, a `./dev` row whose child takes a `throttle` slot of its own: the run's priority is passed on (`--priority train`, nothing for a
+/// normal run) so the child queues in the lane of the row's run, and the executor is told to watch its queue
+/// ([`Gate::children_queue`]). The row is never heavy itself (ER-43: it would hold a slot while its child waits for another).
+fn slot_child(facts: &Facts, mut g: Gate) -> Gate {
+    debug_assert!(!g.heavy, "a row with a slot-taking child must not hold a slot itself (ER-43)");
+    g.args.extend(facts.priority.args().iter().map(|a| a.to_string()));
+    g.children_queue = true;
+    g
+}
 
 /// `g` run by this program ([`Facts::dev_exe`]), or not measured when it cannot be started again: never a guessed `./dev`, never
 /// a test program (whose harness would take the arguments as test filters and run its tests again).
@@ -250,6 +277,7 @@ fn gate(id: String, cwd: &str, program: &str, args: &[&str], rank: u8, next: Str
         progress: super::progress::Progress::Lines,
         build_dir: None,
         ci_env: false,
+        children_queue: false,
     }
 }
 
@@ -506,6 +534,7 @@ fn plan_rows(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
         });
     }
     out.push(locks_guard(change, facts));
+    out.push(moved_paths(change, facts));
     // C100 (ADR 0060) on every push, like the conformance row (ER-41; ER-42: a hand list of its inputs missed apps/*/paddock.ci.json,
     // so that is not kept). Checks landed unwired on 2026-11-12 (four) and 2026-11-17 (C138). `./dev gates check` is CI's own command;
     // 5 to 8 s, in parallel with the conformance tests (docs/benchmarks.md, "C100 in the push gate"). It blocks from its first run:
@@ -941,6 +970,34 @@ fn locks_guard(change: &Change, facts: &Facts) -> Planned {
     )
 }
 
+/// The moved-path row (C183, user decision 2026-11-28): a push that renames or deletes a file runs the one check that finds the path
+/// registers still naming it, in seconds, before the full conformance run would (ER-9, ER-53: only a full conformance run caught it,
+/// twice in the paddock-dev split, one gate round each). Report-only until its first green run (ER-41): the check prints warnings and
+/// the row passes. The row is `./dev check run --only C183`; the same check also runs in the conformance row on every push.
+fn moved_paths(change: &Change, facts: &Facts) -> Planned {
+    if !change.moved {
+        return Planned::Skip {
+            id: "moved-paths".into(),
+            reason: "the push renames and deletes no file (git rename detection against the base)".into(),
+        };
+    }
+    dev_run(
+        facts,
+        Gate {
+            args: strs(&["check", "run", "--only", "C183"]),
+            env: approval_stage_env(facts),
+            ..gate(
+                "moved-paths".into(),
+                "",
+                "",
+                &[],
+                0,
+                "a path register still names a file this push renamed or deleted: the warning names the register line and `moved to <new path>` or `deleted`; edit that line (C183, docs/gates.toml)".into(),
+            )
+        },
+    )
+}
+
 /// The golden row (ER-21: three times in two days a change altered what a generated golden records, the push passed because it ran no
 /// golden test, and only a CI trial went red): `./dev gen check --only <ids>` for the golden entries of `docs/generators.toml` the change
 /// reaches ([`Facts::goldens`]; each entry declares its inputs, `golden = true`). Each runs its golden tests and, on a stale golden,
@@ -960,20 +1017,23 @@ fn goldens(facts: &Facts) -> Planned {
         },
         Ok(ids) => dev_run(
             facts,
-            Gate {
-                args: strs(&["gen", "check", "--only", &ids.join(",")]),
-                ..gate(
-                    "goldens".into(),
-                    "",
-                    "",
-                    &[],
-                    3,
-                    format!(
-                        "a golden is stale: the line above names the test and its bless command (the `regenerate` of {} in docs/generators.toml); run it on your machine, review the diff and commit it with the change",
-                        ids.join(", ")
-                    ),
-                )
-            },
+            slot_child(
+                facts,
+                Gate {
+                    args: strs(&["gen", "check", "--only", &ids.join(",")]),
+                    ..gate(
+                        "goldens".into(),
+                        "",
+                        "",
+                        &[],
+                        3,
+                        format!(
+                            "a golden is stale: the line above names the test and its bless command (the `regenerate` of {} in docs/generators.toml); run it on your machine, review the diff and commit it with the change",
+                            ids.join(", ")
+                        ),
+                    )
+                },
+            ),
         ),
     }
 }

@@ -38,7 +38,7 @@ jobs:
     outputs:
       run: ${{ steps.decide.outputs.run }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # A train run is dispatched at once and waits here, on Linux, until no older run holds the Mac or Windows runner it
       # needs (./dev ci runner-wait); the queued run is what scheduled runs yield to. Other events: nothing.
       - uses: ./.gitea/actions/runner-wait
@@ -64,7 +64,7 @@ jobs:
       # This job's VMs only: the leftover check below never sees another job's VM on the same Mac (job isolation).
       PADDOCK_VM_PREFIX: paddock-smoke-${{ github.run_id }}-${{ github.run_attempt }}-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # The job's own temp folder and socket folder (ER-14): nothing of the smoke lands in the runner user's temp folder.
       - uses: ./.gitea/actions/job-tmpdir
