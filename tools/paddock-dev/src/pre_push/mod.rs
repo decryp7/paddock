@@ -785,7 +785,13 @@ fn accepted_ids(option: &[String], env: &HashMap<String, String>) -> Vec<String>
 }
 
 /// The folder for this checkout's gate logs and override log: `<git common dir>/paddock-pre-push`.
+///
+/// `PADDOCK_PREPUSH_STATE` replaces it (a test's own folder, so it never waits for a build-folder lock a real gate of this checkout holds,
+/// ER-14, ER-51); the run, the test cache and the slow-row records all read it through here.
 pub(crate) fn state_dir(root: &Path) -> PathBuf {
+    if let Some(own) = crate::places::state_override("PADDOCK_PREPUSH_STATE") {
+        return own;
+    }
     git_text(root, &["rev-parse", "--path-format=absolute", "--git-common-dir"])
         .map(|t| PathBuf::from(t.trim()))
         .unwrap_or_else(|| root.join(".git"))

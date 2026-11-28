@@ -177,12 +177,16 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   (6, not held, while a slow row is unfinished or missing). A run with `--set fast` or `--set slow` leaves no whole-run pass record. The
   Linux tests are CI's Linux jobs on d-gtr9. A push or member gate prints a per-row table (queued s, run s, concurrent) and writes
   `row-timings.tsv` in its log folder.
-- **Mutation-testing of the diff (user decision 127, 2026-11-27).** The member gate's `mutants` row (`./dev mutants gate --base <merge base>`,
-  tools/paddock-dev/src/mutants_gate.rs) runs the pinned cargo-mutants (`mutants_gate::PIN`; install it with `cargo install cargo-mutants
-  --version <PIN> --locked`, nothing installs it for you) `--in-diff` over the Rust functions changed in `tools/paddock-dev` and `crates/`, to find
-  a test or a guard that never reaches the code it claims to check. A MISSED mutant is a `::warning::` naming the function and the mutation;
-  timeouts, unviable mutants and a run cut by the cap are counted apart and never a pass. Report-only until its first green run (the
-  `row:mutants` entry of docs/gates.toml, `MODE`); skipped in a developer's push. Measured: docs/benchmarks.md.
+- **Mutation-testing of the diff (user decisions 127 and 143, 2026-11-27 and 11-28).** `.gitea/workflows/mutants.yml` (Linux; a push to main
+  after a landing and `workflow_dispatch` with a `base`; report-only; **not in ci.yml**: its shards held the Linux runner and made trains queue
+  43 to 62 minutes) runs the pinned cargo-mutants (`mutants_gate::PIN`, `./dev mutants pin`, `cargo install --locked`) `--in-diff` over the Rust
+  functions the landing changed in `tools/paddock-dev` and `crates/` (tools/paddock-dev/src/mutants_gate.rs), to find a test or a guard that never
+  reaches the code it claims to check. Its plan job counts the diff's mutants (`./dev mutants plan --base <rev>`) and plans one shard for each 6 of
+  them (at most 12); the shards run one at a time (`./dev mutants gate --base <rev> --shard k/n`), and the plan and each shard first end at once
+  while a train is in CI (`./dev ci schedule-skip --any-event`: nothing waits on a slot), saying so in the record line. A MISSED mutant is a
+  `::warning::` naming the function and the mutation; timeouts, unviable mutants and a shard that ran out of time are counted apart and never a
+  pass. Report-only until its first green run (`MODE`, review 2026-12-11). Locally: `./dev mutants gate --base <rev>` (pin installed by hand).
+  Measured: docs/benchmarks.md.
 - Before committing, the gates of the affected projects, for example:
 
   ```sh

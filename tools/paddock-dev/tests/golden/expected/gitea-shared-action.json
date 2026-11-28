@@ -21,6 +21,7 @@
  },
  "packages": {},
  "cargoOnly": [],
+ "gradePackages": {},
  "why": {
   "app:x": [
    ".gitea/actions/node-caches/action.yml used by .gitea/workflows/x.yml"
