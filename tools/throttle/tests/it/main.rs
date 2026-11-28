@@ -3,6 +3,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 mod capture;
 mod filelock;
+mod leak;
 mod places;
 mod procutil;
 mod real;

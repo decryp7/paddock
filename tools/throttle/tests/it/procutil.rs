@@ -70,6 +70,34 @@ pub struct World {
     pub dir: tempfile::TempDir,
 }
 
+/// A test that ends, by a panic too, releases every holder of its world and shows that none is left: nothing started with this world's
+/// folder in its command line may outlive it (ER-14, ER-51). A survivor is ended by its identity and fails the test.
+impl Drop for World {
+    fn drop(&mut self) {
+        self.release();
+        let dir = self.dir.path().to_path_buf();
+        let end = Instant::now() + Duration::from_secs(10);
+        let mut left = leaked_in(&dir);
+        while !left.is_empty() && Instant::now() < end {
+            // conformance: hang-guard — a poll of the holders ending after the release, bounded by 10 s
+            std::thread::sleep(Duration::from_millis(50));
+            left = leaked_in(&dir);
+        }
+        if left.is_empty() {
+            return;
+        }
+        for id in &left {
+            paddock_proc::end(*id);
+        }
+        let msg = format!("test left {} process(es) running that mention {}", left.len(), dir.display());
+        if std::thread::panicking() {
+            eprintln!("{msg}");
+        } else {
+            panic!("{msg}");
+        }
+    }
+}
+
 impl World {
     pub fn new() -> World {
         World {
@@ -124,8 +152,32 @@ impl World {
     }
 }
 
-/// The command a holder runs: waits for the flag file, then appends its name to the output file.
-pub const HOLD: &str = r#"while [ ! -e "$0" ]; do sleep 0.1; done; echo "$2" >> "$1""#;
+/// The shell loop every test holder runs, written once: it waits for the file named by `$<var>` and ends on its own when the flag's
+/// folder is gone (the test's temp folder was deleted, so the flag can never appear) or after `${HOLD_MAX:-3000}` polls of 0.1 s
+/// (at least 5 minutes; the slowest throttle test takes under 30 s, 40 s is the longest wait, ER-12). A holder that nobody released
+/// (a test that panicked) ended up polling for ever with parent pid 1. Afterwards `[ -e <flag> ]` tells released from given up.
+#[macro_export]
+macro_rules! wait_flag_loop {
+    ($flag:literal, $dir:literal) => {
+        concat!(
+            r#"hold_n=0; while [ ! -e ""#,
+            $flag,
+            r#"" ] && [ -d ""#,
+            $dir,
+            r#"" ] && [ "$hold_n" -lt "${HOLD_MAX:-3000}" ]; do sleep 0.1; hold_n=$((hold_n+1)); done"#
+        )
+    };
+}
+
+/// The command a holder runs: waits for the flag file (see [`wait_flag_loop`]), then appends its name to the output file; a holder that
+/// gave up writes nothing.
+pub const HOLD: &str = concat!(crate::wait_flag_loop!("$0", "${0%/*}"), r#"; [ -e "$0" ] && echo "$2" >> "$1""#);
+
+/// The processes of other tests or of the machine never match: the marker is this world's own folder name, unique to the run.
+/// Identities (pid plus start time), never bare pids (rule 53).
+pub fn leaked_in(dir: &Path) -> Vec<paddock_proc::ProcessId> {
+    paddock_proc::processes_mentioning(&dir.to_string_lossy())
+}
 
 /// Base environment of a test run of throttle or the shell plock: fast polling, a private lock folder, a private home. `TestCommand`
 /// starts from an empty environment, so no `THROTTLE_*`, `CI` or `CARGO_TARGET_DIR` of the machine reaches the child (no deny-list).

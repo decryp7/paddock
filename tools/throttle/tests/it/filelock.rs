@@ -53,7 +53,11 @@ mod real {
         let w = World::new();
         let (flag, done) = (w.flag(), w.path("bg.done"));
         // The background loop writes `bg.done` only after the flag appears, so a missing file while Q runs says it still lives.
-        let script = r#"( while [ ! -e "$0" ]; do sleep 0.1; done; : > "$1" ) >/dev/null 2>&1 &"#;
+        let script = concat!(
+            "( ",
+            crate::wait_flag_loop!("$0", "${0%/*}"),
+            r#"; [ -e "$0" ] && : > "$1" ) >/dev/null 2>&1 &"#
+        );
         let (code, _, e) = heavy_out(
             &w,
             &[
@@ -92,7 +96,7 @@ mod real {
         let flag = w.flag();
         let mut child = Guard {
             child: paddock_testkit::TestCommand::new("sh")
-                .args(["-c", r#"while [ ! -e "$0" ]; do sleep 0.1; done"#, flag.to_str().unwrap()])
+                .args(["-c", crate::wait_flag_loop!("$0", "${0%/*}"), flag.to_str().unwrap()])
                 .spawn()
                 .expect("spawn sh"),
             label: "child that outlives the handle".into(),
