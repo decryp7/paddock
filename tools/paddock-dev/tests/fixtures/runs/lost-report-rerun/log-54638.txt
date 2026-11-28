@@ -1,0 +1,15 @@
+2026-11-28T06:33:48.7230809Z Job: crate
+2026-11-28T06:35:59.7443789Z [32;1m    Starting[0m [1m1793[0m tests across [1m51[0m binaries ([1m2[0m tests [33;1mskipped[0m)
+2026-11-28T06:36:16.7921196Z [32;1m     Summary[0m [  17.048s] [1m1793[0m tests run: [1m1793[0m [32;1mpassed[0m, [1m2[0m [33;1mskipped[0m
+2026-11-28T06:36:23.3282776Z Success - Post ./.gitea/actions/job-isolation
+2026-11-28T06:36:23.3589922Z Success - Post ./.gitea/actions/sccache-stats
+2026-11-28T06:36:23.3879068Z Success - Post ./.gitea/actions/host-tools
+2026-11-28T06:36:23.4199692Z Success - Post ./dev tool cache
+2026-11-28T06:36:23.4446535Z Success - Post ./.gitea/actions/setup-rust
+2026-11-28T06:36:23.4761883Z Success - Post ./.gitea/actions/build-folder
+2026-11-28T06:36:23.5122690Z Success - Post ./.gitea/actions/job-isolation
+2026-11-28T06:36:23.5499269Z Success - Post ./dev tool cache
+2026-11-28T06:36:23.5773651Z Success - Post ./.gitea/actions/build-jobs
+2026-11-28T06:36:23.8051803Z Success - Post actions/checkout@v4
+2026-11-28T06:36:29.9779180Z Cleaning up container for job crate (ubuntu-latest, 3/3)
+2026-11-28T06:36:30.9126050Z Job succeeded

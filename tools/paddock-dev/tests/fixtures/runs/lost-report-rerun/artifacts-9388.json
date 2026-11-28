@@ -1,0 +1,40 @@
+{
+  "artifacts": [
+    {
+      "id": 95627,
+      "name": "plan-record",
+      "size_in_bytes": 6907,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/artifacts/95627",
+      "archive_download_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/artifacts/95627/zip",
+      "expired": false,
+      "workflow_run": {
+        "id": 9388,
+        "url": "",
+        "previous_attempt_url": null,
+        "html_url": "",
+        "jobs_url": "",
+        "logs_url": "",
+        "artifacts_url": "",
+        "cancel_url": "",
+        "rerun_url": "",
+        "display_title": "",
+        "path": "",
+        "event": "",
+        "run_attempt": 0,
+        "run_number": 0,
+        "repository_id": 426,
+        "head_sha": "0cb6996371efe231ea60f67459cc78eb11e9eccc",
+        "status": "",
+        "pull_requests": null,
+        "created_at": "0001-01-01T00:00:00Z",
+        "updated_at": "0001-01-01T00:00:00Z",
+        "started_at": "0001-01-01T00:00:00Z",
+        "completed_at": "0001-01-01T00:00:00Z"
+      },
+      "created_at": "2026-11-28T14:27:16+08:00",
+      "updated_at": "2026-11-28T14:27:16+08:00",
+      "expires_at": "2026-12-12T14:27:16+08:00"
+    }
+  ],
+  "total_count": 1
+}

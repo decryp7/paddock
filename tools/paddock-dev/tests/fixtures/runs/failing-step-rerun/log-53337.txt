@@ -1,0 +1,17 @@
+2026-11-27T15:25:04.4427099Z Job: paddock-dev
+2026-11-27T15:29:54.7499488Z [32;1m    Starting[0m [1m801[0m tests across [1m3[0m binaries ([1m1675[0m tests [33;1mskipped[0m, including [1m97[0m tests via [1mprofile.ci.default-filter[0m)
+2026-11-27T15:33:25.8361488Z [32;1m     Summary[0m [ 211.089s] [1m801[0m tests run: [1m801[0m [32;1mpassed[0m, [1m1675[0m [33;1mskipped[0m
+2026-11-27T15:33:39.0710702Z Success - Post ./.gitea/actions/job-isolation
+2026-11-27T15:33:39.0748178Z Success - Post ./.gitea/actions/sccache-stats
+2026-11-27T15:33:39.0785429Z Success - Post ./.gitea/actions/prune-build-folder
+2026-11-27T15:33:39.0825330Z Success - Post ./.gitea/actions/host-tools
+2026-11-27T15:33:39.0895497Z Success - Post ./dev tool cache
+2026-11-27T15:33:39.0920971Z Success - Post ./.gitea/actions/setup-rust
+2026-11-27T15:33:39.0962435Z Success - Post ./.gitea/actions/build-folder
+2026-11-27T15:33:39.1003777Z Success - Post ./.gitea/actions/kept-clone
+2026-11-27T15:33:39.1020964Z Success - Post ./.gitea/actions/job-isolation
+2026-11-27T15:33:39.1075026Z Success - Post ./dev tool cache
+2026-11-27T15:33:39.1096353Z Success - Post ./.gitea/actions/build-jobs
+2026-11-27T15:33:42.2002963Z Success - Post actions/checkout@v4
+2026-11-27T15:33:42.7503475Z Cleaning up container for job paddock-dev (windows-latest)
+2026-11-27T15:33:43.9031987Z Job succeeded

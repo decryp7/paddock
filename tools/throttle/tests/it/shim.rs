@@ -18,13 +18,14 @@ struct Rig {
 }
 
 /// The stand-in `cargo`: prints what it was given and what the shim told it, then waits for the flag file when `WAIT_FLAG` is set.
-const STAND_IN: &str = r#"#!/bin/sh
-echo "real-cargo $*"
-echo "held=${THROTTLE_HELD:-none}"
-if [ -n "$WAIT_FLAG" ]; then while [ ! -e "$WAIT_FLAG" ]; do sleep 0.1; done; fi
-if [ -n "$STAND_SLEEP" ]; then exec sleep "$STAND_SLEEP"; fi
+const STAND_IN: &str = concat!(
+    "#!/bin/sh\necho \"real-cargo $*\"\necho \"held=${THROTTLE_HELD:-none}\"\nif [ -n \"$WAIT_FLAG\" ]; then ",
+    crate::wait_flag_loop!("$WAIT_FLAG", "${WAIT_FLAG%/*}"),
+    "; fi\n",
+    r#"if [ -n "$STAND_SLEEP" ]; then exec sleep "$STAND_SLEEP"; fi
 exit "${STAND_EXIT:-0}"
-"#;
+"#
+);
 
 fn exe(path: &Path, text: &str) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
