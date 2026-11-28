@@ -23,11 +23,27 @@ them). The store is on a slow disk, so a timeout of one request is normal, and a
 
 The fail-open rule itself is unchanged: a target without an answer runs, never the other way round.
 
-## Addendum, 2026-11-28 (user): writes and deletes are per key too
+## Addendum, 2026-11-28 (user, 2026-11-28, in chat): writes and deletes are per key, 2 at a time, with backed-off retries
 
 Run 9350 (crate, windows-latest): the selfcheck passed, then one record PUT timed out after 5015 ms and the one atomic write lost every record
-of the leg ("records not stored: curl failed: curl: (28)"). `Store::put_many` and `Store::delete_many` now return one result per key; a PUT or
-DELETE with no answer or a 5xx is tried once more alone (the same `fetch_each` as the lookup), and a record that still fails is the only one lost,
-with its cause counted in the warning (`N of M records not stored: K x <cause>`). Writes run after the tests, so their request limit
-(`WRITE_REQUEST_SECS`) and parallelism (`WRITE_PARALLEL`) are set apart from the reads', each with its measured cause beside the constant (ER-12),
-from `./dev ci test-cache probe --shared` (the workflow `test-cache-probe.yml` runs it on every OS by hand).
+of the leg ("records not stored: curl failed: curl: (28)"). Accepted by the user:
+
+- `Store::put_many` and `Store::delete_many` return one result per key. A record that still fails is the only one lost, with its cause counted in
+  the warning (`N of M records not stored: K x <cause>`).
+- Writes and deletes run **2 in parallel** (`WRITE_PARALLEL`; lookups keep 16) with a request limit of 30 s (`WRITE_REQUEST_SECS`; reads keep 5 s).
+- A write or delete that gets 503, another 5xx or no answer is retried **up to 3 times, after 1, 3 and 9 s** (`WRITE_RETRY_WAITS`), each time only for
+  the requests that still failed. **Reads keep one retry with no wait.**
+
+Cause (ER-12), measured on 2026-11-28 against the real RustFS on a spinning disk (user decision 136), 400 to 451-byte records, machine load 7 to 24
+(`ci test-cache probe --shared`, and the same PUTs by hand): the server answers 503 to PUTs in flight together.
+
+| PUTs in parallel | 503 answers | longest PUT |
+|---|---|---|
+| 16 | 30, 32 and 37 of 61; 32 of 50 | 15.6 to 18 s |
+| 8 | 18 and 21 of 61 | 12.8 s |
+| 4 | 2, 1 and 4 of 50 or 61 | 9.9 to 11.3 s |
+| 2 | none of 61 (median 3.4 s) | 9.1 s |
+| 1 | none | 3.3 s |
+
+Half the PUTs at 16 in parallel took more than 5 s, which is run 9350's timeout. The numbers are for the spinning disk; the probe
+(`.gitea/workflows/test-cache-probe.yml`, by hand on every OS) is run again after RustFS moves to NVMe, and the constants are revisited then.

@@ -21,11 +21,15 @@ use std::time::Duration;
 pub const BUCKET: &str = "test-results-paddock";
 /// Transfers of one lookup call in parallel.
 pub const PARALLEL: usize = 16;
-/// Transfers of one write or delete call in parallel. Measured against the real store on 2026-11-28 (61 PUTs of 400 bytes each, machine
-/// load 12-24, RustFS on a spinning disk, user decision 136): 16 in parallel gave 503 for 30, 32 and 37 of 61 PUTs (median 5.1-5.8 s, up to
-/// 15.6 s); 4 in parallel gave 503 for 2 and 1 of 61 (median 2.5-3.8 s, up to 9.9 s); one at a time gave 200 for all 20 (up to 2.8 s). A
-/// write waits for no one, so it takes the slower, quieter rate (ER-20, ER-48).
-pub const WRITE_PARALLEL: usize = 4;
+/// Transfers of one write or delete call in parallel. Measured against the real store on 2026-11-28 (RustFS on a spinning disk, user decision
+/// 136; machine load 7-24; 61 PUTs of 400 bytes, and the probe's 50 of 451): the server answers 503 to PUTs in flight together. 16 in
+/// parallel gave 503 for 30, 32 and 37 of 61 and 32 of 50 (median 5.1-5.8 s, up to 18 s); 8 gave 18 and 21 of 61; 4 gave 2, 1 and 4 of 61 or
+/// 50 (up to 11 s); 2 gave none of 61 (median 3.4 s, up to 9.1 s); one at a time gave none (up to 3.3 s). A write waits for no one, so it takes
+/// the rate the server answers (ER-20, ER-48). Run again after the store moves to NVMe: the probe (`ci test-cache probe`) prints the table.
+pub const WRITE_PARALLEL: usize = 2;
+/// The waits before the retries of a write or delete that got no answer or a 5xx (RustFS answers 503 SlowDown under load): up to three retries,
+/// each only for the requests that still failed. Reads keep one retry with no wait: a lookup the run waits on fails open instead.
+pub const WRITE_RETRY_WAITS: [Duration; 3] = [Duration::from_secs(1), Duration::from_secs(3), Duration::from_secs(9)];
 /// The budget of one lookup request.
 pub const REQUEST_SECS: u64 = 5;
 /// The budget of one write or delete request (ER-12). It was [`REQUEST_SECS`]; run 9350 (crate, windows-latest) lost every record of the leg
@@ -36,9 +40,9 @@ pub const REQUEST_SECS: u64 = 5;
 pub const WRITE_REQUEST_SECS: u64 = 30;
 /// The budget of one lookup call (the whole lookup).
 pub const CALL_SECS: u64 = 60;
-/// The budget of one write or delete call: 61 PUTs at [`WRITE_PARALLEL`] took 57-83 s with their cleanup (same measurement), so four times
-/// that; a hang detector, not a speed limit (ER-12).
-pub const WRITE_CALL_SECS: u64 = 300;
+/// The budget of one write or delete call: 61 PUTs at [`WRITE_PARALLEL`] 2 take about 105 s (the measured median of 3.4 s each, 61 x 3.4 / 2;
+/// at 4 in parallel the same 61 took 57-83 s with their cleanup), so about six times that; a hang detector, not a speed limit (ER-12).
+pub const WRITE_CALL_SECS: u64 = 600;
 
 /// One transfer: URL, file the answer goes to, file to upload, method.
 /// What curl prints per transfer: status, redirect target, the output file.
@@ -220,7 +224,7 @@ impl Store for S3Store {
                 (self.url(&rel_path(&l.target, &l.class, &l.key)), self.body_path(i), None, "DELETE")
             })
             .collect();
-        let codes = fetch_each(&blocks, &mut |b| self.run_each(b));
+        let codes = fetch_retrying(&blocks, &mut |b| self.run_each(b), &WRITE_RETRY_WAITS, &std::thread::sleep);
         for &i in &todo {
             let _ = std::fs::remove_file(self.body_path(i));
         }
@@ -278,13 +282,19 @@ impl Store for S3Store {
     }
 
     fn put_many(&self, records: &[Record]) -> Vec<Result<(), StoreError>> {
-        self.put_with(records, &mut |b| self.run_each(b))
+        self.put_with(records, &mut |b| self.run_each(b), &WRITE_RETRY_WAITS, &std::thread::sleep)
     }
 }
 
 impl S3Store {
-    /// [`Store::put_many`] over the curl run `try_` (a test passes a fake one).
-    pub(super) fn put_with(&self, records: &[Record], try_: TryFn<'_>) -> Vec<Result<(), StoreError>> {
+    /// [`Store::put_many`] over the curl run `try_`, retrying after each of `waits` through `sleep` (a test passes fakes).
+    pub(super) fn put_with(
+        &self,
+        records: &[Record],
+        try_: TryFn<'_>,
+        waits: &[Duration],
+        sleep: &dyn Fn(Duration),
+    ) -> Vec<Result<(), StoreError>> {
         let all_fail = |e: StoreError| records.iter().map(|_| Err(StoreError(e.0.clone()))).collect::<Vec<_>>();
         if let Err(e) = std::fs::create_dir_all(&self.scratch) {
             return all_fail(StoreError(format!("{} cannot be made: {e}", self.scratch.display())));
@@ -306,7 +316,7 @@ impl S3Store {
             ));
         }
         // Per record, never per call: a PUT with no answer or a server error is tried once more alone, and only a record that still fails is lost.
-        let codes = fetch_each(&blocks, try_);
+        let codes = fetch_retrying(&blocks, try_, waits, sleep);
         for i in 0..records.len() {
             let _ = std::fs::remove_file(up(i));
             let _ = std::fs::remove_file(self.body_path(i));
@@ -418,10 +428,20 @@ impl S3Store {
     }
 }
 
-/// The status of every block, from one try and at most one more for the blocks that got no answer or a server error (status 0 or 5xx):
+/// [`fetch_retrying`] with one retry and no wait: what a lookup does.
+pub(super) fn fetch_each(blocks: &[Block], try_: TryFn<'_>) -> Vec<Result<u16, StoreError>> {
+    fetch_retrying(blocks, try_, &[Duration::ZERO], &|_| {})
+}
+
+/// The status of every block, from one try and then one more try per entry of `waits` (after `sleep` of that long) for the blocks that got no answer or a server error (status 0 or 5xx):
 /// per item, never per call (PRINCIPLES, bulk APIs: errors are per item unless the operation is atomic; ADR 0116 §5, amended
 /// 2026-11-28). `Err` is that item's cause. `try_` runs blocks and answers as [`S3Store::run_each`] does.
-pub(super) fn fetch_each(blocks: &[Block], try_: TryFn<'_>) -> Vec<Result<u16, StoreError>> {
+pub(super) fn fetch_retrying(
+    blocks: &[Block],
+    try_: TryFn<'_>,
+    waits: &[Duration],
+    sleep: &dyn Fn(Duration),
+) -> Vec<Result<u16, StoreError>> {
     // The answers per block, and whether the call failed whole.
     let one = |blocks: &[Block], try_: TryFn<'_>| match try_(blocks) {
         Ok((done, why)) => (
@@ -441,15 +461,21 @@ pub(super) fn fetch_each(blocks: &[Block], try_: TryFn<'_>) -> Vec<Result<u16, S
     };
     let (mut first, whole) = one(blocks, try_);
     // A call that failed whole (curl did not start, the call's budget ended, a redirect) is not retried: another 60 s would not help.
-    let retry: Vec<usize> = (0..blocks.len())
-        .filter(|&i| !whole && first[i].as_ref().map_or(true, |c| *c >= 500))
-        .collect();
-    if retry.is_empty() {
+    if whole {
         return first;
     }
-    let again: Vec<Block> = retry.iter().map(|&i| blocks[i].clone()).collect();
-    for (&i, r) in retry.iter().zip(one(&again, try_).0) {
-        first[i] = r;
+    for &wait in waits {
+        let retry: Vec<usize> = (0..blocks.len())
+            .filter(|&i| first[i].as_ref().map_or(true, |c| *c >= 500))
+            .collect();
+        if retry.is_empty() {
+            break;
+        }
+        sleep(wait);
+        let again: Vec<Block> = retry.iter().map(|&i| blocks[i].clone()).collect();
+        for (&i, r) in retry.iter().zip(one(&again, try_).0) {
+            first[i] = r;
+        }
     }
     first
 }
