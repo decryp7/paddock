@@ -102,6 +102,7 @@ uses it, results in
   | CI run 9371, 10 tests (`cargo-paddock-plugin::it test_command` 5, `paddock-plugin-host::it faults` 5) | try 1 stopped at 60.01 s to 60.02 s (TMT) all ten; try 2 passed in 37.4 s to 38.6 s, one in 45.8 s (`a_crashing_plugin_is_restarted_after_the_back_off_and_then_quarantined`). A cold CI build is therefore about 60 s plus the 38 s to 46 s the retry still needed, near 100 s |
   | P3: Pitcrew's `fake_runner` example, cold | 138.3 s |
   | P4: `debrief-store-worker`, cold, from the app's folder | 412.3 s |
+  | P4b: Debrief's `health::commands::tests::build_a_real_store_worker_...` as nextest ran it (the app's test program built, the worker not; the ci profile), cold in-test `cargo build -p debrief-store-worker` | 249.3 s for the test (try 1; it then failed at the link for want of `libduckdb` in the child's environment, a setup fault of this run, and passed in 5.9 s once `apps/debrief/.cargo/libduckdb.toml` named the library); the class's 1800 s held it where the ci profile's 90 s would have stopped it |
   | P5: the stand-in compile | 0.3 s |
   | The other builds in tests: `cargo-paddock-plugin` flow's tiny project, `paddock-testkit`'s one-file crate | 0.2 s to 1.2 s (warm folder, nextest's own times, run once) |
 
