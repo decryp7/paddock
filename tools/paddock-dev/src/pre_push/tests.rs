@@ -294,6 +294,8 @@ fn the_row_set_of_a_pass_record_is_every_fixed_row_the_planner_can_plan() {
             "apps/dyno/crates/dyno-core/src/a.rs".into(),
         ],
         ranges: vec!["abc..HEAD".into()],
+        // The moved-path row runs only for a push that renames or deletes a file.
+        moved: true,
         ..Change::default()
     };
     let mut f = facts();
