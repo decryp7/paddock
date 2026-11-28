@@ -36,7 +36,8 @@ pub fn is_exempt(uses: &str) -> bool {
 
 /// Whether a remote reference ends in `@` and a full 40-hex commit SHA (lower case, as `git` prints it).
 pub fn is_pinned(uses: &str) -> bool {
-    uses.rsplit_once('@').is_some_and(|(_, r)| r.len() == 40 && r.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+    uses.rsplit_once('@')
+        .is_some_and(|(_, r)| r.len() == 40 && r.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
 }
 
 /// One remote reference that is not pinned: its line and the value as written.
@@ -70,7 +71,10 @@ pub fn scan(doc: &Node) -> Vec<Site> {
         .into_iter()
         .filter_map(|n| {
             let uses = n.text()?.trim();
-            (!is_exempt(uses) && !is_pinned(uses)).then(|| Site { line: n.line, uses: uses.to_string() })
+            (!is_exempt(uses) && !is_pinned(uses)).then(|| Site {
+                line: n.line,
+                uses: uses.to_string(),
+            })
         })
         .collect();
     sites.sort_by_key(|s| s.line);
@@ -121,7 +125,12 @@ impl Check for C182 {
                     "jobs:\n  a:\n    runs-on: x\n    steps:\n      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0\n      - uses: ./.gitea/actions/plan\n      - uses: ./.paddock/.gitea/actions/setup-rust\n      - uses: docker://alpine:3\n      # - uses: actions/checkout@v4\n      - run: |\n          echo uses: actions/checkout@v4\n",
                 ),
             ],
-            expect: vec![(".gitea/actions/b/action.yml", 4), (".gitea/workflows/w.yml", 5), (".gitea/workflows/w.yml", 6), (".gitea/workflows/w.yml", 8)],
+            expect: vec![
+                (".gitea/actions/b/action.yml", 4),
+                (".gitea/workflows/w.yml", 5),
+                (".gitea/workflows/w.yml", 6),
+                (".gitea/workflows/w.yml", 8),
+            ],
         }
     }
 
@@ -143,14 +152,20 @@ impl Check for C182 {
                 }
             };
             probes += uses_nodes(&doc).len();
-            remote += uses_nodes(&doc).iter().filter(|n| n.text().is_some_and(|u| !is_exempt(u.trim()))).count();
+            remote += uses_nodes(&doc)
+                .iter()
+                .filter(|n| n.text().is_some_and(|u| !is_exempt(u.trim())))
+                .count();
             for s in scan(&doc) {
                 findings.push(Finding::warn(
                     "C182",
                     RULE,
                     f,
                     s.line,
-                    format!("`uses: {}` is not pinned to a full 40-character commit SHA (ER-26): a tag or branch moves under the job", s.uses),
+                    format!(
+                        "`uses: {}` is not pinned to a full 40-character commit SHA (ER-26): a tag or branch moves under the job",
+                        s.uses
+                    ),
                     FIX,
                 ));
             }
@@ -163,7 +178,11 @@ impl Check for C182 {
                 met: probes > 0 || ctx.is_in_memory(),
                 detail: format!(
                     "{files} workflows and actions read, {probes} `uses:` lines, {remote} of them remote{}",
-                    if unread.is_empty() { String::new() } else { format!("; not read: {}", unread.join("; ")) }
+                    if unread.is_empty() {
+                        String::new()
+                    } else {
+                        format!("; not read: {}", unread.join("; "))
+                    }
                 ),
             },
         }
@@ -183,7 +202,14 @@ mod tests {
         let sha = "11d5960a326750d5838078e36cf38b85af677262";
         assert!(is_pinned(&format!("actions/checkout@{sha}")));
         assert!(is_pinned(&format!("actions/cache/save@{sha}")));
-        for bad in ["actions/checkout@v4", "actions/checkout", "a/b@11d5960", &format!("a/b@{}", sha.to_uppercase()), &format!("a/b@{sha}0"), "a/b@sha256:abc"] {
+        for bad in [
+            "actions/checkout@v4",
+            "actions/checkout",
+            "a/b@11d5960",
+            &format!("a/b@{}", sha.to_uppercase()),
+            &format!("a/b@{sha}0"),
+            "a/b@sha256:abc",
+        ] {
             assert!(!is_pinned(bad), "{bad}");
         }
     }

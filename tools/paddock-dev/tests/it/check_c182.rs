@@ -35,10 +35,21 @@ const PINNED: &str = "jobs:\n  a:\n    runs-on: x\n    steps:\n      - uses: act
 /// A moving tag is a warning at its line, never an error (report-only, ER-41), and the fix names the SHA form; a local path is no finding.
 #[test]
 fn c182_reports_a_moving_tag_as_a_warning() {
-    let tree = tree_of(&[(".gitea/workflows/w.yml", UNPINNED), (".gitea/actions/a/action.yml", "runs:\n  using: composite\n  steps:\n    - uses: x/y@main\n")]);
+    let tree = tree_of(&[
+        (".gitea/workflows/w.yml", UNPINNED),
+        (
+            ".gitea/actions/a/action.yml",
+            "runs:\n  using: composite\n  steps:\n    - uses: x/y@main\n",
+        ),
+    ]);
     let r = run_checks(&options(tree.path(), "fixture"), &registry()).unwrap();
     let got: Vec<(&str, usize)> = r.findings.iter().map(|f| (f.file.as_str(), f.line)).collect();
-    assert_eq!(got, vec![(".gitea/actions/a/action.yml", 4), (".gitea/workflows/w.yml", 5)], "{:?}", r.findings);
+    assert_eq!(
+        got,
+        vec![(".gitea/actions/a/action.yml", 4), (".gitea/workflows/w.yml", 5)],
+        "{:?}",
+        r.findings
+    );
     assert!(r.findings[0].fix.contains("40-hex"), "{:?}", r.findings);
     assert_eq!((r.errors(), r.warnings()), (0, 2));
 }
@@ -46,7 +57,10 @@ fn c182_reports_a_moving_tag_as_a_warning() {
 /// A SHA with its version comment, local paths and a text that only names `uses:` stay green.
 #[test]
 fn c182_passes_pins_and_local_paths() {
-    let tree = tree_of(&[(".gitea/workflows/w.yml", PINNED), ("docs/x.yml", "steps:\n  - uses: actions/checkout@v4\n")]);
+    let tree = tree_of(&[
+        (".gitea/workflows/w.yml", PINNED),
+        ("docs/x.yml", "steps:\n  - uses: actions/checkout@v4\n"),
+    ]);
     let r = run_checks(&options(tree.path(), "fixture"), &registry()).unwrap();
     assert!(r.findings.is_empty(), "{:?}", r.findings);
 }
@@ -66,10 +80,19 @@ fn c182_control_sees_a_builder() {
 fn c182_is_registered_reserved_and_listed() {
     assert!(registry().iter().any(|c| c.id() == "C182"), "C182 is not in the registry");
     let root = repo_root();
-    assert!(std::fs::read_dir(root.join("conformance/reserved")).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().starts_with("C182-")));
+    assert!(
+        std::fs::read_dir(root.join("conformance/reserved")).unwrap().any(|e| e
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with("C182-"))
+    );
     let ci = std::fs::read_to_string(root.join("conformance/paddock.ci.json")).unwrap();
     let v: serde_json::Value = serde_json::from_str(&ci).unwrap();
-    assert!(v["conformance"]["rust"].to_string().contains("C182"), "C182 is not in conformance.rust");
+    assert!(
+        v["conformance"]["rust"].to_string().contains("C182"),
+        "C182 is not in conformance.rust"
+    );
 }
 
 /// "Delete the files": a whole-tree run that reads no workflow or action did not look at anything, which is never a pass.
@@ -78,13 +101,20 @@ fn c182_without_a_workflow_is_not_measured() {
     let tree = tree_of(&[("docs/other.md", "uses: actions/checkout@v4\n")]);
     let r = run_checks(&options(tree.path(), "fixture"), &registry()).unwrap();
     assert!(r.errors() >= 1, "{:?}", r.findings);
-    assert!(r.findings.iter().all(|f| f.outcome.is_some_and(|o| o.name() == "not-measured")), "{:?}", r.findings);
+    assert!(
+        r.findings.iter().all(|f| f.outcome.is_some_and(|o| o.name() == "not-measured")),
+        "{:?}",
+        r.findings
+    );
 }
 
 /// A workflow the YAML reader cannot read was not looked at: not measured, never a pass.
 #[test]
 fn c182_a_workflow_that_does_not_parse_is_not_measured() {
-    let tree = tree_of(&[(".gitea/workflows/w.yml", "jobs: [\n  steps: x\n"), (".gitea/workflows/ok.yml", PINNED)]);
+    let tree = tree_of(&[
+        (".gitea/workflows/w.yml", "jobs: [\n  steps: x\n"),
+        (".gitea/workflows/ok.yml", PINNED),
+    ]);
     let r = run_checks(&options(tree.path(), "fixture"), &registry()).unwrap();
     assert!(r.errors() >= 1, "{:?}", r.findings);
 }
