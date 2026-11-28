@@ -133,7 +133,7 @@ jobs:
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
     steps:
       # The whole history: the base (a merge base, the last green commit of main) can be any older commit.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -274,13 +274,13 @@ jobs:
     steps:
       # Linux: the whole tree in the container. Hosts: only the bootstrap folders (the actions, their scripts, paddock-dev's inputs)
       # as a partial clone; the kept-clone step below brings the slot's own clone to this commit (conformance/ci/checkout-profiles.txt).
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: runner.os == 'Linux'
         with:
           persist-credentials: false
           fetch-depth: 0
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: runner.os != 'Linux'
         with:
           persist-credentials: false
@@ -454,7 +454,7 @@ jobs:
     env:
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -496,7 +496,7 @@ jobs:
       # `base`, else origin/main; a base it cannot read fails the test as not measured (run 8327: a shallow checkout had none).
       PADDOCK_BASE_REF: ${{ inputs.base || 'origin/main' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
           # The base of the allow list growth test (PADDOCK_BASE_REF) and its merge base.
@@ -631,7 +631,7 @@ jobs:
       # The read credential is set on the ./dev steps only.
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
 
@@ -687,7 +687,7 @@ jobs:
       run:
         working-directory: ui
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
 
@@ -752,7 +752,7 @@ jobs:
       # check::baseline::target_ref.
       PADDOCK_BASE_REF: ${{ inputs.base || 'origin/main' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
           # C100 reads the register's history (the Gates-date trailers) and the base revision.
@@ -805,7 +805,7 @@ jobs:
       # `base`, else origin/main; a base it cannot read fails the test as not measured (run 8327: a shallow checkout had none).
       PADDOCK_BASE_REF: ${{ inputs.base || 'origin/main' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
           # The base of the allow list growth test (PADDOCK_BASE_REF) and its merge base.
@@ -880,7 +880,7 @@ jobs:
       # paddock-chromium); the driver drops the sandbox only for root AND with this opt-in.
       PADDOCK_BROWSER_NO_SANDBOX: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - uses: ./.gitea/actions/setup-rust
@@ -977,12 +977,12 @@ jobs:
     steps:
       # Linux: the whole tree in the container. Hosts: only the bootstrap folders (the actions, their scripts, paddock-dev's inputs)
       # as a partial clone; the kept-clone step below brings the slot's own clone to this commit (conformance/ci/checkout-profiles.txt).
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
         if: runner.os == 'Linux'
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: runner.os != 'Linux'
         with:
           persist-credentials: false
@@ -1218,12 +1218,12 @@ jobs:
     steps:
       # Linux: the whole tree in the container. Hosts: only the bootstrap folders (the actions, their scripts, paddock-dev's inputs)
       # as a partial clone; the kept-clone step below brings the slot's own clone to this commit (conformance/ci/checkout-profiles.txt).
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
         if: runner.os == 'Linux'
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: runner.os != 'Linux'
         with:
           persist-credentials: false
@@ -1382,7 +1382,7 @@ jobs:
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
           # The history scan reads origin/main..HEAD.
@@ -1425,7 +1425,7 @@ jobs:
       CARGO_TERM_COLOR: always
     steps:
       # The whole history: the audit's merge base can be any older commit.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
           fetch-depth: 0

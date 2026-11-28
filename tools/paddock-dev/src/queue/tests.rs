@@ -2108,7 +2108,7 @@ fn ci_yml_is_read_only_and_its_checkouts_keep_no_credentials() {
         top.contains("\npermissions:\n  contents: read\n  actions: read\n"),
         "workflow-level read-only permissions"
     );
-    let checkouts = ci.matches("uses: actions/checkout@v4").count();
+    let checkouts = ci.matches("uses: actions/checkout@").count();
     assert!(checkouts > 0);
     assert_eq!(
         ci.matches("persist-credentials: false").count(),

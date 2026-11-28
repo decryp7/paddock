@@ -50,7 +50,7 @@ jobs:
         working-directory: .
     steps:
       # A scheduled run ends early while a train is in CI (ADR 0093 amendment 2026-11-12); the action needs the checkout.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: github.event_name == 'schedule'
       - id: train
         if: github.event_name == 'schedule'
@@ -111,7 +111,7 @@ jobs:
       # `./dev` building itself first included. RUSTUP_TOOLCHAIN outranks the file and is set for every step of the job.
       RUSTUP_TOOLCHAIN: stable
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs` through conformance/ci/kit.sh; each runner class's layout is in ci_build_jobs.rs: Linux 6 jobs on 30 cores).
       - uses: ./.gitea/actions/build-jobs
@@ -193,7 +193,7 @@ jobs:
 
       - name: Upload criterion report
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
         with:
           name: criterion-report
           path: apps/debrief/target/criterion
@@ -215,7 +215,7 @@ jobs:
       RUSTUP_TOOLCHAIN: stable
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs` through conformance/ci/kit.sh; each runner class's layout is in ci_build_jobs.rs: Linux 6 jobs on 30 cores).
       - uses: ./.gitea/actions/build-jobs
