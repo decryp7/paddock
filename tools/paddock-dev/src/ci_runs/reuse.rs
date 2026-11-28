@@ -247,7 +247,6 @@ mod tests {
 
     fn ask(f: &mut Fake, current: Option<u64>) -> Reuse {
         let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t");
-        c.backoff_ms = 0;
         decide_with(&mut c, "ci.yml", SHA, current, true, std::path::Path::new("."), None)
     }
 
@@ -427,7 +426,6 @@ mod tests {
         f.log(44761, include_str!("../../tests/ci-runs/nextest-run8610-crate-flaky-only.log"));
         f.log(44768, include_str!("../../tests/ci-runs/nextest-run8610-app-gates-flaky-only.log"));
         let mut c = Client::new(&mut f, "https://gitea.invalid", "decryp7/paddock", "t");
-        c.backoff_ms = 0;
         let mut ask = |flags: &[&str]| {
             let t = crate::ci_runs::green::Touched {
                 flags: flags.iter().map(|a| a.to_string()).collect(),

@@ -89,7 +89,8 @@ jobs:
         shell: bash
         env:
           RESULT: ${{ steps.keep.outcome }}
-        run: echo "- bench-previous cache: saved: $RESULT" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+        run: |
+          echo "- bench-previous cache: saved: $RESULT" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
       - uses: actions/upload-artifact@v3
         if: always()

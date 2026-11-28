@@ -774,7 +774,6 @@ mod tests {
 
     fn triage_with(mut f: Fake, run: u64, against: Option<u64>) -> Report {
         let mut c = Client::new(&mut f, "https://gitea.invalid", "example/paddock", "t");
-        c.backoff_ms = 0;
         let req = Request {
             run,
             against,
@@ -1055,7 +1054,6 @@ mod tests {
         runs.insert(0, branch);
         f.set_runs(runs);
         let mut c = Client::new(&mut f, "https://gitea.invalid", "example/paddock", "t");
-        c.backoff_ms = 0;
         let req = Request {
             run: 7963,
             against: None,
@@ -1168,7 +1166,6 @@ mod tests {
         let mut f = fake();
         f.fail(36182, "curl exited with 22: 500");
         let mut c = Client::new(&mut f, "https://gitea.invalid", "example/paddock", "t");
-        c.backoff_ms = 0;
         let req = Request {
             run: 7963,
             against: Some(7941),
@@ -1207,7 +1204,6 @@ mod tests {
     fn the_history_is_read_and_a_clean_window_leaves_the_answer_complete() {
         let mut f = fake();
         let mut c = Client::new(&mut f, "https://gitea.invalid", "example/paddock", "t");
-        c.backoff_ms = 0;
         let r = collect(&mut c, &history_request(), &mut |_| {}).unwrap();
         assert!(r.gaps.is_empty(), "{:?}", r.gaps);
         assert_eq!(r.rows.len(), 3);
@@ -1220,7 +1216,6 @@ mod tests {
         // The log of a failed job of run 7941, which is in the window: the history cannot account for it.
         f.fail(35684, "curl exited with 22: 500");
         let mut c = Client::new(&mut f, "https://gitea.invalid", "example/paddock", "t");
-        c.backoff_ms = 0;
         let r = collect(&mut c, &history_request(), &mut |_| {}).unwrap();
         assert!(r.gaps.iter().any(|g| g.contains("flake history of debrief")), "{:?}", r.gaps);
         assert!(!r.complete());

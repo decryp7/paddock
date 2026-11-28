@@ -385,9 +385,7 @@ fn artifact(id: u64, expired: bool) -> Value {
 }
 
 fn store(api: &mut Api) -> ArtifactStore<'_> {
-    let mut client = Client::new(api, "https://gitea.invalid", "decryp7/paddock", "tok");
-    client.backoff_ms = 0;
-    ArtifactStore::new(client)
+    ArtifactStore::new(Client::new(api, "https://gitea.invalid", "decryp7/paddock", "tok"))
 }
 
 fn record_zip(r: &Record) -> Vec<u8> {
