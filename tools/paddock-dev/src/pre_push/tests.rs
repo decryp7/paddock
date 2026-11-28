@@ -44,6 +44,7 @@ fn facts() -> Facts {
         reached: Default::default(),
         goldens: Ok(Vec::new()),
         overlap: Default::default(),
+        priority: Default::default(),
     }
 }
 
@@ -52,6 +53,7 @@ fn change(files: &[&str]) -> Change {
         files: files.iter().map(|f| f.to_string()).collect(),
         ranges: vec!["abc..HEAD".into()],
         base: Some("origin/main".into()),
+        moved: false,
     }
 }
 
@@ -293,6 +295,8 @@ fn the_row_set_of_a_pass_record_is_every_fixed_row_the_planner_can_plan() {
             "apps/dyno/crates/dyno-core/src/a.rs".into(),
         ],
         ranges: vec!["abc..HEAD".into()],
+        // The moved-path row runs only for a push that renames or deletes a file.
+        moved: true,
         ..Change::default()
     };
     let mut f = facts();
@@ -360,6 +364,73 @@ fn a_change_to_a_file_a_golden_reads_plans_the_golden_row_and_any_other_change_s
             .iter()
             .any(|p| matches!(p, Planned::NotMeasured { id, .. } if id == "goldens")),
         "{planned:?}"
+    );
+}
+
+/// The goldens row starts `./dev gen check`, whose builds take a `throttle` slot of their own. A member gate for a train gave its other
+/// rows the train lane and left this child at normal priority, so every train row overtook it (the row took 424 to 589 s of which the
+/// build was 12 to 23 s): the row passes the run's priority to the child (`--priority train`), and a normal run passes nothing.
+#[test]
+fn a_member_gate_with_train_priority_plans_the_golden_row_with_the_train_flag_and_a_normal_one_does_not() {
+    use crate::priority::Priority;
+    let file = "tools/paddock-dev/src/ci_run/mod.rs";
+    let reg = real_registry();
+    for (priority, want) in [(Priority::Train, true), (Priority::Normal, false)] {
+        let mut f = facts();
+        f.priority = priority;
+        f.goldens = Ok(reg.golden_due(&[file.to_string()], &BTreeSet::new()));
+        let planned = plan_gates(&plan(), &change(&[file]), &f);
+        let row = run_gates(&planned)
+            .into_iter()
+            .find(|g| g.id == "goldens")
+            .expect("the goldens row");
+        let has = row.args.windows(2).any(|w| w == ["--priority", "train"]);
+        assert_eq!(has, want, "{priority:?}: {:?}", row.args);
+    }
+}
+
+/// The class (queue time counted as run time, ER-21): every row whose `./dev` child takes a `throttle` slot of its own
+/// ([`gates::SLOT_TAKING_DEV_COMMANDS`]) passes the run's priority on and is marked for the queue status channel, whatever row it is;
+/// no other row carries the mark. And such a row is never heavy itself (ER-43): a row that held a slot while its child waited for
+/// another would wait for the capacity its own work needs.
+#[test]
+fn every_row_whose_dev_child_takes_a_slot_passes_the_priority_on_and_none_holds_a_slot_itself() {
+    use crate::priority::Priority;
+    let mut f = facts();
+    f.priority = Priority::Train;
+    f.goldens = Ok(vec!["ci-run-golden".into()]);
+    let c = Change {
+        files: vec![
+            "crates/paddock-proc/src/lib.rs".into(),
+            "crates/paddock-proc/Cargo.toml".into(),
+            "apps/dyno/crates/dyno-core/src/a.rs".into(),
+        ],
+        ranges: vec!["abc..HEAD".into()],
+        base: Some("origin/main".into()),
+        moved: false,
+    };
+    let planned = plan_gates(&plan(), &c, &f);
+    let dev = f.dev_exe.clone().expect("a dev program");
+    let mut slot_takers = Vec::new();
+    for g in run_gates(&planned) {
+        let takes = g.program == dev
+            && super::gates::SLOT_TAKING_DEV_COMMANDS
+                .iter()
+                .any(|cmd| g.args.len() >= cmd.len() && g.args.iter().zip(cmd.iter()).all(|(a, b)| a == b));
+        assert_eq!(
+            g.children_queue, takes,
+            "{}: the mark must be exactly the slot-taking dev children: {:?}",
+            g.id, g.args
+        );
+        if takes {
+            slot_takers.push(g.id.clone());
+            assert!(g.args.windows(2).any(|w| w == ["--priority", "train"]), "{}: {:?}", g.id, g.args);
+            assert!(!g.heavy, "{} holds a slot while its child queues for another (ER-43)", g.id);
+        }
+    }
+    assert!(
+        slot_takers.contains(&"goldens".to_string()),
+        "the control: the goldens row is one: {slot_takers:?}"
     );
 }
 
@@ -2857,6 +2928,7 @@ fn heavy_gate(id: &str, rank: u8) -> Planned {
         progress: crate::pre_push::progress::Progress::Lines,
         build_dir: None,
         ci_env: false,
+        children_queue: false,
     })
 }
 
@@ -3495,6 +3567,70 @@ fn a_given_file_list_has_no_base_and_a_measured_change_has_one() {
     assert_eq!(measured.base.as_deref(), Some(c1.as_str()));
     let (pushed, _, _) = super::discover(&r.root, &c1, &[], std::slice::from_ref(&c2)).unwrap();
     assert_eq!(pushed.base.as_deref(), Some(c1.as_str()));
+}
+
+/// A push that renames or deletes a file measures it (`Change::moved`, git's `-M` through the shared reader): a pushed range, a working
+/// tree with an uncommitted move, and a plain change that only adds or edits say so; a list the caller gave has no base and no answer.
+#[test]
+fn a_push_says_whether_it_renames_or_deletes_a_file() {
+    let r = Repo::new();
+    r.commit("a");
+    r.commit("keep");
+    let base = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    r.remote("main", &base);
+    let c2 = r.commit("added");
+    assert!(
+        !super::discover(&r.root, &base, &[], std::slice::from_ref(&c2)).unwrap().0.moved,
+        "an addition moves nothing"
+    );
+    r.git(&["rm", "-q", "a"]);
+    r.git(&["commit", "-q", "-m", "drop"]);
+    let c3 = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    assert!(
+        super::discover(&r.root, &base, &[], std::slice::from_ref(&c3)).unwrap().0.moved,
+        "a deletion in the pushed range"
+    );
+    assert!(
+        super::discover(&r.root, &base, &[], &[]).unwrap().0.moved,
+        "and in the measured working tree"
+    );
+    r.git(&["reset", "-q", "--hard", &c2]);
+    assert!(!super::discover(&r.root, &base, &[], &[]).unwrap().0.moved);
+    r.git(&["mv", "keep", "kept"]);
+    assert!(
+        super::discover(&r.root, &base, &[], &[]).unwrap().0.moved,
+        "a staged rename that is not committed yet"
+    );
+    assert!(
+        !super::discover(&r.root, &base, &["x".to_string()], &[]).unwrap().0.moved,
+        "a given list has no base to measure from"
+    );
+}
+
+/// The moved-path row (C183) runs `./dev check run --only C183` when the push renames or deletes a file and is skipped with its reason
+/// when it does not; the row set of a pass record names it.
+#[test]
+fn the_moved_paths_row_runs_only_when_the_push_moves_or_deletes_a_file() {
+    let moved = Change {
+        moved: true,
+        ..change(&["docs/x.md"])
+    };
+    let planned = plan_gates(&plan(), &moved, &facts());
+    let row = run_gates(&planned)
+        .into_iter()
+        .find(|g| g.id == "moved-paths")
+        .unwrap_or_else(|| panic!("{:?}", ids(&planned)));
+    assert_eq!(row.args, ["check", "run", "--only", "C183"]);
+    assert!(row.next.contains("C183"), "{}", row.next);
+    let planned = plan_gates(&plan(), &change(&["docs/x.md"]), &facts());
+    assert!(
+        planned
+            .iter()
+            .any(|p| matches!(p, Planned::Skip { id, reason } if id == "moved-paths" && reason.contains("renames and deletes no file"))),
+        "{:?}",
+        ids(&planned)
+    );
+    assert!(super::gates::ROW_SET.contains(&"moved-paths"));
 }
 
 /// The contracts line of the conformance `tests` phase compiles paddock-dev's tests, so the row hands the executor the build folder

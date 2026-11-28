@@ -172,7 +172,7 @@ fn term_stops_a_running_agent_cleanly_and_removes_its_discovery_file() {
         evidence(&dirs)
     );
     assert!(!dirs.discovery().exists(), "the discovery file was left behind");
-    assert!(!dyno_agent::instance::is_held(&dirs), "the agent lock was not released");
+    paddock_testkit::lock::await_free("the agent lock is released", || dyno_agent::instance::is_held(&dirs));
 }
 
 #[test]
@@ -185,7 +185,7 @@ fn term_sent_while_the_agent_is_starting_still_ends_it() {
         let child = start(dirs.root());
         term(&child);
         let _ = exits(child);
-        assert!(!dyno_agent::instance::is_held(&dirs), "the agent lock was left held");
+        paddock_testkit::lock::await_free("the agent lock is released", || dyno_agent::instance::is_held(&dirs));
     }
 }
 

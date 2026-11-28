@@ -8,17 +8,24 @@
 #
 # What it does:
 #   plan    the base (the push's `before`, else the `base` input, else the commit's first parent), then `./dev mutants plan`: how many
-#           mutants the diff has, and from that how many shards (one more for each SHARD_TARGET mutants, at most MAX_SHARDS), not a fixed eight.
-#   shards  one leg per planned shard, ONE AT A TIME (`max-parallel: 1`), each `./dev mutants gate --shard k/n`.
-#   record  one line that says what was planned and how each part ended (the coordinator reads it, and the annotations).
+#           mutants the diff has; at most MAX_PER_LANDING (60) of them are chosen, round-robin over the changed functions (user decision
+#           2026-11-28), the rest NOT MEASURED; the chosen are split in slices (one more for each SHARD_TARGET mutants up to MAX_SHARDS, then as
+#           many as keep each within MAX_PER_SHARD). Every shard makes the same choice from its own listing of the same diff.
+#   shards  one leg per started slice, TWO AT A TIME (`max-parallel: 2`, user decision 2026-11-28), each `./dev mutants gate --shard k/n`; each prints one
+#           `mutants shard result:` line. A mutant's tests stop at the first failure and its build is incremental (mutants_gate.rs,
+#           NEXTEST_EXTRA and MUTANTS_ENV; docs/benchmarks.md, "Mutation testing: the per-mutant cost").
+#   record  per shard, measured, in part or NOT MEASURED (`./dev mutants record`: the result lines, read through the Actions API).
 #
 # How it yields to trains, and never holds capacity one needs (ER-43): the Linux runner has 3 slots (conformance/ci/runner-slots.json).
 #   1. The plan job and every shard first ask `./dev ci schedule-skip --any-event`: while a train's dispatch run on `train/*` is queued or
 #      running, the part ends at once, measures nothing and says so (`::notice::skipped: train ...`). Nothing WAITS, so no job of this
 #      workflow sits on a slot while a train needs it (a waiting job is a held slot: runner-wait's own note). The skipped diff is named in
 #      the record line: dispatch this workflow again with `base` set to it.
-#   2. At most one shard runs at a time, so this workflow never holds more than one of the three slots, and a train that starts during
-#      a shard finds two free and waits for none longer than that shard (SHARD_TARGET mutants, about 25 minutes, `timeout-minutes` below).
+#   2. At most two shards run at once (Gitea Actions has no "parallel only when idle": each shard's own check above is what makes the
+#      second one yield, since it runs that check when it starts), so this workflow holds at most two of the three slots: a train queued
+#      meanwhile starts on the third at once, the shards still waiting end at their check, and a train job that needs a second slot waits
+#      for at most one shard (SHARD_TARGET mutants, about 35 minutes expected, `timeout-minutes` below). No job of this workflow waits on a
+#      slot (ER-43).
 #   3. A newer landing queues behind a running run (`concurrency`, no cancel: cancelling would lose the older diff).
 # A run that cannot read the Actions runs proceeds (fail open, with a warning), as the scheduled runs do.
 
@@ -59,13 +66,15 @@ jobs:
       run: ${{ steps.plan.outputs.run }}
       shards: ${{ steps.plan.outputs.shards }}
       count: ${{ steps.plan.outputs.count }}
+      selected: ${{ steps.plan.outputs.selected }}
+      slices: ${{ steps.plan.outputs.slices }}
       base: ${{ steps.base.outputs.base }}
     env:
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
     steps:
       # The whole history: the base is a commit of main's past.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -121,18 +130,22 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
-    # One shard at a time: at most one of the three Linux slots, so a train always finds two. A shard is at most SHARD_TARGET mutants.
+    # Two shards at once (user decision 2026-11-28): at most two of the three Linux slots, so a train always finds one, and each shard
+    # yields at its start while a train is queued or running. A shard is about SHARD_TARGET mutants, at most MAX_PER_SHARD.
     timeout-minutes: 75
     strategy:
       fail-fast: false
-      max-parallel: 1
+      max-parallel: 2
       matrix:
         shard: ${{ fromJSON(needs.plan.outputs.shards) }}
     env:
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+      # Root in the Linux container: Chromium needs the opt-in to start without its sandbox, as in ci.yml's crates job. Without it every
+      # real-browser test of paddock-chromium failed the unmutated tree, so no mutant of `crates` was measured (run 9400, shard 0/12).
+      PADDOCK_BROWSER_NO_SANDBOX: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -174,8 +187,11 @@ jobs:
       - uses: ./.gitea/actions/sccache-stats
         if: always()
 
-  # The one line the coordinator reads: what was planned (or why nothing ran) and how the shards ended. The findings themselves are the
-  # `::warning file=...::mutants: MISSED in ...` annotations and the `mutants gate:` summary of each shard job.
+  # The record the coordinator reads: what was planned (or why nothing ran) and, per planned shard, whether it measured all of its slice,
+  # part of it, or nothing (`./dev mutants record`, src/mutants_gate/record.rs: each shard's result line, read from its job log through the
+  # Actions API). A shard that yielded to a train, was cancelled or refused its slice is NOT MEASURED there by name, with the base to dispatch
+  # again (runs 9393 and 9400 lost ten and eleven shards behind a green "shards success"). The findings are the `::warning file=...::mutants:
+  # MISSED in ...` annotations of each shard job.
   record:
     name: record
     needs: [plan, shards]
@@ -183,21 +199,47 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
-    timeout-minutes: 5
+    timeout-minutes: 15
+    env:
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
     steps:
-      - name: Record
+      - name: Nothing planned
+        if: ${{ needs.plan.outputs.base == '' }}
+        env:
+          HEAD_SHA: ${{ github.sha }}
+          PLAN: ${{ needs.plan.result }}
+        run: |
+          line="mutants record: $HEAD_SHA NOT MEASURED: the plan did not run its diff (plan $PLAN): yielded to a train or failed. Next step: dispatch mutants.yml with base set to the previous main tip"
+          echo "::warning::$line"
+          echo "$line" >> "$GITHUB_STEP_SUMMARY"
+      - name: No mutants
+        if: ${{ needs.plan.outputs.base != '' && needs.plan.outputs.run != 'true' }}
         env:
           HEAD_SHA: ${{ github.sha }}
           BASE: ${{ needs.plan.outputs.base }}
           COUNT: ${{ needs.plan.outputs.count }}
-          PLAN: ${{ needs.plan.result }}
-          SHARDS: ${{ needs.shards.result }}
         run: |
-          if [ -z "$BASE" ]; then
-            line="mutants record: $HEAD_SHA NOT MEASURED: the plan did not run its diff (plan $PLAN): yielded to a train or failed. Next step: dispatch mutants.yml with base set to the previous main tip"
-            echo "::warning::$line"
-          else
-            line="mutants record: $BASE..$HEAD_SHA planned ${COUNT:-0} mutants (plan $PLAN, shards $SHARDS)"
-            echo "::notice::$line"
-          fi
+          line="mutants record: $BASE..$HEAD_SHA planned ${COUNT:-0} mutants, no shard (the plan's own lines say why)"
+          echo "::notice::$line"
           echo "$line" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        if: ${{ needs.plan.outputs.run == 'true' }}
+        with:
+          persist-credentials: false
+      - uses: ./.gitea/actions/setup-rust
+        if: ${{ needs.plan.outputs.run == 'true' }}
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
+      - name: Record
+        if: ${{ needs.plan.outputs.run == 'true' }}
+        env:
+          PLAN_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.sha }}
+          BASE: ${{ needs.plan.outputs.base }}
+          COUNT: ${{ needs.plan.outputs.count }}
+          SELECTED: ${{ needs.plan.outputs.selected }}
+          SLICES: ${{ needs.plan.outputs.slices }}
+          SHARDS: ${{ needs.plan.outputs.shards }}
+        run: ./dev mutants record --base "$BASE" --head "$HEAD_SHA" --count "${COUNT:-0}" --selected "${SELECTED:-0}" --slices "${SLICES:-0}" --shards "$SHARDS"

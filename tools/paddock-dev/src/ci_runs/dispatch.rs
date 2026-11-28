@@ -28,7 +28,8 @@
 
 use super::client::{Client, RunInfo};
 use crate::health::{Health, Ready, wait_held};
-use crate::wait::{Clock, Http, MAX_LIMIT, MIN_INTERVAL, Outcome, Poll, Probe, SystemClock, fmt_duration, parse_duration, wait_for};
+use crate::http::Http;
+use crate::wait::{Clock, MAX_LIMIT, MIN_INTERVAL, Outcome, Poll, Probe, SystemClock, fmt_duration, parse_duration, wait_for};
 use paddock_ci_config::jobs::{MatrixValues, RunnerJob, runner_jobs, triggers};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;

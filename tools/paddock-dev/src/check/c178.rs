@@ -18,9 +18,11 @@
 //! split moves tests with their module), a reference to an item that lives in `lib.rs` itself (`crate::Foo`, not a module: it is no
 //! module edge), and a reference to the module's own name. `self::` and `super::` paths stay inside the module.
 //!
-//! Report-only (warnings, mode report-only; ER-41) until its first green run on the real tree, recorded in docs/gates.toml
-//! (`[[report_only]]` C178). It blocks after the back-edges are gone (the ADR's WP-4), and it is deleted when the crate split lands,
-//! because cargo refuses a crate cycle itself. No baseline file (ER-46): the report is the list. Rust host only: born in Rust.
+//! Blocking (findings are errors, mode gate; ER-41) since 2026-11-28. It was report-only from 2026-11-27, with 32 references in 19 module
+//! pairs on 5e5991a31, until the back-edges were gone (the ADR's WP-4: batches B1 to B5). First green run on the real tree: `./dev check
+//! run --only C178` on refactor/paddock-dev-b4-b5 at 1baf7a33c (the commit that removes the last 15 references), 2026-11-28: 0 errors,
+//! 0 warnings, 295 probes, control true. It is deleted when the crate split lands, because cargo refuses a crate cycle itself. No
+//! baseline file (ER-46): the report is the list. Rust host only: born in Rust.
 
 use super::finding::Finding;
 use super::record::Precondition;
@@ -284,7 +286,7 @@ impl Check for C178 {
     }
 
     fn mode(&self) -> Mode {
-        Mode::ReportOnly
+        Mode::Gate
     }
 
     fn control(&self) -> Control {
@@ -354,7 +356,7 @@ impl Check for C178 {
         let mut findings = Vec::new();
         for (m, file) in &modules {
             if layers.layer(m).is_none() {
-                findings.push(Finding::warn(
+                findings.push(Finding::error(
                     "C178",
                     RULE,
                     file,
@@ -366,7 +368,7 @@ impl Check for C178 {
         }
         let listed: BTreeSet<&str> = modules.keys().map(String::as_str).collect();
         for m in layers.modules().filter(|m| !listed.contains(m)) {
-            findings.push(Finding::warn(
+            findings.push(Finding::error(
                 "C178",
                 RULE,
                 LAYERS,
@@ -388,7 +390,7 @@ impl Check for C178 {
                 }
                 let Some(to_layer) = layers.layer(&e.target) else { continue };
                 if !layers.may_use(from_layer, to_layer) {
-                    findings.push(Finding::warn(
+                    findings.push(Finding::error(
                         "C178",
                         RULE,
                         f,

@@ -169,16 +169,16 @@ pub(super) fn merge_base(root: &Path, base_ref: &str) -> Result<String, (String,
 }
 
 /// The files renamed between `base` and the work tree (committed, staged or not yet committed), as `git diff -M` reports them, read with
-/// the one `git diff` parser ([`crate::merge_check::diff`], ER-22, ER-42). A register keyed by path follows a rename: its entry counts for
+/// the one `git diff` parser ([`crate::git_diff`], ER-22, ER-42). A register keyed by path follows a rename: its entry counts for
 /// the new path, which is neither growth nor a reason to ask the user (ER-46). A rename that changed content is a rename too; whether the
 /// entry still fits is the register's own judgement of the moved text. Empty when git cannot say (a path git quotes, a failed run): the
 /// stricter reading.
 pub fn renames(root: &Path, base: &str) -> Renames {
     let mut args = vec!["diff", "--diff-filter=R"];
-    args.extend(crate::merge_check::diff::DIFF_FLAGS);
+    args.extend(crate::git_diff::DIFF_FLAGS);
     args.push(base);
     let Ok(text) = git(root, &args) else { return Renames::new() };
-    crate::merge_check::diff::parse(&text)
+    crate::git_diff::parse(&text)
         .unwrap_or_default()
         .into_iter()
         .filter_map(|f| f.old_path.map(|old| (old, f.path)))

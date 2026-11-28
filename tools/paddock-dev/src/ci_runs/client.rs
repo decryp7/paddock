@@ -3,9 +3,9 @@
 //! logs (through the planner's [`GiteaRuns`]); the run list is the part `plan_since` does not have.
 
 use super::time::ts;
+use crate::http::Http;
 use crate::job_outcome::JobOutcome;
 use crate::plan_since::GiteaRuns;
-use crate::wait::Http;
 use serde_json::Value;
 
 /// One run of the list (`GET .../actions/runs`).
@@ -366,7 +366,8 @@ mod tests {
 
     use super::*;
     use crate::ci_runs::testutil::Fake;
-    use crate::wait::{Http, READ_HOLD, Retrying};
+    use crate::http::Http;
+    use crate::wait::{READ_HOLD, Retrying};
     use std::cell::RefCell;
     use std::sync::atomic::AtomicU32;
     use std::time::Duration;

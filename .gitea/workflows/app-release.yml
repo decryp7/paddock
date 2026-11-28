@@ -204,10 +204,10 @@ jobs:
 
       # Linux: the whole tree in the container. Hosts: only the bootstrap folders (the actions, their scripts, paddock-dev's inputs)
       # as a partial clone; the kept-clone step below brings the slot's own clone to this commit (conformance/ci/checkout-profiles.txt).
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: runner.os == 'Linux'
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: runner.os != 'Linux'
         with:
           sparse-checkout: |
@@ -440,9 +440,9 @@ jobs:
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: decryp7/paddock
           ref: ${{ inputs.paddock-ref }}
@@ -466,11 +466,11 @@ jobs:
     container:
       image: ${{ inputs.image }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: decryp7/paddock
           ref: ${{ inputs.paddock-ref }}
@@ -536,7 +536,7 @@ jobs:
     container:
       image: ${{ inputs.image }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3
         with:

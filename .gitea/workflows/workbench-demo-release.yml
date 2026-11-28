@@ -49,7 +49,7 @@ jobs:
       # not measured (runs 8327, 8807: a one-commit checkout has no merge base). Conformance C167 checks it.
       PADDOCK_BASE_REF: origin/main
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
           # The history for PADDOCK_BASE_REF and its merge base.
@@ -58,7 +58,7 @@ jobs:
       # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs` through conformance/ci/kit.sh; each runner class's layout is in ci_build_jobs.rs: Linux 6 jobs on 30 cores).
       - uses: ./.gitea/actions/build-jobs
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
 
@@ -119,7 +119,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # The Linux leg runs in the garage image (only `stable`): use it as it is, instead of downloading the pinned version named by
       # rust-toolchain.toml on every run. First, because build-jobs and job-isolation build ./dev (RUSTUP_TOOLCHAIN outranks the file).
@@ -150,7 +150,7 @@ jobs:
           dir="$(bash conformance/ci/kit.sh isolation path target workbench-demo)"
           echo "CARGO_TARGET_DIR=$(cygpath -w "$dir")" >> "$GITHUB_ENV"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         if: runner.os == 'Linux'
         with:
           node-version: 24
@@ -195,7 +195,7 @@ jobs:
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - uses: ./.gitea/actions/keychain
         with:
@@ -211,9 +211,9 @@ jobs:
     container:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
 

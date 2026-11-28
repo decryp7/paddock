@@ -72,6 +72,58 @@ pub struct AutoMerge {
     pub conflicted: std::collections::HashSet<String>,
 }
 
+/// A path git's rename detection says is gone from where it was: renamed (with the path it has now) or deleted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Moved {
+    /// The file now lives at `to` (`git diff -M`: at least half of it is unchanged).
+    Renamed {
+        /// The path before.
+        from: String,
+        /// The path after.
+        to: String,
+    },
+    /// The file is gone (or was rewritten so much that git sees a deletion and an addition).
+    Deleted(String),
+}
+
+impl Moved {
+    /// The path the change took away.
+    pub fn old(&self) -> &str {
+        match self {
+            Moved::Renamed { from, .. } => from,
+            Moved::Deleted(p) => p,
+        }
+    }
+}
+
+/// Parses `git diff --name-status -z --diff-filter=DR` (the one parser of that output, ER-42): `D NUL path NUL` and
+/// `R<score> NUL from NUL to NUL`. Any other status, a status with no path or text that is not UTF-8 is an error, never skipped:
+/// a half-read list would pass what it did not see.
+pub fn parse_moves(bytes: &[u8]) -> Result<Vec<Moved>, String> {
+    let mut parts = bytes.split(|b| *b == 0).filter(|p| !p.is_empty());
+    let mut out = Vec::new();
+    let text = |p: &[u8]| String::from_utf8(p.to_vec()).map_err(|_| format!("a path that is not UTF-8: {:?}", String::from_utf8_lossy(p)));
+    while let Some(status) = parts.next() {
+        let status = text(status)?;
+        let mut path = || {
+            parts
+                .next()
+                .ok_or_else(|| format!("the status {status} has no path"))
+                .and_then(text)
+        };
+        match status.chars().next() {
+            Some('D') => out.push(Moved::Deleted(path()?)),
+            Some('R') => {
+                let from = path()?;
+                let to = path()?;
+                out.push(Moved::Renamed { from, to });
+            }
+            _ => return Err(format!("the status {status} is neither D nor R")),
+        }
+    }
+    Ok(out)
+}
+
 /// A repository folder to run git in.
 pub struct Git<'a> {
     root: Cow<'a, Path>,
@@ -345,6 +397,18 @@ impl<'a> Git<'a> {
                 })
             })
             .collect()
+    }
+
+    /// The files git's rename detection (`-M`) says were renamed or deleted between `revs` (a merge base, or a base and a tip; with
+    /// one revision the working tree is the other side), one `--name-status` read parsed by [`parse_moves`].
+    pub fn moves(&self, revs: &[&str]) -> Result<Vec<Moved>, GitError> {
+        let mut args = vec!["diff", "--name-status", "-M", "-z", "--diff-filter=DR", "--no-ext-diff"];
+        args.extend(revs);
+        let bytes = self.bytes(&args)?;
+        parse_moves(&bytes).map_err(|stderr| GitError {
+            args: args.join(" "),
+            stderr,
+        })
     }
 
     /// The paths that differ between two tree-ish revisions (no rename detection: both names of a rename are listed).
@@ -858,6 +922,31 @@ mod tests {
         let both = t.raw_tree(&[(b"100644", b"\xfe", &b), (b"100644", b"\xff", &b)]);
         let err = Git::new(t.dir.path()).changed_paths(&a, &both).unwrap_err();
         assert!(err.contains("UTF-8"), "{err}");
+    }
+
+    #[test]
+    fn name_status_moves_are_parsed_once_and_anything_else_is_an_error() {
+        let got = parse_moves(b"R100\0a/x.rs\0b/x.rs\0D\0gone.txt\0R071\0m\0n\0").unwrap();
+        assert_eq!(
+            got,
+            vec![
+                Moved::Renamed {
+                    from: "a/x.rs".into(),
+                    to: "b/x.rs".into()
+                },
+                Moved::Deleted("gone.txt".into()),
+                Moved::Renamed {
+                    from: "m".into(),
+                    to: "n".into()
+                },
+            ]
+        );
+        assert_eq!(got[0].old(), "a/x.rs");
+        assert_eq!(got[1].old(), "gone.txt");
+        assert!(parse_moves(b"").unwrap().is_empty());
+        assert!(parse_moves(b"M\0x\0").unwrap_err().contains("neither D nor R"));
+        assert!(parse_moves(b"R100\0only-one\0").unwrap_err().contains("no path"));
+        assert!(parse_moves(b"D\0\xff\0").unwrap_err().contains("UTF-8"));
     }
 
     #[test]

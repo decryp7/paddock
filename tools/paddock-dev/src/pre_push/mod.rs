@@ -42,6 +42,7 @@ pub mod exec;
 pub mod gates;
 pub mod kept;
 pub mod known;
+pub mod landing_held;
 pub mod outcome;
 pub mod overlap;
 pub mod reuse;
@@ -520,6 +521,11 @@ fn command_in(
         node_env_problem(cfg!(windows) && work != root, &|p| std::fs::read_to_string(work.join(p)).ok())
     };
     facts.member_gate = args.member_gate;
+    facts.priority = if real.priority {
+        crate::priority::Priority::Train
+    } else {
+        crate::priority::Priority::Normal
+    };
     facts.kept_targets = kept_targets;
     // The member gate's tests narrow each workspace to the packages the change reaches, exactly as CI's member run does (one copy).
     facts.test_filters = gates::workspaces(&plan)
@@ -1511,6 +1517,9 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
     let mut changed: Vec<String> = Vec::new();
     let mut ranges = Vec::new();
     let mut extra = Vec::new();
+    // Whether the push renames or deletes a file (git's `-M`, the shared reader's one `--name-status` parse): the `moved-paths` row
+    // runs only then. A read that fails answers "yes": the row runs and says what it cannot measure (ER-33), never a silent skip.
+    let mut moved = false;
     if let Some((tip, rest)) = pushed.split_first() {
         extra.extend(rest.iter().cloned());
         let mb = merge_base(tip)?;
@@ -1519,6 +1528,7 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
         ));
         changed.extend(names(&["diff", "--name-only", "--no-renames", "-z", &mb, tip])?);
         changed.extend(commit_files(&mb, tip)?);
+        moved = reader.moves(&[&mb, tip]).map_or(true, |m| !m.is_empty());
         if count(&mb, tip) > 0 {
             ranges.push(format!("{mb}..{tip}"));
         }
@@ -1535,6 +1545,7 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
             changed.extend(names(&["diff", "--name-only", "--no-renames", "-z", &mb])?);
             changed.extend(commit_files(&mb, "HEAD")?);
             changed.extend(names(&["ls-files", "-z", "--others", "--exclude-standard"])?);
+            moved = reader.moves(&[&mb]).map_or(true, |m| !m.is_empty());
             let dirty = lines(git_text(root, &["status", "--porcelain"]));
             if !dirty.is_empty() {
                 notes.push(format!(
@@ -1557,6 +1568,7 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
             files: changed,
             ranges,
             base: base_known.then(|| base.to_string()),
+            moved,
         },
         notes,
         extra,
@@ -1607,6 +1619,7 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>, ex: &dyn
         reached: Default::default(),
         goldens: Ok(Vec::new()),
         overlap: Default::default(),
+        priority: Default::default(),
     }
 }
 

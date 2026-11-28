@@ -40,6 +40,8 @@
 //! - [`exe`]: `write_program`, `spawn`, `output` and `status`, the way a test writes a program and starts one (the Linux `ETXTBSY`
 //!   refusal of a file that was written or ended a moment ago is retried for a bounded time; plain `fs::write` plus `Command` is
 //!   not).
+//! - [`lock`]: `await_free` and `await_held`, the one way a test reads a lock's state (a just-released lock can read held for a moment; conformance
+//!   C181 flags a direct read).
 //! - [`cargo_layout`]: `profile_dir()`, `sibling_bin` and `example_bin`, the programs cargo built for this test, found in both
 //!   build-folder layouts (before cargo 1.100 and after) and refusing any other shape.
 //!
@@ -58,6 +60,7 @@ pub mod git_fixture;
 pub mod golden;
 pub mod hostile;
 pub mod limits;
+pub mod lock;
 pub mod net;
 pub mod path;
 pub mod private_temp;

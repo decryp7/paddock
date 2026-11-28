@@ -1,12 +1,12 @@
 // ci-runs-reader: the plan record's artifact: finds the ci.yml runs of a commit and reads their `plan-record` artifact; judges no run
 //! Where the selection records live (ADR 0117 amendment D13, user 2026-11-27): an Actions artifact of the plan job's own run, so ci.yml
 //! stays read-only (no job writes to the repository). The plan job writes the record to a file ([`FileSink`]) and its upload step
-//! publishes it as the artifact [`ARTIFACT_NAME`] with `retention-days` [`super::RETENTION_DAYS`]; the nightly finds the runs of a
+//! publishes it as the artifact [`ARTIFACT_NAME`] with `retention-days` [`crate::escape::RETENTION_DAYS`]; the nightly finds the runs of a
 //! commit through the Actions API (the one [`Client`]) and reads the artifact ([`ArtifactStore`]). A missing, expired or unreadable
 //! record is `Missing` or `Unreadable`, which the judgement reports as not measured, never clean and never a guess (ER-33).
 
-use super::{Load, Record, Sink, Store, valid_commit};
 use crate::ci_runs::client::Client;
+use crate::escape::{Load, Record, Sink, Store, valid_commit};
 use std::cell::RefCell;
 use std::path::PathBuf;
 

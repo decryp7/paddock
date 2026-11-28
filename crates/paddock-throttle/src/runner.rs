@@ -5,6 +5,7 @@ use crate::exit::{self, describe_exit, tail_text as tail_of};
 use crate::hang::{HangWatch, Verdict};
 use crate::lock::{Acquirer, Poll, Request, Throttle};
 use crate::mask::mask_text;
+use crate::status::Event;
 use crate::timefmt::clock_text;
 use paddock_proc::queue_stall::StallClock;
 use paddock_proc::{
@@ -163,6 +164,66 @@ pub struct Admitted<'a> {
 /// stall, a stop request and a lock that cannot be taken ending it with the exit code to leave with. The run itself ([`run`]) and a
 /// participant that supervises its own command (the shim) both take their slot through it, so the rules are written once (ER-22).
 pub fn admit<'a>(
+    h: &'a Throttle,
+    req: &Request,
+    opts: &RunOpts,
+    stop: Stop<'_>,
+) -> Result<Admitted<'a>, i32> {
+    // The caller's status file, when it named one (`THROTTLE_STATUS_FILE`): queued now, then admitted, or done without a slot.
+    let id = status_id(h, &req.name);
+    status_event(
+        h,
+        Event::Queued {
+            id: id.clone(),
+            agent: req.name.clone(),
+            at_ms: now_ms(h),
+        },
+    );
+    match admit_queue(h, req, opts, stop) {
+        Ok(a) => {
+            status_event(
+                h,
+                Event::Admitted {
+                    id,
+                    queued_secs: a.queued,
+                    at_ms: now_ms(h),
+                },
+            );
+            Ok(a)
+        }
+        Err(code) => {
+            status_event(
+                h,
+                Event::Done {
+                    id,
+                    ran_secs: 0.0,
+                    code,
+                    at_ms: now_ms(h),
+                },
+            );
+            Err(code)
+        }
+    }
+}
+
+/// The run's id in a status file: its pid and agent name, so two runs never share one.
+fn status_id(h: &Throttle, name: &str) -> String {
+    format!("{}-{name}", h.pid)
+}
+
+fn now_ms(h: &Throttle) -> u64 {
+    h.clock.now_micros() / 1000
+}
+
+/// Appends `event` to the caller's status file ([`crate::status`]); nothing when it named none.
+fn status_event(h: &Throttle, event: Event) {
+    if let Some(path) = &h.cfg.status_file {
+        crate::status::append(path, &event);
+    }
+}
+
+/// The wait of [`admit`]: ticket, queue, load gate, slot.
+fn admit_queue<'a>(
     h: &'a Throttle,
     req: &Request,
     opts: &RunOpts,
@@ -465,6 +526,15 @@ pub fn run(h: &Throttle, req: Request, args: &[String], opts: RunOpts, stop: Sto
         hung,
     } = exec(h, args, opts, stop, Some(&mut acq), run_log.clone());
     let ran = h.now().saturating_sub(t2);
+    status_event(
+        h,
+        Event::Done {
+            id: status_id(h, &name),
+            ran_secs: t_run.elapsed().as_secs_f64(),
+            code,
+            at_ms: now_ms(h),
+        },
+    );
     timing(queued, t_run.elapsed().as_secs_f64());
     let summary = format!(
         "{name} summary: exit {code}, {:.1} s, {}{}",
