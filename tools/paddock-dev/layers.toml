@@ -16,6 +16,7 @@ name = "core"
 modules = [
     "cargo_target",
     "child_env",
+    "curl_config",
     "full_tree",
     "git_env",
     "host_tests",
@@ -112,6 +113,7 @@ modules = [
 name = "gates"
 uses = ["ci"]
 modules = [
+    "mutants_gate",
     "pre_push",
 ]
 

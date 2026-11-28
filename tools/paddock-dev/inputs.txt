@@ -3,6 +3,7 @@
 # globs. tests/inputs.rs compares the list with `cargo metadata` (normal and build path dependencies only).
 tools/paddock-dev
 crates/Cargo.toml
+crates/paddock-approvals
 crates/paddock-ci-config
 crates/paddock-cli
 crates/paddock-download

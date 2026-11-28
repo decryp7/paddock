@@ -319,13 +319,13 @@ impl AllowList {
         };
         match baseline::growth_following(ctx.root(), &ctx.base_ref(), file, &current, &entries_of, &exact, None, Some(&rekey)) {
             Growth::Unmeasured(why) => vec![baseline::unmeasured_finding(ctx.in_ci(), id, rule, file, "the allow list", &why)],
-            Growth::Added { added: 0, .. } => Vec::new(),
+            Growth::Added { added: 0, .. } => growth_approval::stale_finding(ctx, id, rule).into_iter().collect(),
             Growth::Added { base, added, fresh, .. } => {
-                let (detail, ask) = match growth_approval::standing(ctx, id, &fresh) {
+                let (detail, ask, stage_severity) = match growth_approval::standing(ctx, id, &fresh) {
                     Standing::Approved => return Vec::new(),
-                    Standing::Stands { detail, ask } => (detail, ask),
+                    Standing::Stands { detail, ask, severity } => (detail, ask, severity),
                 };
-                vec![
+                vec![growth_approval::at_severity(
                     severity(
                         id,
                         rule,
@@ -339,7 +339,8 @@ impl AllowList {
                         format!("Remove the added entries or lower the raised counts and fix the sites. Growing the list needs the user's approval. {ask}"),
                     )
                     .unwaivable(),
-                ]
+                    stage_severity,
+                )]
             }
         }
     }

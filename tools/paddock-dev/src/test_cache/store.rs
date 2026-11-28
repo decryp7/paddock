@@ -120,11 +120,12 @@ pub struct Lookup {
     pub key: String,
 }
 
-/// The store port. Both calls are bulk: N targets cost one call (ER-20); an error is for the whole call, and a caller turns reuse off
-/// for the run when it gets one (fail open, §5).
+/// The store port. The calls are bulk: N targets cost one call (ER-20). A lookup fails per item (ADR 0116 §5, amended 2026-11-28): a key
+/// whose request failed is an `Err` for that key and the others keep their answers, and a caller runs only that target (fail open).
+/// Writes and deletes are atomic: an error is for the whole call.
 pub trait Store {
-    /// One answer per lookup, in order: the record, or `None` for a miss.
-    fn get_many(&self, lookups: &[Lookup]) -> Result<Vec<Option<Record>>, StoreError>;
+    /// One answer per lookup, in order: the record, `None` for a miss, or the cause that this key could not be read.
+    fn get_many(&self, lookups: &[Lookup]) -> Vec<Result<Option<Record>, StoreError>>;
     /// Writes the records, replacing one with the same key.
     fn put_many(&self, records: &[Record]) -> Result<(), StoreError>;
     /// Deletes the records under these keys and returns each one that was there (the nightly's invalidation names the run a deleted
@@ -215,7 +216,7 @@ impl FsStore {
 
 impl Store for FsStore {
     fn delete_many(&self, lookups: &[Lookup]) -> Result<Vec<Option<Record>>, StoreError> {
-        let found = self.get_many(lookups)?;
+        let found = self.get_many(lookups).into_iter().collect::<Result<Vec<_>, _>>()?;
         for l in lookups {
             let p = self.path(&l.target, &l.class, &l.key);
             match std::fs::remove_file(&p) {
@@ -227,14 +228,15 @@ impl Store for FsStore {
         Ok(found)
     }
 
-    fn get_many(&self, lookups: &[Lookup]) -> Result<Vec<Option<Record>>, StoreError> {
-        Ok(lookups
+    fn get_many(&self, lookups: &[Lookup]) -> Vec<Result<Option<Record>, StoreError>> {
+        lookups
             .iter()
             .map(|l| {
-                let text = std::fs::read_to_string(self.path(&l.target, &l.class, &l.key)).ok()?;
-                Record::parse(&text, &l.key, &l.target, &l.class)
+                Ok(std::fs::read_to_string(self.path(&l.target, &l.class, &l.key))
+                    .ok()
+                    .and_then(|text| Record::parse(&text, &l.key, &l.target, &l.class)))
             })
-            .collect())
+            .collect()
     }
 
     fn put_many(&self, records: &[Record]) -> Result<(), StoreError> {

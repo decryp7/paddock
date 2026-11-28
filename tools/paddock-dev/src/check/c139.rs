@@ -165,10 +165,10 @@ impl Check for C139 {
             let exact = |k: &String| k.clone();
             match baseline::growth(ctx.root(), &ctx.base_ref(), f, &current, &of, &exact, None) {
                 Growth::Unmeasured(why) => findings.push(baseline::unmeasured_finding(ctx.in_ci(), "C139", 49, f, "the exception list", &why)),
-                Growth::Added { added: 0, .. } => {}
+                Growth::Added { added: 0, .. } => findings.extend(growth_approval::stale_finding(ctx, "C139", 49)),
                 Growth::Added { base, added, fresh, .. } => match growth_approval::standing(ctx, "C139", &fresh) {
                     Standing::Approved => {}
-                    Standing::Stands { detail, ask } => findings.push(
+                    Standing::Stands { detail, ask, severity } => findings.push(growth_approval::at_severity(
                         Finding::error(
                             "C139",
                             49,
@@ -182,7 +182,8 @@ impl Check for C139 {
                             format!("{FIX_GROW} {ask}"),
                         )
                         .unwaivable(),
-                    ),
+                        severity,
+                    )),
                 },
             }
         }

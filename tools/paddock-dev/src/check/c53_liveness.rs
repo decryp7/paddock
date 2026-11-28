@@ -386,23 +386,23 @@ pub fn liveness_findings(ctx: &Ctx) -> LivenessRun {
                         "Nothing to do: the entry was rewritten to the file the code moved to.",
                     ));
                 }
-                let standing = if added > 0 {
-                    growth_approval::standing(ctx, "C53", &fresh)
-                } else {
-                    Standing::Approved
-                };
-                if let Standing::Stands { detail, ask } = standing {
-                    out.push(Finding::error(
-                        "C53",
-                        53,
-                        LIVENESS_BASELINE,
-                        1,
-                        format!(
-                            "the baseline grew: {added} entr{} not in the baseline at the merge base {}; it may only shrink{detail}",
-                            if added == 1 { "y is" } else { "ies are" },
-                            &base[..base.len().min(9)]
+                if added == 0 {
+                    out.extend(growth_approval::stale_finding(ctx, "C53", 53));
+                } else if let Standing::Stands { detail, ask, severity } = growth_approval::standing(ctx, "C53", &fresh) {
+                    out.push(growth_approval::at_severity(
+                        Finding::error(
+                            "C53",
+                            53,
+                            LIVENESS_BASELINE,
+                            1,
+                            format!(
+                                "the baseline grew: {added} entr{} not in the baseline at the merge base {}; it may only shrink{detail}",
+                                if added == 1 { "y is" } else { "ies are" },
+                                &base[..base.len().min(9)]
+                            ),
+                            format!("Remove the entries and fix the sites through a ProcessId. Growing the baseline needs the user's approval. {ask}"),
                         ),
-                        format!("Remove the entries and fix the sites through a ProcessId. Growing the baseline needs the user's approval. {ask}"),
+                        severity,
                     ));
                 }
             }

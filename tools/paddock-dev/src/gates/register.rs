@@ -2,6 +2,7 @@
 //! report-only, ratcheted or planned, each with a reason, an owner and a review date. It is parsed once into typed values;
 //! the rules of §3.1 and §3.2 are checked here, in a pure function of the register text, today's date and the history.
 
+use paddock_approvals::{Approver, Verdict, date_move_claim};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -50,15 +51,6 @@ impl fmt::Display for Date {
     }
 }
 
-/// Who approved an entry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Approver {
-    /// The coordinator.
-    Coordinator,
-    /// The user.
-    User,
-}
-
 /// The fields every dated entry carries.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stamp {
@@ -70,8 +62,6 @@ pub struct Stamp {
     pub since: Date,
     /// When it is reviewed at the latest.
     pub review_by: Date,
-    /// Who approved it.
-    pub approved: Approver,
 }
 
 /// An entry of `not_gated`, `conditional`, `report_only` or `level`.
@@ -232,7 +222,8 @@ fn date(t: &toml::Table, k: &str) -> Option<Date> {
 
 fn stamp(t: &toml::Table, ctx: &str, errors: &mut Vec<String>) -> Option<Stamp> {
     let mut missing = Vec::new();
-    for k in ["reason", "owner", "since", "review_by", "approved"] {
+    // `approved` is not read here: the approvals have one reader (`paddock_approvals`, judged in `evaluate`).
+    for k in ["reason", "owner", "since", "review_by"] {
         if !t.contains_key(k) {
             missing.push(k);
         }
@@ -241,14 +232,6 @@ fn stamp(t: &toml::Table, ctx: &str, errors: &mut Vec<String>) -> Option<Stamp> 
         errors.push(format!("{ctx} lacks {}", missing.join(", ")));
         return None;
     }
-    let approved = match text(t, "approved").as_deref() {
-        Some("coordinator") => Approver::Coordinator,
-        Some("user") => Approver::User,
-        other => {
-            errors.push(format!("{ctx}: approved = {other:?} must be \"coordinator\" or \"user\""));
-            return None;
-        }
-    };
     let (Some(since), Some(review_by)) = (date(t, "since"), date(t, "review_by")) else {
         errors.push(format!("{ctx}: since and review_by must be dates (YYYY-MM-DD)"));
         return None;
@@ -258,7 +241,6 @@ fn stamp(t: &toml::Table, ctx: &str, errors: &mut Vec<String>) -> Option<Stamp> 
         owner: text(t, "owner").unwrap_or_default(),
         since,
         review_by,
-        approved,
     })
 }
 
@@ -370,10 +352,6 @@ pub fn parse(src: &str) -> (Register, Vec<String>) {
             text(e, "id").unwrap_or_default(),
             text(e, "app").unwrap_or_default()
         );
-        if text(e, "approved").as_deref() != Some("user") {
-            errors.push(format!("{ctx} needs approved = \"user\""));
-            continue;
-        }
         let (Some(id), Some(app), Some(owner), Some(target)) = (text(e, "id"), text(e, "app"), text(e, "owner"), text(e, "target")) else {
             errors.push(format!("{ctx} lacks id, app, owner or target"));
             continue;
@@ -559,13 +537,14 @@ pub fn check_dates(r: &Register, today: Date) -> Vec<Problem> {
     out
 }
 
-/// One version of the register in the history: the commit, its message and the register text.
+/// One version of the register in the history: the commit, its trailers and the register text.
 #[derive(Debug, Clone)]
 pub struct Version {
     /// The commit id.
     pub sha: String,
-    /// The full message.
-    pub message: String,
+    /// The trailers of the message, as git's own parser gives them (`%(trailers:only,unfold)`, ER-42); for a merge or for HEAD those of
+    /// every commit it brings in.
+    pub trailers: String,
     /// The register text at that commit.
     pub text: String,
 }
@@ -606,43 +585,8 @@ fn ratchet_state(r: &Register) -> BTreeMap<String, (String, String)> {
         .collect()
 }
 
-/// The trailer lines of a commit message: the lines of every paragraph after the subject's whose lines are all `Key: value`.
-/// A trailer counts only as a whole trimmed line there, never as part of prose or a subject.
-fn trailer_lines(message: &str) -> Vec<&str> {
-    let shaped = |l: &str| {
-        l.split_once(": ").is_some_and(|(k, v)| {
-            !v.trim().is_empty()
-                && k.starts_with(|c: char| c.is_ascii_alphabetic())
-                && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
-        })
-    };
-    let mut paragraphs: Vec<Vec<&str>> = vec![Vec::new()];
-    for l in message.lines().map(str::trim) {
-        if l.is_empty() {
-            if !paragraphs.last().is_some_and(Vec::is_empty) {
-                paragraphs.push(Vec::new());
-            }
-        } else if let Some(p) = paragraphs.last_mut() {
-            p.push(l);
-        }
-    }
-    paragraphs
-        .into_iter()
-        .filter(|p| !p.is_empty())
-        .skip(1)
-        .filter(|p| p.iter().all(|l| shaped(l)))
-        .flatten()
-        .collect()
-}
-
-/// The approver of the trailer `<want> <approver>` in the message, if it is there exactly (`approved: user` or `coordinator`).
-fn trailer_approver<'a>(message: &str, want: &str, approvers: &[&'a str]) -> Option<&'a str> {
-    let lines = trailer_lines(message);
-    approvers
-        .iter()
-        .copied()
-        .find(|a| lines.iter().any(|l| *l == format!("{want} {a}")))
-}
+/// The trailer key that approves a move of a date or of a ratchet's target.
+const GATES_DATE: &str = "Gates-date";
 
 fn entry_key_matches(key: &str, id: &str) -> bool {
     key == id || key.starts_with(&format!("{id} ["))
@@ -667,20 +611,23 @@ pub fn date_history(versions: &[Version]) -> Vec<Problem> {
                 if old_target != target {
                     wants.push((
                         format!("moved the target of [[ratchet]] {k} from {old_target} to {target}"),
-                        format!("Gates-date: {k} {old_target} -> {target}; approved:"),
+                        format!("{k} {old_target} -> {target}"),
                     ));
                 }
                 if old_blocks != blocks && blocks == REPORT_ONLY {
                     let was = if old_blocks.is_empty() { "blocking" } else { old_blocks.as_str() };
                     wants.push((
                         format!("made [[ratchet]] {k} report-only (it was {was})"),
-                        format!("Gates-date: {k} blocks_tag {was} -> {REPORT_ONLY}; approved:"),
+                        format!("{k} blocks_tag {was} -> {REPORT_ONLY}"),
                     ));
                 }
-                for (what, want) in wants {
-                    if trailer_approver(&v.message, &want, &["user"]).is_none() {
+                for (what, move_) in wants {
+                    // The user alone approves a ratchet's move; the one judge is `paddock_approvals` (user decision 125).
+                    let line = format!("{GATES_DATE}: {move_}; approved: user");
+                    let verdict = date_move_claim(&v.trailers, GATES_DATE, &move_).verdict("approved", Approver::User, line.clone());
+                    if verdict != Verdict::Approved {
                         out.push(Problem {
-                            message: format!("commit {} {what} without a `{want} user` trailer", short(&v.sha)),
+                            message: format!("commit {} {what} without a `{line}` trailer", short(&v.sha)),
                             fix: "Make the change in a commit whose message carries the trailer (approved by the user), or put it back."
                                 .into(),
                         });
@@ -693,26 +640,28 @@ pub fn date_history(versions: &[Version]) -> Vec<Problem> {
             for (k, new) in &now {
                 if let Some(old) = before.get(k).filter(|o| *o != new) {
                     let id = k.split(" [").next().unwrap_or(k);
-                    let want = format!("Gates-date: {id} {old} -> {new}; approved:");
-                    let approver = trailer_approver(&v.message, &want, &["coordinator", "user"]);
+                    let move_ = format!("{id} {old} -> {new}");
                     let n = moves.entry(k.clone()).or_insert(0);
                     *n += 1;
-                    match approver {
-                        None => out.push(Problem {
+                    // The first move takes the coordinator's or the user's approval, a second move of the entry the user's.
+                    let needs = if *n >= 2 { Approver::User } else { Approver::Coordinator };
+                    let line = format!("{GATES_DATE}: {move_}; approved: {}", needs.as_str());
+                    match date_move_claim(&v.trailers, GATES_DATE, &move_).verdict("approved", needs, line) {
+                        Verdict::Approved => {}
+                        Verdict::Mismatch { why } if *n >= 2 => out.push(Problem {
                             message: format!(
-                                "commit {} moved review_by of {k} from {old} to {new} without a `{want} <coordinator|user>` trailer",
-                                short(&v.sha)
-                            ),
-                            fix: "Make the move in a commit whose message carries the trailer, or put the old date back.".into(),
-                        }),
-                        Some(a) if *n >= 2 && a != "user" => out.push(Problem {
-                            message: format!(
-                                "commit {} moved review_by of {k} a second time and needs `approved: user`",
+                                "commit {} moved review_by of {k} a second time and needs `approved: user` ({why})",
                                 short(&v.sha)
                             ),
                             fix: "A second move of the same entry is approved by the user.".into(),
                         }),
-                        _ => {}
+                        _ => out.push(Problem {
+                            message: format!(
+                                "commit {} moved review_by of {k} from {old} to {new} without a `{GATES_DATE}: {move_}; approved: <coordinator|user>` trailer",
+                                short(&v.sha)
+                            ),
+                            fix: "Make the move in a commit whose message carries the trailer, or put the old date back.".into(),
+                        }),
                     }
                 }
             }
@@ -959,12 +908,17 @@ approved = "user"
         let (r, errs) = parse(GOOD);
         assert!(errs.is_empty(), "{errs:?}");
         assert_eq!((r.not_gated.len(), r.ignored.len(), r.ratchet.len(), r.harness.len()), (1, 1, 1, 1));
-        let bad = GOOD
-            .replace("owner = \"ADR 0060 WP-4\"\n", "")
-            .replace("approved = \"user\"", "approved = \"coordinator\"");
+        let bad = GOOD.replace("owner = \"ADR 0060 WP-4\"\n", "");
         let (_, errs) = parse(&bad);
         assert!(errs.iter().any(|e| e.contains("lacks owner")), "{errs:?}");
-        assert!(errs.iter().any(|e| e.contains("needs approved = \"user\"")), "{errs:?}");
+        // The approvals are not this reader's: a register that lacks `approved` still parses whole (`paddock_approvals` judges it).
+        let (r, errs) = parse(
+            &GOOD
+                .replace("approved = \"user\"\n", "")
+                .replace("approved = \"coordinator\"\n", ""),
+        );
+        assert!(errs.is_empty(), "{errs:?}");
+        assert_eq!((r.not_gated.len(), r.ignored.len(), r.ratchet.len()), (1, 1, 1));
         assert!(parse("not = toml = at all").1[0].contains("not valid TOML"));
         assert!(parse("version = 2").1[0].contains("version must be 1"));
     }
@@ -1065,10 +1019,17 @@ approved = "user"
         assert_eq!(release_refusals(Some(&dyno), Some(&dyno), "dyno-v1.2.0", d("2026-12-09")).len(), 1);
     }
 
+    /// A version whose commit message is `message`: its trailers are the `Gates-date:` lines after the subject, as git's own parser
+    /// gives them for these simple messages (the real parser, prose and subject included, is exercised in `edge.rs`).
     fn version(sha: &str, message: &str, text: &str) -> Version {
         Version {
             sha: sha.into(),
-            message: message.into(),
+            trailers: message
+                .lines()
+                .skip(1)
+                .filter(|l| l.starts_with("Gates-date: "))
+                .collect::<Vec<_>>()
+                .join("\n"),
             text: text.into(),
         }
     }
@@ -1266,19 +1227,13 @@ approved = "user"
     }
 
     #[test]
-    fn a_trailer_counts_only_as_the_whole_line_of_a_trailer_block() {
+    fn a_trailer_counts_only_with_its_exact_move_and_a_whole_approver_word() {
         let moved = RATCHET.replace("debrief-v1.2.0", "debrief-v1.3.0");
         let t = "Gates-date: C13 debrief debrief-v1.2.0 -> debrief-v1.3.0; approved: user";
         let flagged = |msg: &str| !date_history(&[version("a1", "feat: add", RATCHET), version("b2", msg, &moved)]).is_empty();
         assert!(!flagged(&format!("fix: move\n\nwhy\n\n{t}")));
         assert!(flagged(&format!("fix: move\n\n{t} and more")), "text after the approver");
         assert!(flagged(&format!("fix: move\n\n{t}x")), "text after the approver");
-        assert!(flagged(&format!("fix: move\n\nThe trailer would read {t}")), "inside prose");
-        assert!(
-            flagged(&format!("fix: move\n\nSee below.\n{t}")),
-            "a paragraph that is not all trailers"
-        );
-        assert!(flagged(t), "the subject is not a trailer");
         // another app's ratchet of the same id does not share the trailer
         let other = t.replace("C13 debrief ", "C13 dyno ");
         assert!(flagged(&format!("fix: move\n\n{other}")));
@@ -1287,6 +1242,13 @@ approved = "user"
         let line = "Gates-date: C13 2026-12-06 -> 2026-12-20; approved: coordinator";
         assert!(date_history(&[version("a1", "x", GOOD), version("b2", &format!("x\n\n{line}"), &a)]).is_empty());
         assert!(!date_history(&[version("a1", "x", GOOD), version("b2", &format!("x\n\n{line} maybe"), &a)]).is_empty());
+        assert!(
+            !date_history(&[
+                version("a1", "x", GOOD),
+                version("b2", "x\n\nGates-date: C13 2026-12-06 -> 2026-12-20; approved: nobody", &a)
+            ])
+            .is_empty()
+        );
     }
 
     #[test]

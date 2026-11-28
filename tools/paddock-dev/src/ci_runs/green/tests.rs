@@ -247,9 +247,7 @@ fn reached() -> Touched {
 }
 
 fn client(f: &mut Fake) -> Client<'_> {
-    let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t");
-    c.backoff_ms = 0;
-    c
+    Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t")
 }
 
 fn base(f: &mut Fake, first_parent: &[String], t: Touched) -> Option<Base> {

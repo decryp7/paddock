@@ -45,8 +45,8 @@ echo "Building (a first build takes several minutes)..."
 (cd app && CI=true npx tauri build --bundles deb,appimage -- --profile dist)
 
 target="${CARGO_TARGET_DIR:-$root/target}"
-deb=$(find "$target/dist/bundle/deb" -maxdepth 1 -name '*.deb' 2>/dev/null | head -1)
-appimage=$(find "$target/dist/bundle/appimage" -maxdepth 1 -name '*.AppImage' 2>/dev/null | head -1)
+deb=$(find "$target/dist/bundle/deb" -maxdepth 1 -name '*.deb' 2>/dev/null); deb=${deb%%$'\n'*}
+appimage=$(find "$target/dist/bundle/appimage" -maxdepth 1 -name '*.AppImage' 2>/dev/null); appimage=${appimage%%$'\n'*}
 echo
 echo "Built:"
 echo "  deb:      ${deb:-not found}"
