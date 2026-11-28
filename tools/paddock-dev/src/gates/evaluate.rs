@@ -9,6 +9,44 @@ use super::register::{self, Date, Entry, Gate, Register, Version};
 use super::tree::{Tree, any_glob, glob_regex};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// The findings and warnings of the register's approvals at `stage` (`base` is the register at the merge base, if it could be read).
+fn approvals(register: &str, base: Option<&str>, stage: paddock_approvals::Stage, out: &mut Outcome) {
+    use paddock_approvals::{Severity, Verdict};
+    // A register that cannot be read is already the `register` finding above.
+    let Ok(now) = paddock_approvals::parse_gates(register) else {
+        return;
+    };
+    let base = base.and_then(|t| paddock_approvals::parse_gates(t).ok());
+    for j in paddock_approvals::judge_entries(&now, base.as_ref(), stage) {
+        let (message, fix) = match &j.verdict {
+            Verdict::Missing { line_to_add } => (
+                format!("{} lacks approved", j.subject),
+                format!("The coordinator or the user records it (never an agent for the user, ER-39): {line_to_add}."),
+            ),
+            Verdict::Mismatch { why } => (
+                format!("{}: {why}", j.subject),
+                "Fix the approval; the user alone adopts a ratchet.".to_string(),
+            ),
+            Verdict::Stale { why } => (
+                format!("{} has a stale approval: {why}", j.subject),
+                "Remove the approval.".to_string(),
+            ),
+            Verdict::Approved => continue,
+        };
+        let f = Finding {
+            file: Some(REGISTER.to_string()),
+            line: None,
+            id: "register".to_string(),
+            message,
+            fix,
+        };
+        match j.severity {
+            Severity::Error => out.findings.push(f),
+            Severity::Warning => out.warnings.push(f),
+        }
+    }
+}
+
 /// Everything C100 reads.
 pub struct Input<'a> {
     /// The tracked files.
@@ -39,6 +77,8 @@ pub struct Input<'a> {
     pub history_error: Option<String>,
     /// The checkout is shallow: the register's history and the base are not all there (ER-33: not measured).
     pub shallow: bool,
+    /// Where the check runs: what a missing approval counts as ([`paddock_approvals::severity`]).
+    pub stage: paddock_approvals::Stage,
 }
 
 /// One finding.
@@ -210,6 +250,11 @@ pub fn evaluate(input: &Input) -> Outcome {
         );
     }
     out.register_errors = reg_errors.len();
+    // The approvals (`approved` of every entry) have one reader and one policy: `paddock_approvals`. An entry the branch adds (the
+    // base register lacks it) without approval is a warning at a push and an error at the member gate and landing.
+    if let Some(t) = &input.register_text {
+        approvals(t, input.base_register_text.as_deref(), input.stage, &mut out);
+    }
     let mut problems = register::check_dates(&reg, input.today);
     problems.extend(register::date_history(&input.history));
     // The sunset rule (user, 2026-11-24; ER-41's time rule): an overdue report-only entry blocks a release tag of an app it concerns
@@ -839,6 +884,7 @@ mod tests {
             history_error: None,
             warn: false,
             shallow: false,
+            stage: paddock_approvals::Stage::Landing,
         })
     }
 
@@ -893,6 +939,7 @@ mod tests {
             history_error: None,
             warn: false,
             shallow: false,
+            stage: paddock_approvals::Stage::Landing,
         })
     }
 
@@ -927,6 +974,7 @@ mod tests {
             history_error: None,
             warn: false,
             shallow: false,
+            stage: paddock_approvals::Stage::Landing,
         });
         let m = messages(&o);
         assert!(
@@ -987,7 +1035,61 @@ mod tests {
             history_error: None,
             warn: false,
             shallow: false,
+            stage: paddock_approvals::Stage::Landing,
         })
+    }
+
+    /// C100 over a register with the wired `step:tools/hooks` entry, against `base`, at `stage`.
+    fn run_approvals(register: &str, base: Option<&str>, stage: paddock_approvals::Stage) -> Outcome {
+        let tree = MemTree::new(&[]);
+        let mut sources = Sources::default();
+        sources.workflows.insert(".gitea/workflows/ci.yml".into(), STEP_CI.into());
+        sources.root_contracts.insert("tools".into(), STEP_CONTRACT.into());
+        evaluate(&Input {
+            tree: &tree,
+            sources: &sources,
+            conformance_list: Ok(LIST.into()),
+            conformance_commands: Some(r#"["list","commands"]"#.into()),
+            dev_commands: ["gates", "gates check"].iter().map(|s| s.to_string()).collect(),
+            register_text: Some(register.to_string()),
+            base_register_text: base.map(str::to_string),
+            history: Vec::new(),
+            today: Date::parse("2026-11-10").unwrap(),
+            release_tag: None,
+            planner: &AllMarks,
+            history_error: None,
+            warn: false,
+            shallow: false,
+            stage,
+        })
+    }
+
+    /// The C178/C179 case: a branch adds a report-only entry without `approved`. A push may carry it (a warning); the member gate and
+    /// landing refuse it; an entry main already carries without it is refused at every stage (ER-39, ER-41).
+    #[test]
+    fn a_report_only_entry_the_branch_adds_without_approval_warns_at_a_push_and_fails_the_member_gate() {
+        use paddock_approvals::Stage;
+        let with = step_register("2026-12-06");
+        let without = with.replace("approved = \"coordinator\"\n", "");
+        let lacks = |o: &Outcome| messages(o).iter().any(|m| m.contains("step:tools/hooks") && m.contains("approved"));
+        let warned = |o: &Outcome| {
+            o.warnings
+                .iter()
+                .any(|w| w.message.contains("step:tools/hooks") && w.message.contains("approved"))
+        };
+        let base = Some(REG_HEAD);
+        let push = run_approvals(&without, base, Stage::BranchPush);
+        assert!(!lacks(&push) && warned(&push), "a push: warning only: {:?}", messages(&push));
+        for stage in [Stage::MemberGate, Stage::Landing] {
+            let o = run_approvals(&without, base, stage);
+            assert!(lacks(&o) && !warned(&o), "{stage:?}: {:?}", messages(&o));
+        }
+        // Main carries the entry without approval: an error even at a push.
+        assert!(lacks(&run_approvals(&without, Some(&without), Stage::BranchPush)));
+        // Approved: nothing at any stage; an unknown approver is a mismatch (error) at a push too.
+        assert!(!lacks(&run_approvals(&with, base, Stage::MemberGate)) && !warned(&run_approvals(&with, base, Stage::MemberGate)));
+        let bad = with.replace("\"coordinator\"", "\"agent\"");
+        assert!(lacks(&run_approvals(&bad, base, Stage::BranchPush)));
     }
 
     /// The sunset rule in C100 (ER-41's time rule), with its positive controls: an overdue report-only entry is a warning on a push

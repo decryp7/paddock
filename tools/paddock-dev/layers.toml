@@ -16,7 +16,9 @@ name = "core"
 modules = [
     "cargo_target",
     "child_env",
+    "curl_config",
     "full_tree",
+    "git",
     "git_env",
     "host_tests",
     "input_hash",
@@ -28,6 +30,7 @@ modules = [
     "priority",
     "process_env",
     "repo_inputs",
+    "repo_root",
     "stop_signals",
     "test_cost",
     "test_sleeper",
@@ -87,9 +90,11 @@ modules = [
     "plan_gitea",
     "plan_graph",
     "plan_repo",
+    "registers",
     "plan_since",
     "repo_model",
     "run_scope",
+    "subject",
     "test_features",
 ]
 
@@ -112,6 +117,7 @@ modules = [
 name = "gates"
 uses = ["ci"]
 modules = [
+    "mutants_gate",
     "pre_push",
 ]
 

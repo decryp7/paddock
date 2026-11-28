@@ -150,9 +150,9 @@ fn the_register_switches_a_guard_to_blocking_once_and_the_repositorys_starts_rep
         mode_of(Ok("[first_green]\n\"green-main\" = \"x\"\n"), Guard::GreenMain),
         Mode::ReportOnly(_)
     ));
-    let real = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(REGISTER)).unwrap();
+    let real = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(DISPATCH_GUARDS)).unwrap();
     for g in [Guard::FailedFirst, Guard::GreenMain] {
-        assert!(recorded(&real, g).is_ok(), "{REGISTER} reads");
+        assert!(recorded(&real, g).is_ok(), "{DISPATCH_GUARDS} reads");
     }
 }
 
@@ -266,7 +266,6 @@ fn jobs_of(list: Vec<Value>) -> Vec<TimedJob> {
     let url = "https://gitea.invalid/api/v1/repos/decryp7/paddock/actions/runs/1/jobs?limit=50&page=1";
     f.json(url, json!({"jobs": list, "total_count": 0}));
     let mut c = Client::new(&mut f, "https://gitea.invalid", "decryp7/paddock", "t");
-    c.backoff_ms = 0;
     c.timed_jobs(1).unwrap().unwrap()
 }
 
@@ -336,7 +335,6 @@ fn main_is_read_from_the_newest_nightly_that_measured_something_and_the_newest_p
     scope["expected"]["crate (windows-latest)"] = json!({"job": "crate", "leg": {"os": "windows-latest"}, "projects": ["crates"]});
     f.log(9, &format!("plan scope: {scope}\n{rest}"));
     let mut c = Client::new(&mut f, "https://gitea.invalid", "decryp7/paddock", "t");
-    c.backoff_ms = 0;
     let (nightly, push) = read_main(&mut c).unwrap();
     let at = |mut r: MainRun| {
         r.created_ms = super::super::time::ts("2026-11-24T05:00:00Z");
@@ -379,7 +377,6 @@ fn a_trains_runs_are_read_down_to_its_last_full_run_with_the_kind_from_the_token
         "2026-11-23T10:00:00Z ::notice::...\n2026-11-23T10:00:01Z plan mode: full=true\n",
     );
     let mut c = Client::new(&mut f, "https://gitea.invalid", "decryp7/paddock", "t");
-    c.backoff_ms = 0;
     let runs = read_train(&mut c, "ci.yml", TRAIN).unwrap();
     assert_eq!(
         runs,
@@ -392,7 +389,6 @@ fn a_trains_runs_are_read_down_to_its_last_full_run_with_the_kind_from_the_token
     // Positive control: without the plan log the untagged run is unknown, and the guard says not measured.
     f.remove_json(&format!("{API}/runs/8868/jobs?limit=50&page=1"));
     let mut c = Client::new(&mut f, "https://gitea.invalid", "decryp7/paddock", "t");
-    c.backoff_ms = 0;
     let runs = read_train(&mut c, "ci.yml", TRAIN).unwrap();
     assert_eq!(runs.last().unwrap().kind, None);
     assert!(matches!(failed_first(&runs, HEAD, "ci.yml", TRAIN), Finding::NotMeasured(_)));

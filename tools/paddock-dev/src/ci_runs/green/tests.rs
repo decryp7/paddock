@@ -247,9 +247,7 @@ fn reached() -> Touched {
 }
 
 fn client(f: &mut Fake) -> Client<'_> {
-    let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t");
-    c.backoff_ms = 0;
-    c
+    Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t")
 }
 
 fn base(f: &mut Fake, first_parent: &[String], t: Touched) -> Option<Base> {
@@ -1674,6 +1672,36 @@ fn train_t_a_flaky_test_in_a_package_the_lock_diff_left_unchanged_is_a_fix_item_
     let o = grade(&mut f, &r, lock_only_plan(&["paddock-chromium"]));
     assert!(matches!(&o.result, GradedResult::Red(why) if why.contains("touched code")), "{o:?}");
     assert!(!o.lands());
+}
+
+/// Train aa's shape (run 9329, ER-12): the plan reached the crates workspace through ci.yml steps that cannot alter a test (the plan
+/// job, artifact uploads: `packageGraded`) and through a few changed crates. The plan's own JSON is read, so no flag is set by hand.
+fn ci_graded_plan(changed: &[&str]) -> Touched {
+    let plan = json!({"crates": true, "apps": [], "packages": {"crates": changed}, "cargoOnly": [], "packageGraded": ["crates"]});
+    let mut t = Touched::from_plan(&plan);
+    t.members = [("crates".to_string(), ["paddock-chromium", "paddock-core"].map(String::from).into())].into();
+    t
+}
+
+#[test]
+fn train_aa_a_flaky_test_in_a_package_a_ci_yml_change_that_cannot_alter_a_test_left_alone_lands() {
+    let c = sha(2);
+    let r = Run::train(8610, &c, "failure").failing(CRATE, CRATE_FLAKY);
+    let mut f = server(std::slice::from_ref(&r));
+    let o = grade(&mut f, &r, ci_graded_plan(&["paddock-core"]));
+    assert!(o.lands() && !o.is_tag_green(), "{o:?}");
+    assert_eq!(fix_items(&o).len(), 1, "{o:?}");
+    // Positive control (ER-33): the same run with the test's own package changed blocks.
+    let o = grade(&mut f, &r, ci_graded_plan(&["paddock-chromium"]));
+    assert!(matches!(&o.result, GradedResult::Red(why) if why.contains("touched code")), "{o:?}");
+    // Control: without `packageGraded` the project is reached for a reason beyond Cargo and every test of it is touched (fail closed).
+    let mut whole = ci_graded_plan(&["paddock-core"]);
+    whole.cargo_only.clear();
+    let o = grade(&mut f, &r, whole);
+    assert!(
+        matches!(&o.result, GradedResult::Red(why) if why.contains("not a Cargo reach")),
+        "{o:?}"
+    );
 }
 
 #[test]

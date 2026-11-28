@@ -7,11 +7,12 @@ use super::budget::with_throttle_flags;
 use super::exec::{Done, Ending, Row};
 use super::exec::docker_answers;
 use crate::heavy_tool::throttle_command_for;
-use crate::throttle::{QUEUE_STALL, on_path};
+use crate::pathfind::on_path;
+use crate::throttle::QUEUE_STALL;
 use super::gates::{self, Gate, LinuxTarget};
 use super::linux_inputs::{ImageProbe, PROBE_NEXT, WsCrates, ci_version, image_probe, left_out};
-use super::outcome::subject_of;
-use super::{render, repo_root};
+use crate::subject::subject_of;
+use super::render;
 use crate::plan::{Request, plan_with_graph};
 use paddock_cli::{CliError, Report};
 use paddock_repo_graph::GitHistory;
@@ -128,7 +129,7 @@ fn step(root: &Path, id: &str, argv: &[String], what: &str) -> (String, Row, boo
 
 /// Runs `./dev check --warm-linux`.
 pub fn command(root: &Option<PathBuf>, named: &[String]) -> Result<Report, CliError> {
-    let root = repo_root(root)?;
+    let root = crate::repo_root::repo_root(root.as_deref())?;
     let env: HashMap<String, String> = paddock_env::vars().collect();
     let version = ci_version(&root).map_err(|e| CliError::failure(format!("{e}.")).with_hint("Run it from a full checkout."))?;
     let all = if named.is_empty() {

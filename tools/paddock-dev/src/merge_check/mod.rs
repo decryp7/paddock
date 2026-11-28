@@ -40,7 +40,6 @@ pub(crate) mod diff;
 mod gates;
 mod generated;
 mod generator_step;
-pub(crate) mod git;
 mod hakari;
 mod hunks;
 mod lost_tests;
@@ -56,7 +55,7 @@ pub mod trailers;
 pub mod trial_dispatch;
 mod whole_file;
 
-use git::{AutoMerge, Git, short};
+use crate::git::{AutoMerge, Git, short};
 use paddock_cli::outcome::{Sha, TreeId};
 use paddock_cli::{CheckId, CliError, Exit, Outcome, Reason, Report, Subject, ToolVersion, UnixSeconds, Unmeasured, measure};
 use serde_json::json;
@@ -247,7 +246,7 @@ fn run(git: &Git, merge: &Merge) -> Result<Vec<Finding>, String> {
         if !git.has_commit(p)? {
             return Err(format!(
                 "the parent {} is not in this clone (a shallow clone? run `git fetch --unshallow`)",
-                git::short(p)
+                crate::git::short(p)
             ));
         }
     }
@@ -420,10 +419,12 @@ fn resolve(git: &Git, req: &Request) -> Result<Merge, CliError> {
     let gap = |e: String| CliError::new(Exit::NotMeasured, not_measured(&e));
     match (&req.commit, &req.branch, &req.target) {
         (Some(c), None, None) => {
-            let line = git.text(&["rev-list", "--parents", "-n", "1", c]).map_err(gap)?;
+            let line = git.text(&["rev-list", "--parents", "-n", "1", c]).map_err(|e| gap(e.to_string()))?;
             let ids: Vec<String> = line.split_whitespace().skip(1).map(str::to_string).collect();
             if ids.len() < 2 {
-                let shallow = git.text(&["rev-parse", "--is-shallow-repository"]).map_err(gap)?;
+                let shallow = git
+                    .text(&["rev-parse", "--is-shallow-repository"])
+                    .map_err(|e| gap(e.to_string()))?;
                 if shallow.trim() == "true" {
                     return Err(gap(format!(
                         "{c} shows no parents because this clone is shallow (run `git fetch --unshallow`)"
@@ -432,11 +433,15 @@ fn resolve(git: &Git, req: &Request) -> Result<Merge, CliError> {
                 return Err(CliError::usage(format!("{c} is not a merge commit."))
                     .with_hint("Give a merge commit, or --branch <b> --target <t> before merging."));
             }
-            let tree = git.text(&["rev-parse", &format!("{c}^{{tree}}")]).map_err(gap)?.trim().to_string();
+            let tree = git
+                .text(&["rev-parse", &format!("{c}^{{tree}}")])
+                .map_err(|e| gap(e.to_string()))?
+                .trim()
+                .to_string();
             // The message and git's reading of its trailers, in one call.
             let shown = git
                 .text(&["show", "-s", &format!("--format=%B%x00{}", trailers::TRAILERS_FORMAT), c])
-                .map_err(gap)?;
+                .map_err(|e| gap(e.to_string()))?;
             let (message, trailer_block) = shown.split_once('\0').unwrap_or((shown.as_str(), ""));
             let (message, trailer_block) = (message.to_string(), trailer_block.to_string());
             let commit = git
@@ -451,12 +456,12 @@ fn resolve(git: &Git, req: &Request) -> Result<Merge, CliError> {
         (None, Some(b), Some(t)) => {
             let first = git
                 .text(&["rev-parse", "--verify", &format!("{t}^{{commit}}")])
-                .map_err(gap)?
+                .map_err(|e| gap(e.to_string()))?
                 .trim()
                 .to_string();
             let second = git
                 .text(&["rev-parse", "--verify", &format!("{b}^{{commit}}")])
-                .map_err(gap)?
+                .map_err(|e| gap(e.to_string()))?
                 .trim()
                 .to_string();
             let tree = git
@@ -574,7 +579,7 @@ fn check(req: &Request) -> Result<Checked, CliError> {
         return Err(CliError::usage("--no-trial needs a reason.")
             .with_hint("Say why, for example --no-trial \"docs-only member, no job of its own to run\"."));
     }
-    let root = crate::gates::command::repo_root(req.root.as_deref())?;
+    let root = crate::repo_root::repo_root(req.root.as_deref())?;
     let git = Git::new(&root);
     let merge = resolve(&git, req)?;
     let analysis = analyze(&git, &merge);

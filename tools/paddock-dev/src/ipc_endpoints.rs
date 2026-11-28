@@ -1099,14 +1099,7 @@ pub fn check_with(root: &Path, tick: &dyn Fn()) -> Result<Checked, String> {
 
 /// `./dev check ipc-endpoints [--tag <tag>]`.
 pub fn command(root: Option<PathBuf>, tag: Option<String>) -> Result<Report, CliError> {
-    let root = match root {
-        Some(r) => r,
-        None => {
-            let cwd = std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder cannot be read: {e}.")))?;
-            let out = crate::input_hash::Exec::run(&crate::input_hash::Real, "git", &["rev-parse", "--show-toplevel"], &cwd, None)?;
-            PathBuf::from(out.trim())
-        }
-    };
+    let root = crate::repo_root::repo_root(root.as_deref())?;
     let (sites, register, ratchet, found) = check(&root).map_err(|e| {
         CliError::failure(format!("::error::C102 {e}")).with_hint("Fix the file named above and run `./dev check ipc-endpoints` again.")
     })?;

@@ -990,7 +990,6 @@ mod tests {
 
     fn ask(f: &mut Fake) -> Verdict {
         let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t");
-        c.backoff_ms = 0;
         let fp = vec!["e".repeat(40)];
         verdict_with_touched(&mut c, "ci.yml", SHA, None, true, &mut |_| fp.clone(), &mut |_, _| {
             Some(Touched::default())
@@ -1000,7 +999,6 @@ mod tests {
     /// The same on the old basis, the report-only phase's (ER-41).
     fn ask_old(f: &mut Fake) -> Verdict {
         let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t");
-        c.backoff_ms = 0;
         let fp = vec!["e".repeat(40)];
         verdict_with_touched(&mut c, "ci.yml", SHA, None, false, &mut |_| fp.clone(), &mut |_, _| {
             Some(Touched::default())
@@ -1023,7 +1021,6 @@ mod tests {
         assert!(line.contains("\"os_full\":false"), "the control line is scoped: {line}");
         let ask_tag = |f: &mut Fake| {
             let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t");
-            c.backoff_ms = 0;
             verdict_for(&mut c, "ci.yml", SHA, None, true, true)
         };
         let mut scoped = server(vec![main_push(5, "success")], &[(5, 50, Some(line.as_str()))]);
@@ -1044,7 +1041,6 @@ mod tests {
     fn a_tag_of_an_app_refuses_a_green_run_that_left_the_app_inactive_and_accepts_one_that_planned_it() {
         let ask_app = |f: &mut Fake, app: &str| {
             let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t");
-            c.backoff_ms = 0;
             let v = verdict_for(&mut c, "ci.yml", SHA, None, true, true);
             for_app(&mut c, v, app)
         };
@@ -1073,7 +1069,6 @@ mod tests {
         let broken = "plan scope: {not json\nplan verdict: complete=true\n";
         let ask_tag = |f: &mut Fake, scope: bool| {
             let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t");
-            c.backoff_ms = 0;
             let fp: Vec<String> = Vec::new();
             verdict_with_touched_for(&mut c, "ci.yml", SHA, None, scope, true, &mut |_| fp.clone(), &mut |_, _| {
                 Some(Touched::default())
@@ -1123,7 +1118,6 @@ mod tests {
         }
         let ask_hint = |f: &mut Fake, tag: bool| {
             let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t");
-            c.backoff_ms = 0;
             let fp = vec!["e".repeat(40), "d".repeat(40)];
             verdict_with_touched_for(&mut c, "ci.yml", SHA, None, true, tag, &mut |_| fp.clone(), &mut |_, _| {
                 Some(Touched::default())
@@ -1636,7 +1630,6 @@ mod tests {
     }
     fn record(f: &mut Fake, workflow: &str, id: u64) -> Result<String, String> {
         let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t");
-        c.backoff_ms = 0;
         first_green_scope(&mut c, workflow, id)
     }
 
@@ -1697,7 +1690,6 @@ mod tests {
             ..Touched::default()
         };
         let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t");
-        c.backoff_ms = 0;
         verdict_with_touched(&mut c, "ci.yml", SHA, None, true, &mut |_| Vec::new(), &mut |_, _| Some(t.clone()))
     }
 
@@ -1762,7 +1754,6 @@ mod tests {
         let asked = std::cell::Cell::new(0);
         let v = {
             let mut c = Client::new(&mut f, "https://gitea.invalid", "decryp7/paddock", "t");
-            c.backoff_ms = 0;
             verdict_with_touched(
                 &mut c,
                 "ci.yml",
@@ -1783,7 +1774,6 @@ mod tests {
         // Positive control: a verdict with no full run asks for the hint once.
         let mut f = run_8610("cancelled");
         let mut c = Client::new(&mut f, "https://gitea.invalid", "decryp7/paddock", "t");
-        c.backoff_ms = 0;
         let v = verdict_with_touched(
             &mut c,
             "ci.yml",
@@ -1808,7 +1798,6 @@ mod tests {
         let ask_at = |root: &std::path::Path| {
             let mut f = server(vec![main_push(5, "success")], &[(5, 50, Some(old_line))]);
             let mut c = Client::new(&mut f, "https://gitea.invalid", "decryp7/paddock", "t");
-            c.backoff_ms = 0;
             verdict_at(&mut c, "ci.yml", SHA, root)
         };
         let dir = tempfile::tempdir().unwrap();
@@ -1848,7 +1837,6 @@ mod tests {
             f.log(44761, CRATE_FLAKY);
             f.log(44768, include_str!("../../tests/ci-runs/nextest-run8610-app-gates-flaky-only.log"));
             let mut c = Client::new(&mut f, "https://gitea.invalid", "decryp7/paddock", "t");
-            c.backoff_ms = 0;
             let v = verdict_with_touched(&mut c, "ci.yml", SHA, None, scope, &mut |_| Vec::new(), &mut |_, _| {
                 Some(Touched::default())
             });
@@ -1874,7 +1862,6 @@ mod tests {
         // The same through the push reuse: it runs the commit.
         let mut f = run_8610("cancelled");
         let mut c = Client::new(&mut f, "https://gitea.invalid", "decryp7/paddock", "t");
-        c.backoff_ms = 0;
         let d = crate::ci_runs::reuse::decide_with_touched(
             &mut c,
             "ci.yml",
@@ -1916,7 +1903,6 @@ mod tests {
 
     fn ask_trial(f: &mut Fake) -> Trial {
         let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t");
-        c.backoff_ms = 0;
         trial(&mut c, "ci.yml", "feat/x", MEMBER)
     }
 

@@ -71,6 +71,31 @@ fn run_with(root: &Path, base_ref: Option<&str>) -> (Vec<(String, String)>, usiz
     (r.findings.iter().map(|f| (f.file.clone(), f.message.clone())).collect(), probes)
 }
 
+/// C155 at `stage`: each finding's file, message and whether it fails the run.
+fn run_at(root: &Path, stage: paddock_approvals::Stage) -> Vec<(String, String, bool)> {
+    let opts = RunOptions {
+        root: root.to_path_buf(),
+        config: paddock_dev::check::config::Config::bare("paddock"),
+        scope: None,
+        only: Some(vec!["C155".into()]),
+        files: None,
+        today: "2026-11-22".into(),
+        base_ref: Some("origin/main".into()),
+        ci: Some(false),
+    };
+    let r = paddock_dev::check::run_checks_at(&opts, &registry(), stage).unwrap();
+    r.findings
+        .iter()
+        .map(|f| {
+            (
+                f.file.clone(),
+                f.message.clone(),
+                f.severity == paddock_dev::check::finding::Severity::Error,
+            )
+        })
+        .collect()
+}
+
 fn edit_contract(root: &Path, rel: &str, f: impl Fn(&mut Value)) {
     let path = root.join(rel);
     let mut v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
@@ -463,12 +488,7 @@ fn tree_the_paddock_dev_host_legs_leave_out_the_os_independent_areas_and_linux_r
         "repo_model::replay::",
     ];
     // Code that holds OS behaviour itself, or that only a Mac runs, stays where it is.
-    let os_specific = [
-        "merge_check::git::",
-        "ci_runs::dispatch_guards::",
-        "local_sccache::",
-        "pre_push::exec::",
-    ];
+    let os_specific = ["git::", "ci_runs::dispatch_guards::", "local_sccache::", "pre_push::exec::"];
     for os in ["windows-latest", "macos-latest"] {
         let on = h.module_prefixes(os);
         for m in independent {
@@ -539,4 +559,54 @@ fn tree_a_register_growth_is_cleared_only_by_the_users_gates_line_that_names_exa
     git(root, &["commit", "-qam", "chore: the user's gates line"]);
     let (findings, _) = run(root);
     assert!(!grew(&findings), "a matching line approves the growth: {findings:#?}");
+}
+
+/// The stage policy on the real C155 (user decision 2026-11-27): a removal the branch adds without the user's approval is a warning at
+/// a branch push and an error at the member gate and landing; an approval the merge base already covers is a warning on a branch and
+/// an error at landing, which the integrator clears (this broke train y's trials: its 16 approvals went stale when the member landed).
+#[test]
+fn tree_stage_decides_whether_a_missing_or_stale_os_removal_approval_fails() {
+    use paddock_approvals::Stage;
+    let d = scratch_of(&["crates"]);
+    let root = d.path();
+    git(root, &["init", "-q", "-b", "work"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "chore: base"]);
+    git(root, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    edit_contract(root, "crates/paddock.ci.json", |v| {
+        v["hostTests"]["only"] =
+            serde_json::json!([{"os": "macos-latest", "name": "paddock-proc", "reason": "a control for the unsafe direction"}]);
+    });
+    git(root, &["commit", "-qam", "chore: an only without approval"]);
+    let removal = |stage| -> Vec<bool> {
+        run_at(root, stage)
+            .into_iter()
+            .filter(|(_, m, _)| m.contains("`skip` or `only` entry"))
+            .map(|(_, _, error)| error)
+            .collect()
+    };
+    assert_eq!(removal(Stage::BranchPush), [false], "a push may carry it: a warning");
+    assert_eq!(removal(Stage::MemberGate), [true], "the member gate refuses it");
+    assert_eq!(removal(Stage::Landing), [true], "landing refuses it");
+    // The branch lands with its approval recorded; then the approval is stale.
+    std::fs::create_dir_all(root.join("docs")).unwrap();
+    std::fs::write(
+        root.join("docs/os-removals.toml"),
+        "version = 1\n[[approved]]\ncontract = \"crates/paddock.ci.json\"\nby = \"user\"\ndate = \"2026-11-23\"\nwhy = \"a control\"\nentries = [\"only macos-latest paddock-proc\"]\n",
+    )
+    .unwrap();
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "chore: the user's approval"]);
+    git(root, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    git(root, &["commit", "-q", "--allow-empty", "-m", "chore: after landing"]);
+    let stale = |stage| -> Vec<bool> {
+        run_at(root, stage)
+            .into_iter()
+            .filter(|(f, m, _)| f == "docs/os-removals.toml" && m.contains("stale approval"))
+            .map(|(_, _, error)| error)
+            .collect()
+    };
+    assert_eq!(stale(Stage::BranchPush), [false]);
+    assert_eq!(stale(Stage::MemberGate), [false]);
+    assert_eq!(stale(Stage::Landing), [true], "the integrator clears it at landing");
 }

@@ -145,6 +145,9 @@ pub struct Facts {
     pub nextest_config: std::collections::BTreeMap<String, String>,
     /// The packages each workspace's change reaches, where [`Facts::test_filters`] narrows to them (absent: every package).
     pub reached: std::collections::BTreeMap<String, BTreeSet<String>>,
+    /// The ids of the golden entries of `docs/generators.toml` the change reaches ([`crate::generators::golden_due_in`]), or why they
+    /// cannot be told (the `goldens` row is then not measured, never a pass).
+    pub goldens: Result<Vec<String>, String>,
 }
 
 /// The reason of every row an inactive app's set leaves out: a skip with this reason is never a pass ([`super::render_timed`]
@@ -198,6 +201,7 @@ pub const ROW_SET: &[&str] = &[
     "conformance-tests",
     "dyno-wire-fixtures",
     "gates-register",
+    "goldens",
     "job-model",
     "locks-guard",
     "member-audits",
@@ -444,8 +448,9 @@ fn plan_rows(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
     out.push(conformance(facts));
     out.push(conformance_tests(plan, facts));
     out.extend(commit_lint(change));
-    out.push(member_audits(facts));
+    out.push(member_audits(change, facts));
     out.push(job_model(facts));
+    out.push(goldens(facts));
     out.extend(member_tests(plan, change, facts));
     let reaches_pitwall = plan["apps"].as_array().is_some_and(|a| a.iter().any(|x| x == "pitwall"));
     if reaches_pitwall && app_inactive(facts, "pitwall") {
@@ -501,6 +506,7 @@ fn plan_rows(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
         facts,
         Gate {
             args: strs(&["gates", "check"]),
+            env: approval_stage_env(facts),
             ..gate(
                 "gates-register".into(),
                 "",
@@ -572,6 +578,18 @@ fn conformance_not_ready(id: &str, facts: &Facts) -> Option<Planned> {
     })
 }
 
+/// Where this run is for the approvals ([`paddock_approvals::Stage`]): a developer's push is a branch push, the member gate of
+/// `./dev merge check --gates` is the member gate. The rows that judge approvals (the Rust conformance checks and C100) read it from
+/// the environment ([`crate::check::growth_approval::STAGE_ENV`]); a caller that sets nothing (CI) gets landing, the strictest.
+fn approval_stage_env(facts: &Facts) -> Vec<(String, String)> {
+    let stage = if facts.member_gate {
+        paddock_approvals::Stage::MemberGate
+    } else {
+        paddock_approvals::Stage::BranchPush
+    };
+    vec![(crate::check::growth_approval::STAGE_ENV.to_string(), stage.name().to_string())]
+}
+
 /// The conformance row runs on every push, whatever changed and whatever the plan says (ER-41, user 2026-11-14): its checks read
 /// app code, specs and workflows, and a check skipped on the change that brings in its class never sees it. The planner marks
 /// conformance on every plan too (`conformance always runs`); this gate does not depend on that.
@@ -585,6 +603,7 @@ fn conformance(facts: &Facts) -> Planned {
         // so a flag or field added to the contract reaches the push gate with no change here.
         Some(Ok(_)) => dev_run(facts, Gate {
             args: strs(&["ci", "run", "conformance", "paddock"]),
+            env: approval_stage_env(facts),
             ..gate(id, "", "", &[], 0, "fix the finding it printed; the list of checks is the `conformance` field of conformance/paddock.ci.json (CI's \"Paddock itself\" step runs the same)".into())
         }),
         Some(Err(e)) => Planned::Broken { id, cause: e.clone(), next: "fix the `conformance` object in conformance/paddock.ci.json (app, root, only, strict)".into() },
@@ -675,20 +694,42 @@ pub fn split_audit_filter(filter: &str) -> Option<(String, String)> {
     None
 }
 
+/// The only paths no audit reads, declared once: prose of the design record. Every audit that scans the tree
+/// (`safe_remove_lint`, `cargo_target_lint`, the live checks, the plan against the real graph, the registers) reads code, config,
+/// registers or workflows, so a change outside this list can reach one. A path is added here only with the audit's test showing it.
+pub const AUDIT_BLIND: &[&str] = &["docs/adr/", "docs/research/", "docs/plans/", "docs/planned/", "docs/wiki/"];
+
+/// The nextest filter of a developer's push: the profile's audits minus the whole-repository cost classes (`graph_`, `tree_`), by the
+/// one definition of the classes ([`crate::test_cost::Class`], ER-22). The profile's `default-filter` still applies (nextest ANDs them).
+pub fn audit_dev_filter() -> String {
+    let classes: Vec<String> = crate::test_cost::Class::ALL.iter().map(|c| c.filter()).collect();
+    format!("not ({})", classes.join(" | "))
+}
+
+/// True when the change is known (a base is set), has files, and every file is under [`AUDIT_BLIND`]: then no audit can see it.
+/// An unknown base or an empty list is never blind (fail closed, ER-33).
+fn audit_blind(change: &Change) -> bool {
+    change.base.is_some() && !change.files.is_empty() && change.files.iter().all(|f| AUDIT_BLIND.iter().any(|p| f.starts_with(p)))
+}
+
 /// The audits of `tools/paddock-dev/tests/it`: tests that read the whole tree (the allow-list parity, the cargo-target lint, the
 /// parity corpus, the plan against the tree, the golden checks). A member's own touched-file tests never see a clash between two
 /// members' changes in them; on the merged tree they do (train 13: local-sccache's audits against golden-checked-when-made's code, the
 /// allow-list parity against C135, the parity corpus against test-env-builder; each first showed in the train-wide nextest run, ER-8).
 ///
-/// Runs only when the push gate is the member gate (`./dev merge check --gates` passes `--member-gate`), whatever changed (ER-41); a
-/// developer's push skips it with a reason, as the user wants no extra minutes there (2026-11-17). Blocking from the start: the audits are established tests, not a new check (user, 2026-11-17). `--no-tests=fail`
-/// makes a filter that selects nothing a failure, never a pass (ER-33); `RUSTUP_AUTO_INSTALL=0` stops a probe from installing a
-/// toolchain (ER-45). Measured in docs/benchmarks.md, "Member audits in the member gate".
-fn member_audits(facts: &Facts) -> Planned {
-    if !facts.member_gate {
+/// Runs in the member gate whatever changed (ER-41), and in a developer's push unless every changed file is prose no audit reads
+/// ([`AUDIT_BLIND`]): the audits scan the whole tree (the tool's sources, the shared crates, conformance, the registers, the
+/// workflows), so a push that skipped them let `safe_remove_lint` fail only in the train, twice on 2026-11-28 (ER-9, ER-53).
+/// A developer's push runs the source audits only ([`audit_dev_filter`]: not the `graph_` and `tree_` cost classes, which are
+/// about 90% of the 105 s the profile takes warm and are the planner's own reading of the real graph); the member gate runs all of
+/// them (docs/benchmarks.md, "Member audits in a developer's push"). Blocking: the audits are established tests, not a new check
+/// (user, 2026-11-17). `--no-tests=fail` makes a filter that selects nothing a
+/// failure, never a pass (ER-33); `RUSTUP_AUTO_INSTALL=0` stops a probe from installing a toolchain (ER-45).
+fn member_audits(change: &Change, facts: &Facts) -> Planned {
+    if !facts.member_gate && audit_blind(change) {
         return Planned::Skip {
             id: "member-audits".into(),
-            reason: "they run in the member gate of `./dev merge check --gates` (`--member-gate`), not in a developer's push".into(),
+            reason: "every changed file is prose no audit reads (docs/adr, research, plans, planned, wiki); the member gate runs them whatever changed".into(),
         };
     }
     let mut g = Gate {
@@ -715,6 +756,9 @@ fn member_audits(facts: &Facts) -> Planned {
     };
     if let Some(dir) = dir {
         g.args.splice(2..2, ["--config".to_string(), cargo_target::config_value(&dir)]);
+    }
+    if !facts.member_gate {
+        g.args.extend(["-E".to_string(), audit_dev_filter()]);
     }
     Planned::Run(g)
 }
@@ -828,6 +872,43 @@ fn locks_guard(change: &Change, facts: &Facts) -> Planned {
             )
         },
     )
+}
+
+/// The golden row (ER-21: three times in two days a change altered what a generated golden records, the push passed because it ran no
+/// golden test, and only a CI trial went red): `./dev gen check --only <ids>` for the golden entries of `docs/generators.toml` the change
+/// reaches ([`Facts::goldens`]; each entry declares its inputs, `golden = true`). Each runs its golden tests and, on a stale golden,
+/// prints the exact bless command from its `regenerate` line. A change that reaches none skips the row with the reason. Whatever
+/// changed (ER-41): the inputs are declared next to the golden, not guessed here. Blocking from the start, like the member audits: the
+/// golden tests are CI's own established tests, not a new check. Measured in docs/benchmarks.md, "Golden row in the push gate".
+fn goldens(facts: &Facts) -> Planned {
+    match &facts.goldens {
+        Err(why) => Planned::NotMeasured {
+            id: "goldens".into(),
+            reason: format!("which goldens the change reaches could not be told: {why}"),
+            next: "run `./dev gen check --all` (it runs every generator and golden), or fix the cause above; this is not a finding in your change".into(),
+        },
+        Ok(ids) if ids.is_empty() => Planned::Skip {
+            id: "goldens".into(),
+            reason: "no golden's declared inputs changed (the `golden = true` entries of docs/generators.toml and their paths)".into(),
+        },
+        Ok(ids) => dev_run(
+            facts,
+            Gate {
+                args: strs(&["gen", "check", "--only", &ids.join(",")]),
+                ..gate(
+                    "goldens".into(),
+                    "",
+                    "",
+                    &[],
+                    3,
+                    format!(
+                        "a golden is stale: the line above names the test and its bless command (the `regenerate` of {} in docs/generators.toml); run it on your machine, review the diff and commit it with the change",
+                        ids.join(", ")
+                    ),
+                )
+            },
+        ),
+    }
 }
 
 /// ADR 0123 §7: `./dev ci job-model check`, the member gate's copy of the plan job's step, so a layout change in ci.yml (a job without

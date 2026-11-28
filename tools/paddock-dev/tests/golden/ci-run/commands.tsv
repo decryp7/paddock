@@ -96,6 +96,10 @@ job	conformance			BASES=""
 job	conformance			BASES="${BASES:+$BASES$SEP}$P"
 job	conformance			BIN=sccache
 job	conformance			BIN=sccache.exe
+job	conformance			CAUSE=no-answer-after-start
+job	conformance			CAUSE=start-failed-twice
+job	conformance			CONF="$(cygpath -w "$CONF")"
+job	conformance			CONF="${TMPDIR:-${RUNNER_TEMP:-${TEMP:-/tmp}}}/paddock-sccache.toml"
 job	conformance			DEST="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/$VERSION"
 job	conformance			DEVCMD=("$PADDOCK_DEV"
 job	conformance			DEVCMD=(bash "dev"
@@ -129,6 +133,7 @@ job	conformance			PORT=4227
 job	conformance			SEP=":"
 job	conformance			SEP=";"
 job	conformance			SETTINGS+=("SCCACHE_BASEDIRS=$BASES" "SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH"
+job	conformance			SETTINGS+=("SCCACHE_CONF=$CONF"
 job	conformance			SETTINGS+=("SCCACHE_DIR=$DIR" "SCCACHE_CACHE_SIZE=$SIZE"
 job	conformance			SETTINGS+=("SCCACHE_REDIS_ENDPOINT=${{ vars.SCCACHE_REDIS_ENDPOINT }}" "SCCACHE_REDIS_DB=${REDIS_DB:-5}"
 job	conformance			SETTINGS=(
@@ -139,10 +144,13 @@ job	conformance			SUM=505324daad5fcbb1a3cab5d57d26ef42baf4d10b236df7de93a008196f
 job	conformance			SUM=c9f6c5a3ae84d9da0956b28c357a365827bda33f3383647fc0b67484c74a5ea9
 job	conformance			SUM=ca500a01139e9af8d5f5a5e69b6a0dd941ed79ed3399a91cc35bba484fe732fa
 job	conformance			SUM=d2658c9a24bab25a24fdc1917cb5b614b7c20a4ce8f363e5303d37b7e699d5ec
-job	conformance			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
+job	conformance			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin"
+job	conformance			TOOLCHAIN=${TOOLCHAIN%%$'\n'*
 job	conformance			TOOLCHAIN=${TOOLCHAIN:-stable
 job	conformance			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
 job	conformance			TOTAL="${PADDOCK_CI_SCCACHE_GB:-60}"
+job	conformance			UP=""
+job	conformance			UP=1
 job	conformance			VERSION=0.20.1
 job	conformance			Windows-x86_64)          T=x86_64-pc-windows-msvc
 job	conformance			bash "conformance/ci/dev-tool-cache.sh" key
@@ -155,6 +163,7 @@ job	conformance			bash "conformance/ci/kit.sh" build-jobs
 job	conformance			bash "conformance/ci/kit.sh" host sccache-stats
 job	conformance			bash "dev" ci setup-rust --help >/dev/null
 job	conformance			bash "dev" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || 's3' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	conformance			break
 job	conformance			cargo --version
 job	conformance			cargo nextest run --manifest-path tools/paddock-dev/Cargo.toml --profile ci --no-tests=fail -E 'test(/^contracts::/) | test(/^audit::tests::(every_shared_|the_rust_reader_and_the_script_agree|the_families_real_list)/)'
 job	conformance			case "$P" in */) [ "${#P}" -gt 1 ]
@@ -175,6 +184,7 @@ job	conformance			echo "$kv"
 job	conformance			echo "- sccache lane $PADDOCK_CI_SLOT: LOST ($(printf '%s' "$out" | tr '\n' ' '))" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 job	conformance			echo "- sccache lane $PADDOCK_CI_SLOT: held to the end" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 job	conformance			echo "- sccache lane: NOT taken ($(tr '\n' ' ' < "$LANE_ERR")); job-private folder" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+job	conformance			echo "- sccache: OFF ($CAUSE); this job built without the compile cache" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 job	conformance			echo "::error::could not record the lane $LANE in GITHUB_ENV"
 job	conformance			echo "::error::rustup is not installed on this runner"
 job	conformance			echo "::error::sccache $VERSION checksum mismatch for $T (got $GOT)"
@@ -187,7 +197,8 @@ job	conformance			echo "::warning::could not download sccache $VERSION; building
 job	conformance			echo "::warning::no lane of $MOUNT was taken: $(tr '\n' ' ' < "$LANE_ERR"). The compile cache lives and dies with the job."
 job	conformance			echo "::warning::sccache is not available on this runner; building without the compile cache."
 job	conformance			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
-job	conformance			echo "::warning::the sccache server did not start; the build runs without the compile cache."
+job	conformance			echo "::warning::sccache: cannot write its config $CONF; the client keeps its 10 s start wait."
+job	conformance			echo "::warning::the sccache server did not start ($CAUSE); the build runs without the compile cache."
 job	conformance			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
 job	conformance			echo "CARGO_INCREMENTAL=0"
 job	conformance			echo "CARGO_TERM_COLOR=always"
@@ -195,6 +206,7 @@ job	conformance			echo "PADDOCK_CI_LANE_LOCK=$(stat -c '%d:%i' "$MOUNT/lanes/slo
 job	conformance			echo "PADDOCK_CI_LANE_ROOT=$MOUNT/lanes"
 job	conformance			echo "PADDOCK_CI_SLOT=$LANE"
 job	conformance			echo "PADDOCK_DEV_TOOL_CACHE_DONE=1" >> "$GITHUB_ENV"
+job	conformance			echo "PADDOCK_SCCACHE_STATE=off:$CAUSE" >> "$GITHUB_ENV"
 job	conformance			echo "RUSTC_WRAPPER=sccache"
 job	conformance			echo "Rust toolchain  (from rust-toolchain.toml)"
 job	conformance			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
@@ -207,6 +219,7 @@ job	conformance			echo "release=$(bash "conformance/ci/kit.sh" release-path)" >>
 job	conformance			echo "sccache: base directories $BASES"
 job	conformance			echo "sccache: local disk $DIR"
 job	conformance			echo "sccache: shared backend ${{ vars.SCCACHE_REDIS_ENDPOINT }} db ${REDIS_DB:-5}"
+job	conformance			echo "sccache: the server did not start; stopping it and starting it once more."
 job	conformance			echo "sccache: this job holds lane $LANE of $LANES on $MOUNT"
 job	conformance			echo "setup-rust: compile cache through the $kit implementation"
 job	conformance			else
@@ -214,10 +227,12 @@ job	conformance			exit 0
 job	conformance			exit 1
 job	conformance			export PADDOCK_DEV_DOWNLOAD=0
 job	conformance			export SCCACHE_BASEDIRS="$BASES" SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH
+job	conformance			export SCCACHE_CONF="$CONF"
 job	conformance			export SCCACHE_DIR="$DIR" SCCACHE_CACHE_SIZE="$SIZE"
 job	conformance			export SCCACHE_REDIS_ENDPOINT="${{ vars.SCCACHE_REDIS_ENDPOINT }}" SCCACHE_REDIS_DB="${REDIS_DB:-5}"
 job	conformance			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
 job	conformance			for P in "${PADDOCK_WORKSPACE:-}" "${GITHUB_WORKSPACE:-}" "${PADDOCK_BUILD_FOLDER:-}"
+job	conformance			for attempt in 1 2
 job	conformance			for c in 
 job	conformance			for kv in "${SETTINGS[@]}"
 job	conformance			for name in "" stable
@@ -237,13 +252,12 @@ job	conformance			npm ci --ignore-scripts -w conformance
 job	conformance			out="$("${DEVCMD[@]}" ci slot check --slot "$PADDOCK_CI_SLOT" --root "$PADDOCK_CI_LANE_ROOT" ${PADDOCK_CI_LANE_LOCK:+--lock "$PADDOCK_CI_LANE_LOCK"} 2>&1)"
 job	conformance			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	conformance			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
-job	conformance			printf '%s\n' "$installed"
+job	conformance			printf 'server_startup_timeout_ms = 30000\n' > "$CONF" 2>/dev/null
 job	conformance			redis
 job	conformance			rm -f "$LANE_ERR"
 job	conformance			rm -rf "$dl"
 job	conformance			rustc --version
 job	conformance			rustup default ""
-job	conformance			rustup toolchain list 2>/dev/null
 job	conformance			sccache --show-stats >/dev/null 2>&1
 job	conformance			sccache --start-server
 job	conformance			sccache --stop-server >/dev/null 2>&1
@@ -253,6 +267,7 @@ job	conformance			settle "$name"
 job	conformance			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --install-toolchain "" "" ""
 job	conformance			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
 job	conformance			then
+job	conformance			toolchains=$(rustup toolchain list 2>/dev/null || true
 job	conformance			unzip -q "$dl/$NAME.$EXT" -d "$dl"
 job	conformance			{
 job	conformance			} >> "$GITHUB_ENV"
@@ -269,6 +284,10 @@ job	crates			BASES=""
 job	crates			BASES="${BASES:+$BASES$SEP}$P"
 job	crates			BIN=sccache
 job	crates			BIN=sccache.exe
+job	crates			CAUSE=no-answer-after-start
+job	crates			CAUSE=start-failed-twice
+job	crates			CONF="$(cygpath -w "$CONF")"
+job	crates			CONF="${TMPDIR:-${RUNNER_TEMP:-${TEMP:-/tmp}}}/paddock-sccache.toml"
 job	crates			DEST="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/$VERSION"
 job	crates			DEVCMD=("$PADDOCK_DEV"
 job	crates			DEVCMD=(bash "dev"
@@ -302,6 +321,7 @@ job	crates			PORT=4227
 job	crates			SEP=":"
 job	crates			SEP=";"
 job	crates			SETTINGS+=("SCCACHE_BASEDIRS=$BASES" "SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH"
+job	crates			SETTINGS+=("SCCACHE_CONF=$CONF"
 job	crates			SETTINGS+=("SCCACHE_DIR=$DIR" "SCCACHE_CACHE_SIZE=$SIZE"
 job	crates			SETTINGS+=("SCCACHE_REDIS_ENDPOINT=${{ vars.SCCACHE_REDIS_ENDPOINT }}" "SCCACHE_REDIS_DB=${REDIS_DB:-5}"
 job	crates			SETTINGS=(
@@ -312,10 +332,13 @@ job	crates			SUM=505324daad5fcbb1a3cab5d57d26ef42baf4d10b236df7de93a008196f1f223
 job	crates			SUM=c9f6c5a3ae84d9da0956b28c357a365827bda33f3383647fc0b67484c74a5ea9
 job	crates			SUM=ca500a01139e9af8d5f5a5e69b6a0dd941ed79ed3399a91cc35bba484fe732fa
 job	crates			SUM=d2658c9a24bab25a24fdc1917cb5b614b7c20a4ce8f363e5303d37b7e699d5ec
-job	crates			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
+job	crates			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin"
+job	crates			TOOLCHAIN=${TOOLCHAIN%%$'\n'*
 job	crates			TOOLCHAIN=${TOOLCHAIN:-stable
 job	crates			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
 job	crates			TOTAL="${PADDOCK_CI_SCCACHE_GB:-60}"
+job	crates			UP=""
+job	crates			UP=1
 job	crates			VERSION=0.20.1
 job	crates			Windows-x86_64)          T=x86_64-pc-windows-msvc
 job	crates			bash "conformance/ci/dev-tool-cache.sh" key
@@ -328,6 +351,7 @@ job	crates			bash "conformance/ci/kit.sh" build-jobs
 job	crates			bash "conformance/ci/kit.sh" host sccache-stats
 job	crates			bash "dev" ci setup-rust --help >/dev/null
 job	crates			bash "dev" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || 's3' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	crates			break
 job	crates			cargo --version
 job	crates			case "$P" in */) [ "${#P}" -gt 1 ]
 job	crates			case "$P" in /*
@@ -347,6 +371,7 @@ job	crates			echo "$kv"
 job	crates			echo "- sccache lane $PADDOCK_CI_SLOT: LOST ($(printf '%s' "$out" | tr '\n' ' '))" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 job	crates			echo "- sccache lane $PADDOCK_CI_SLOT: held to the end" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 job	crates			echo "- sccache lane: NOT taken ($(tr '\n' ' ' < "$LANE_ERR")); job-private folder" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+job	crates			echo "- sccache: OFF ($CAUSE); this job built without the compile cache" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 job	crates			echo "::error::could not record the lane $LANE in GITHUB_ENV"
 job	crates			echo "::error::rustup is not installed on this runner"
 job	crates			echo "::error::sccache $VERSION checksum mismatch for $T (got $GOT)"
@@ -359,7 +384,8 @@ job	crates			echo "::warning::could not download sccache $VERSION; building with
 job	crates			echo "::warning::no lane of $MOUNT was taken: $(tr '\n' ' ' < "$LANE_ERR"). The compile cache lives and dies with the job."
 job	crates			echo "::warning::sccache is not available on this runner; building without the compile cache."
 job	crates			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
-job	crates			echo "::warning::the sccache server did not start; the build runs without the compile cache."
+job	crates			echo "::warning::sccache: cannot write its config $CONF; the client keeps its 10 s start wait."
+job	crates			echo "::warning::the sccache server did not start ($CAUSE); the build runs without the compile cache."
 job	crates			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
 job	crates			echo "CARGO_INCREMENTAL=0"
 job	crates			echo "CARGO_TERM_COLOR=always"
@@ -367,6 +393,7 @@ job	crates			echo "PADDOCK_CI_LANE_LOCK=$(stat -c '%d:%i' "$MOUNT/lanes/slots/$L
 job	crates			echo "PADDOCK_CI_LANE_ROOT=$MOUNT/lanes"
 job	crates			echo "PADDOCK_CI_SLOT=$LANE"
 job	crates			echo "PADDOCK_DEV_TOOL_CACHE_DONE=1" >> "$GITHUB_ENV"
+job	crates			echo "PADDOCK_SCCACHE_STATE=off:$CAUSE" >> "$GITHUB_ENV"
 job	crates			echo "RUSTC_WRAPPER=sccache"
 job	crates			echo "Rust toolchain  (from rust-toolchain.toml)"
 job	crates			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
@@ -379,6 +406,7 @@ job	crates			echo "release=$(bash "conformance/ci/kit.sh" release-path)" >> "$GI
 job	crates			echo "sccache: base directories $BASES"
 job	crates			echo "sccache: local disk $DIR"
 job	crates			echo "sccache: shared backend ${{ vars.SCCACHE_REDIS_ENDPOINT }} db ${REDIS_DB:-5}"
+job	crates			echo "sccache: the server did not start; stopping it and starting it once more."
 job	crates			echo "sccache: this job holds lane $LANE of $LANES on $MOUNT"
 job	crates			echo "setup-rust: compile cache through the $kit implementation"
 job	crates			else
@@ -386,10 +414,12 @@ job	crates			exit 0
 job	crates			exit 1
 job	crates			export PADDOCK_DEV_DOWNLOAD=0
 job	crates			export SCCACHE_BASEDIRS="$BASES" SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH
+job	crates			export SCCACHE_CONF="$CONF"
 job	crates			export SCCACHE_DIR="$DIR" SCCACHE_CACHE_SIZE="$SIZE"
 job	crates			export SCCACHE_REDIS_ENDPOINT="${{ vars.SCCACHE_REDIS_ENDPOINT }}" SCCACHE_REDIS_DB="${REDIS_DB:-5}"
 job	crates			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
 job	crates			for P in "${PADDOCK_WORKSPACE:-}" "${GITHUB_WORKSPACE:-}" "${PADDOCK_BUILD_FOLDER:-}"
+job	crates			for attempt in 1 2
 job	crates			for c in 
 job	crates			for kv in "${SETTINGS[@]}"
 job	crates			for name in "" stable
@@ -407,13 +437,12 @@ job	crates			mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
 job	crates			out="$("${DEVCMD[@]}" ci slot check --slot "$PADDOCK_CI_SLOT" --root "$PADDOCK_CI_LANE_ROOT" ${PADDOCK_CI_LANE_LOCK:+--lock "$PADDOCK_CI_LANE_LOCK"} 2>&1)"
 job	crates			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	crates			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
-job	crates			printf '%s\n' "$installed"
+job	crates			printf 'server_startup_timeout_ms = 30000\n' > "$CONF" 2>/dev/null
 job	crates			redis
 job	crates			rm -f "$LANE_ERR"
 job	crates			rm -rf "$dl"
 job	crates			rustc --version
 job	crates			rustup default ""
-job	crates			rustup toolchain list 2>/dev/null
 job	crates			sccache --show-stats >/dev/null 2>&1
 job	crates			sccache --start-server
 job	crates			sccache --stop-server >/dev/null 2>&1
@@ -423,6 +452,7 @@ job	crates			settle "$name"
 job	crates			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --install-toolchain "" "" ""
 job	crates			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
 job	crates			then
+job	crates			toolchains=$(rustup toolchain list 2>/dev/null || true
 job	crates			unzip -q "$dl/$NAME.$EXT" -d "$dl"
 job	crates			{
 job	crates			} >> "$GITHUB_ENV"
@@ -446,6 +476,10 @@ job	e2e			BASES=""
 job	e2e			BASES="${BASES:+$BASES$SEP}$P"
 job	e2e			BIN=sccache
 job	e2e			BIN=sccache.exe
+job	e2e			CAUSE=no-answer-after-start
+job	e2e			CAUSE=start-failed-twice
+job	e2e			CONF="$(cygpath -w "$CONF")"
+job	e2e			CONF="${TMPDIR:-${RUNNER_TEMP:-${TEMP:-/tmp}}}/paddock-sccache.toml"
 job	e2e			DEST="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/$VERSION"
 job	e2e			DEVCMD=("$PADDOCK_DEV"
 job	e2e			DEVCMD=(bash "dev"
@@ -479,6 +513,7 @@ job	e2e			PORT=4227
 job	e2e			SEP=":"
 job	e2e			SEP=";"
 job	e2e			SETTINGS+=("SCCACHE_BASEDIRS=$BASES" "SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH"
+job	e2e			SETTINGS+=("SCCACHE_CONF=$CONF"
 job	e2e			SETTINGS+=("SCCACHE_DIR=$DIR" "SCCACHE_CACHE_SIZE=$SIZE"
 job	e2e			SETTINGS+=("SCCACHE_REDIS_ENDPOINT=${{ vars.SCCACHE_REDIS_ENDPOINT }}" "SCCACHE_REDIS_DB=${REDIS_DB:-5}"
 job	e2e			SETTINGS=(
@@ -489,10 +524,13 @@ job	e2e			SUM=505324daad5fcbb1a3cab5d57d26ef42baf4d10b236df7de93a008196f1f2230
 job	e2e			SUM=c9f6c5a3ae84d9da0956b28c357a365827bda33f3383647fc0b67484c74a5ea9
 job	e2e			SUM=ca500a01139e9af8d5f5a5e69b6a0dd941ed79ed3399a91cc35bba484fe732fa
 job	e2e			SUM=d2658c9a24bab25a24fdc1917cb5b614b7c20a4ce8f363e5303d37b7e699d5ec
-job	e2e			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
+job	e2e			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin"
+job	e2e			TOOLCHAIN=${TOOLCHAIN%%$'\n'*
 job	e2e			TOOLCHAIN=${TOOLCHAIN:-stable
 job	e2e			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
 job	e2e			TOTAL="${PADDOCK_CI_SCCACHE_GB:-60}"
+job	e2e			UP=""
+job	e2e			UP=1
 job	e2e			VERSION=0.20.1
 job	e2e			Windows-x86_64)          T=x86_64-pc-windows-msvc
 job	e2e			bash "$r" line Angular "‹steps.angular-cache.outputs.cache-primary-key›" "‹steps.angular-cache.outputs.cache-hit›" "‹steps.angular-cache.outputs.cache-matched-key›" pending
@@ -509,6 +547,7 @@ job	e2e			bash "conformance/ci/kit.sh" host node-caches "ui" "e2e-2"
 job	e2e			bash "conformance/ci/kit.sh" host sccache-stats
 job	e2e			bash "dev" ci setup-rust --help >/dev/null
 job	e2e			bash "dev" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || 's3' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	e2e			break
 job	e2e			cargo --version
 job	e2e			case "$P" in */) [ "${#P}" -gt 1 ]
 job	e2e			case "$P" in /*
@@ -530,6 +569,7 @@ job	e2e			echo "- npm cache: not measured (the step did not run)"
 job	e2e			echo "- sccache lane $PADDOCK_CI_SLOT: LOST ($(printf '%s' "$out" | tr '\n' ' '))" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 job	e2e			echo "- sccache lane $PADDOCK_CI_SLOT: held to the end" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 job	e2e			echo "- sccache lane: NOT taken ($(tr '\n' ' ' < "$LANE_ERR")); job-private folder" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+job	e2e			echo "- sccache: OFF ($CAUSE); this job built without the compile cache" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 job	e2e			echo "::error::could not record the lane $LANE in GITHUB_ENV"
 job	e2e			echo "::error::rustup is not installed on this runner"
 job	e2e			echo "::error::sccache $VERSION checksum mismatch for $T (got $GOT)"
@@ -542,7 +582,8 @@ job	e2e			echo "::warning::could not download sccache $VERSION; building without
 job	e2e			echo "::warning::no lane of $MOUNT was taken: $(tr '\n' ' ' < "$LANE_ERR"). The compile cache lives and dies with the job."
 job	e2e			echo "::warning::sccache is not available on this runner; building without the compile cache."
 job	e2e			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
-job	e2e			echo "::warning::the sccache server did not start; the build runs without the compile cache."
+job	e2e			echo "::warning::sccache: cannot write its config $CONF; the client keeps its 10 s start wait."
+job	e2e			echo "::warning::the sccache server did not start ($CAUSE); the build runs without the compile cache."
 job	e2e			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
 job	e2e			echo "CARGO_INCREMENTAL=0"
 job	e2e			echo "CARGO_TERM_COLOR=always"
@@ -550,6 +591,7 @@ job	e2e			echo "PADDOCK_CI_LANE_LOCK=$(stat -c '%d:%i' "$MOUNT/lanes/slots/$LANE
 job	e2e			echo "PADDOCK_CI_LANE_ROOT=$MOUNT/lanes"
 job	e2e			echo "PADDOCK_CI_SLOT=$LANE"
 job	e2e			echo "PADDOCK_DEV_TOOL_CACHE_DONE=1" >> "$GITHUB_ENV"
+job	e2e			echo "PADDOCK_SCCACHE_STATE=off:$CAUSE" >> "$GITHUB_ENV"
 job	e2e			echo "RUSTC_WRAPPER=sccache"
 job	e2e			echo "Rust toolchain  (from rust-toolchain.toml)"
 job	e2e			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
@@ -562,6 +604,7 @@ job	e2e			echo "release=$(bash "conformance/ci/kit.sh" release-path)" >> "$GITHU
 job	e2e			echo "sccache: base directories $BASES"
 job	e2e			echo "sccache: local disk $DIR"
 job	e2e			echo "sccache: shared backend ${{ vars.SCCACHE_REDIS_ENDPOINT }} db ${REDIS_DB:-5}"
+job	e2e			echo "sccache: the server did not start; stopping it and starting it once more."
 job	e2e			echo "sccache: this job holds lane $LANE of $LANES on $MOUNT"
 job	e2e			echo "setup-rust: compile cache through the $kit implementation"
 job	e2e			echo "version=$(node --version 2>/dev/null || echo none)" >> "$GITHUB_OUTPUT"
@@ -570,10 +613,12 @@ job	e2e			exit 0
 job	e2e			exit 1
 job	e2e			export PADDOCK_DEV_DOWNLOAD=0
 job	e2e			export SCCACHE_BASEDIRS="$BASES" SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH
+job	e2e			export SCCACHE_CONF="$CONF"
 job	e2e			export SCCACHE_DIR="$DIR" SCCACHE_CACHE_SIZE="$SIZE"
 job	e2e			export SCCACHE_REDIS_ENDPOINT="${{ vars.SCCACHE_REDIS_ENDPOINT }}" SCCACHE_REDIS_DB="${REDIS_DB:-5}"
 job	e2e			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
 job	e2e			for P in "${PADDOCK_WORKSPACE:-}" "${GITHUB_WORKSPACE:-}" "${PADDOCK_BUILD_FOLDER:-}"
+job	e2e			for attempt in 1 2
 job	e2e			for c in 
 job	e2e			for kv in "${SETTINGS[@]}"
 job	e2e			for name in "" stable
@@ -592,14 +637,13 @@ job	e2e			npm ci
 job	e2e			out="$("${DEVCMD[@]}" ci slot check --slot "$PADDOCK_CI_SLOT" --root "$PADDOCK_CI_LANE_ROOT" ${PADDOCK_CI_LANE_LOCK:+--lock "$PADDOCK_CI_LANE_LOCK"} 2>&1)"
 job	e2e			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	e2e			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
-job	e2e			printf '%s\n' "$installed"
+job	e2e			printf 'server_startup_timeout_ms = 30000\n' > "$CONF" 2>/dev/null
 job	e2e			r="conformance/ci/cache-report.sh"
 job	e2e			redis
 job	e2e			rm -f "$LANE_ERR"
 job	e2e			rm -rf "$dl"
 job	e2e			rustc --version
 job	e2e			rustup default ""
-job	e2e			rustup toolchain list 2>/dev/null
 job	e2e			sccache --show-stats >/dev/null 2>&1
 job	e2e			sccache --start-server
 job	e2e			sccache --stop-server >/dev/null 2>&1
@@ -610,6 +654,7 @@ job	e2e			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --install-toolchain "
 job	e2e			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
 job	e2e			tee -a "$GITHUB_STEP_SUMMARY"
 job	e2e			then
+job	e2e			toolchains=$(rustup toolchain list 2>/dev/null || true
 job	e2e			unzip -q "$dl/$NAME.$EXT" -d "$dl"
 job	e2e			{
 job	e2e			} >> "$GITHUB_ENV"
@@ -628,6 +673,10 @@ job	tools			BASES=""
 job	tools			BASES="${BASES:+$BASES$SEP}$P"
 job	tools			BIN=sccache
 job	tools			BIN=sccache.exe
+job	tools			CAUSE=no-answer-after-start
+job	tools			CAUSE=start-failed-twice
+job	tools			CONF="$(cygpath -w "$CONF")"
+job	tools			CONF="${TMPDIR:-${RUNNER_TEMP:-${TEMP:-/tmp}}}/paddock-sccache.toml"
 job	tools			DEST="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/$VERSION"
 job	tools			DEVCMD=("$PADDOCK_DEV"
 job	tools			DEVCMD=(bash "dev"
@@ -661,6 +710,7 @@ job	tools			PORT=4227
 job	tools			SEP=":"
 job	tools			SEP=";"
 job	tools			SETTINGS+=("SCCACHE_BASEDIRS=$BASES" "SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH"
+job	tools			SETTINGS+=("SCCACHE_CONF=$CONF"
 job	tools			SETTINGS+=("SCCACHE_DIR=$DIR" "SCCACHE_CACHE_SIZE=$SIZE"
 job	tools			SETTINGS+=("SCCACHE_REDIS_ENDPOINT=${{ vars.SCCACHE_REDIS_ENDPOINT }}" "SCCACHE_REDIS_DB=${REDIS_DB:-5}"
 job	tools			SETTINGS=(
@@ -671,10 +721,13 @@ job	tools			SUM=505324daad5fcbb1a3cab5d57d26ef42baf4d10b236df7de93a008196f1f2230
 job	tools			SUM=c9f6c5a3ae84d9da0956b28c357a365827bda33f3383647fc0b67484c74a5ea9
 job	tools			SUM=ca500a01139e9af8d5f5a5e69b6a0dd941ed79ed3399a91cc35bba484fe732fa
 job	tools			SUM=d2658c9a24bab25a24fdc1917cb5b614b7c20a4ce8f363e5303d37b7e699d5ec
-job	tools			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
+job	tools			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin"
+job	tools			TOOLCHAIN=${TOOLCHAIN%%$'\n'*
 job	tools			TOOLCHAIN=${TOOLCHAIN:-stable
 job	tools			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
 job	tools			TOTAL="${PADDOCK_CI_SCCACHE_GB:-60}"
+job	tools			UP=""
+job	tools			UP=1
 job	tools			VERSION=0.20.1
 job	tools			Windows-x86_64)          T=x86_64-pc-windows-msvc
 job	tools			bash "conformance/ci/dev-tool-cache.sh" key
@@ -689,6 +742,7 @@ job	tools			bash "dev" ci setup-rust --help >/dev/null
 job	tools			bash "dev" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || 's3' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	tools			bash .claude/hooks/run-tests.sh
 job	tools			bash ci-image/fetch-verified.sh "https://github.com/jgraph/drawio-desktop/releases/download/v${v}/drawio-amd64-${v}.deb" "$sum" "$RUNNER_TEMP/drawio.deb"
+job	tools			break
 job	tools			cargo --version
 job	tools			case "$P" in */) [ "${#P}" -gt 1 ]
 job	tools			case "$P" in /*
@@ -709,6 +763,7 @@ job	tools			echo "$kv"
 job	tools			echo "- sccache lane $PADDOCK_CI_SLOT: LOST ($(printf '%s' "$out" | tr '\n' ' '))" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 job	tools			echo "- sccache lane $PADDOCK_CI_SLOT: held to the end" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 job	tools			echo "- sccache lane: NOT taken ($(tr '\n' ' ' < "$LANE_ERR")); job-private folder" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+job	tools			echo "- sccache: OFF ($CAUSE); this job built without the compile cache" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 job	tools			echo "::error::could not fetch the pinned draw.io $v (see the line above). Fix: re-run, or check the release still exists and the SHA-256 in ci-image/Dockerfile."
 job	tools			echo "::error::could not record the lane $LANE in GITHUB_ENV"
 job	tools			echo "::error::rustup is not installed on this runner"
@@ -724,7 +779,8 @@ job	tools			echo "::warning::could not download sccache $VERSION; building witho
 job	tools			echo "::warning::no lane of $MOUNT was taken: $(tr '\n' ' ' < "$LANE_ERR"). The compile cache lives and dies with the job."
 job	tools			echo "::warning::sccache is not available on this runner; building without the compile cache."
 job	tools			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
-job	tools			echo "::warning::the sccache server did not start; the build runs without the compile cache."
+job	tools			echo "::warning::sccache: cannot write its config $CONF; the client keeps its 10 s start wait."
+job	tools			echo "::warning::the sccache server did not start ($CAUSE); the build runs without the compile cache."
 job	tools			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
 job	tools			echo "CARGO_INCREMENTAL=0"
 job	tools			echo "CARGO_TERM_COLOR=always"
@@ -733,6 +789,7 @@ job	tools			echo "PADDOCK_CI_LANE_LOCK=$(stat -c '%d:%i' "$MOUNT/lanes/slots/$LA
 job	tools			echo "PADDOCK_CI_LANE_ROOT=$MOUNT/lanes"
 job	tools			echo "PADDOCK_CI_SLOT=$LANE"
 job	tools			echo "PADDOCK_DEV_TOOL_CACHE_DONE=1" >> "$GITHUB_ENV"
+job	tools			echo "PADDOCK_SCCACHE_STATE=off:$CAUSE" >> "$GITHUB_ENV"
 job	tools			echo "RUSTC_WRAPPER=sccache"
 job	tools			echo "Rust toolchain  (from rust-toolchain.toml)"
 job	tools			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
@@ -745,6 +802,7 @@ job	tools			echo "release=$(bash "conformance/ci/kit.sh" release-path)" >> "$GIT
 job	tools			echo "sccache: base directories $BASES"
 job	tools			echo "sccache: local disk $DIR"
 job	tools			echo "sccache: shared backend ${{ vars.SCCACHE_REDIS_ENDPOINT }} db ${REDIS_DB:-5}"
+job	tools			echo "sccache: the server did not start; stopping it and starting it once more."
 job	tools			echo "sccache: this job holds lane $LANE of $LANES on $MOUNT"
 job	tools			echo "setup-rust: compile cache through the $kit implementation"
 job	tools			else
@@ -752,10 +810,12 @@ job	tools			exit 0
 job	tools			exit 1
 job	tools			export PADDOCK_DEV_DOWNLOAD=0
 job	tools			export SCCACHE_BASEDIRS="$BASES" SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH
+job	tools			export SCCACHE_CONF="$CONF"
 job	tools			export SCCACHE_DIR="$DIR" SCCACHE_CACHE_SIZE="$SIZE"
 job	tools			export SCCACHE_REDIS_ENDPOINT="${{ vars.SCCACHE_REDIS_ENDPOINT }}" SCCACHE_REDIS_DB="${REDIS_DB:-5}"
 job	tools			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
 job	tools			for P in "${PADDOCK_WORKSPACE:-}" "${GITHUB_WORKSPACE:-}" "${PADDOCK_BUILD_FOLDER:-}"
+job	tools			for attempt in 1 2
 job	tools			for c in 
 job	tools			for kv in "${SETTINGS[@]}"
 job	tools			for name in "" stable
@@ -776,13 +836,12 @@ job	tools			node scripts/svg-drift.mjs
 job	tools			out="$("${DEVCMD[@]}" ci slot check --slot "$PADDOCK_CI_SLOT" --root "$PADDOCK_CI_LANE_ROOT" ${PADDOCK_CI_LANE_LOCK:+--lock "$PADDOCK_CI_LANE_LOCK"} 2>&1)"
 job	tools			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	tools			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
-job	tools			printf '%s\n' "$installed"
+job	tools			printf 'server_startup_timeout_ms = 30000\n' > "$CONF" 2>/dev/null
 job	tools			redis
 job	tools			rm -f "$LANE_ERR"
 job	tools			rm -rf "$dl"
 job	tools			rustc --version
 job	tools			rustup default ""
-job	tools			rustup toolchain list 2>/dev/null
 job	tools			sccache --show-stats >/dev/null 2>&1
 job	tools			sccache --start-server
 job	tools			sccache --stop-server >/dev/null 2>&1
@@ -790,11 +849,14 @@ job	tools			sccache --version
 job	tools			settle ""
 job	tools			settle "$name"
 job	tools			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --install-toolchain "" "" ""
-job	tools			sum=$(sed -n 's/^ARG DRAWIO_SHA256_AMD64=//p' ci-image/Dockerfile | head -n 1
+job	tools			sum=$(sed -n 's/^ARG DRAWIO_SHA256_AMD64=//p' ci-image/Dockerfile
+job	tools			sum=${sum%%$'\n'*
 job	tools			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
 job	tools			then
+job	tools			toolchains=$(rustup toolchain list 2>/dev/null || true
 job	tools			unzip -q "$dl/$NAME.$EXT" -d "$dl"
-job	tools			v=$(sed -n 's/^ARG DRAWIO_VERSION=//p' ci-image/Dockerfile | head -n 1
+job	tools			v=$(sed -n 's/^ARG DRAWIO_VERSION=//p' ci-image/Dockerfile
+job	tools			v=${v%%$'\n'*
 job	tools			{
 job	tools			} >> "$GITHUB_ENV"
 job	ui			"$PADDOCK_DEV" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || 's3' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
@@ -808,6 +870,10 @@ job	ui			BASES=""
 job	ui			BASES="${BASES:+$BASES$SEP}$P"
 job	ui			BIN=sccache
 job	ui			BIN=sccache.exe
+job	ui			CAUSE=no-answer-after-start
+job	ui			CAUSE=start-failed-twice
+job	ui			CONF="$(cygpath -w "$CONF")"
+job	ui			CONF="${TMPDIR:-${RUNNER_TEMP:-${TEMP:-/tmp}}}/paddock-sccache.toml"
 job	ui			DEST="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/$VERSION"
 job	ui			DEVCMD=("$PADDOCK_DEV"
 job	ui			DEVCMD=(bash "dev"
@@ -841,6 +907,7 @@ job	ui			PORT=4227
 job	ui			SEP=":"
 job	ui			SEP=";"
 job	ui			SETTINGS+=("SCCACHE_BASEDIRS=$BASES" "SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH"
+job	ui			SETTINGS+=("SCCACHE_CONF=$CONF"
 job	ui			SETTINGS+=("SCCACHE_DIR=$DIR" "SCCACHE_CACHE_SIZE=$SIZE"
 job	ui			SETTINGS+=("SCCACHE_REDIS_ENDPOINT=${{ vars.SCCACHE_REDIS_ENDPOINT }}" "SCCACHE_REDIS_DB=${REDIS_DB:-5}"
 job	ui			SETTINGS=(
@@ -851,10 +918,13 @@ job	ui			SUM=505324daad5fcbb1a3cab5d57d26ef42baf4d10b236df7de93a008196f1f2230
 job	ui			SUM=c9f6c5a3ae84d9da0956b28c357a365827bda33f3383647fc0b67484c74a5ea9
 job	ui			SUM=ca500a01139e9af8d5f5a5e69b6a0dd941ed79ed3399a91cc35bba484fe732fa
 job	ui			SUM=d2658c9a24bab25a24fdc1917cb5b614b7c20a4ce8f363e5303d37b7e699d5ec
-job	ui			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
+job	ui			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin"
+job	ui			TOOLCHAIN=${TOOLCHAIN%%$'\n'*
 job	ui			TOOLCHAIN=${TOOLCHAIN:-stable
 job	ui			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
 job	ui			TOTAL="${PADDOCK_CI_SCCACHE_GB:-60}"
+job	ui			UP=""
+job	ui			UP=1
 job	ui			VERSION=0.20.1
 job	ui			Windows-x86_64)          T=x86_64-pc-windows-msvc
 job	ui			bash "$r" line Angular "‹steps.angular-cache.outputs.cache-primary-key›" "‹steps.angular-cache.outputs.cache-hit›" "‹steps.angular-cache.outputs.cache-matched-key›" pending
@@ -870,6 +940,7 @@ job	ui			bash "conformance/ci/kit.sh" host node-caches "ui" "${{ github.job }}"
 job	ui			bash "conformance/ci/kit.sh" host sccache-stats
 job	ui			bash "dev" ci setup-rust --help >/dev/null
 job	ui			bash "dev" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || 's3' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	ui			break
 job	ui			cargo --version
 job	ui			case "$P" in */) [ "${#P}" -gt 1 ]
 job	ui			case "$P" in /*
@@ -891,6 +962,7 @@ job	ui			echo "- npm cache: not measured (the step did not run)"
 job	ui			echo "- sccache lane $PADDOCK_CI_SLOT: LOST ($(printf '%s' "$out" | tr '\n' ' '))" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 job	ui			echo "- sccache lane $PADDOCK_CI_SLOT: held to the end" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 job	ui			echo "- sccache lane: NOT taken ($(tr '\n' ' ' < "$LANE_ERR")); job-private folder" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+job	ui			echo "- sccache: OFF ($CAUSE); this job built without the compile cache" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 job	ui			echo "::error::could not record the lane $LANE in GITHUB_ENV"
 job	ui			echo "::error::rustup is not installed on this runner"
 job	ui			echo "::error::sccache $VERSION checksum mismatch for $T (got $GOT)"
@@ -903,7 +975,8 @@ job	ui			echo "::warning::could not download sccache $VERSION; building without 
 job	ui			echo "::warning::no lane of $MOUNT was taken: $(tr '\n' ' ' < "$LANE_ERR"). The compile cache lives and dies with the job."
 job	ui			echo "::warning::sccache is not available on this runner; building without the compile cache."
 job	ui			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
-job	ui			echo "::warning::the sccache server did not start; the build runs without the compile cache."
+job	ui			echo "::warning::sccache: cannot write its config $CONF; the client keeps its 10 s start wait."
+job	ui			echo "::warning::the sccache server did not start ($CAUSE); the build runs without the compile cache."
 job	ui			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
 job	ui			echo "CARGO_INCREMENTAL=0"
 job	ui			echo "CARGO_TERM_COLOR=always"
@@ -911,6 +984,7 @@ job	ui			echo "PADDOCK_CI_LANE_LOCK=$(stat -c '%d:%i' "$MOUNT/lanes/slots/$LANE.
 job	ui			echo "PADDOCK_CI_LANE_ROOT=$MOUNT/lanes"
 job	ui			echo "PADDOCK_CI_SLOT=$LANE"
 job	ui			echo "PADDOCK_DEV_TOOL_CACHE_DONE=1" >> "$GITHUB_ENV"
+job	ui			echo "PADDOCK_SCCACHE_STATE=off:$CAUSE" >> "$GITHUB_ENV"
 job	ui			echo "RUSTC_WRAPPER=sccache"
 job	ui			echo "Rust toolchain  (from rust-toolchain.toml)"
 job	ui			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
@@ -923,6 +997,7 @@ job	ui			echo "release=$(bash "conformance/ci/kit.sh" release-path)" >> "$GITHUB
 job	ui			echo "sccache: base directories $BASES"
 job	ui			echo "sccache: local disk $DIR"
 job	ui			echo "sccache: shared backend ${{ vars.SCCACHE_REDIS_ENDPOINT }} db ${REDIS_DB:-5}"
+job	ui			echo "sccache: the server did not start; stopping it and starting it once more."
 job	ui			echo "sccache: this job holds lane $LANE of $LANES on $MOUNT"
 job	ui			echo "setup-rust: compile cache through the $kit implementation"
 job	ui			echo "version=$(node --version 2>/dev/null || echo none)" >> "$GITHUB_OUTPUT"
@@ -931,10 +1006,12 @@ job	ui			exit 0
 job	ui			exit 1
 job	ui			export PADDOCK_DEV_DOWNLOAD=0
 job	ui			export SCCACHE_BASEDIRS="$BASES" SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH
+job	ui			export SCCACHE_CONF="$CONF"
 job	ui			export SCCACHE_DIR="$DIR" SCCACHE_CACHE_SIZE="$SIZE"
 job	ui			export SCCACHE_REDIS_ENDPOINT="${{ vars.SCCACHE_REDIS_ENDPOINT }}" SCCACHE_REDIS_DB="${REDIS_DB:-5}"
 job	ui			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
 job	ui			for P in "${PADDOCK_WORKSPACE:-}" "${GITHUB_WORKSPACE:-}" "${PADDOCK_BUILD_FOLDER:-}"
+job	ui			for attempt in 1 2
 job	ui			for c in 
 job	ui			for kv in "${SETTINGS[@]}"
 job	ui			for name in "" stable
@@ -954,14 +1031,13 @@ job	ui			npm ci
 job	ui			out="$("${DEVCMD[@]}" ci slot check --slot "$PADDOCK_CI_SLOT" --root "$PADDOCK_CI_LANE_ROOT" ${PADDOCK_CI_LANE_LOCK:+--lock "$PADDOCK_CI_LANE_LOCK"} 2>&1)"
 job	ui			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	ui			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
-job	ui			printf '%s\n' "$installed"
+job	ui			printf 'server_startup_timeout_ms = 30000\n' > "$CONF" 2>/dev/null
 job	ui			r="conformance/ci/cache-report.sh"
 job	ui			redis
 job	ui			rm -f "$LANE_ERR"
 job	ui			rm -rf "$dl"
 job	ui			rustc --version
 job	ui			rustup default ""
-job	ui			rustup toolchain list 2>/dev/null
 job	ui			sccache --show-stats >/dev/null 2>&1
 job	ui			sccache --start-server
 job	ui			sccache --stop-server >/dev/null 2>&1
@@ -972,6 +1048,7 @@ job	ui			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --install-toolchain ""
 job	ui			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
 job	ui			tee -a "$GITHUB_STEP_SUMMARY"
 job	ui			then
+job	ui			toolchains=$(rustup toolchain list 2>/dev/null || true
 job	ui			unzip -q "$dl/$NAME.$EXT" -d "$dl"
 job	ui			{
 job	ui			} >> "$GITHUB_ENV"

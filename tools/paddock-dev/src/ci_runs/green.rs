@@ -254,7 +254,12 @@ impl Touched {
                 .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
                 .unwrap_or_default()
         };
-        let packages = plan["packages"]
+        // `gradePackages`: the changed packages without the crates whose only change is manifest metadata (cargo ignores it); a plan
+        // without it (an older recording) is read as `packages`.
+        let packages = plan
+            .get("gradePackages")
+            .filter(|v| v.is_object())
+            .unwrap_or(&plan["packages"])
             .as_object()
             .map(|o| o.iter().map(|(w, l)| (w.clone(), strings(l))).collect())
             .unwrap_or_default();
@@ -263,8 +268,12 @@ impl Touched {
             apps: strings(&plan["apps"]),
             all: false,
             packages,
-            // A lockfile reason whose changed packages the plan read (`lockGraded`) narrows the grade like a Cargo reach.
-            cargo_only: strings(&plan["cargoOnly"]).union(&strings(&plan["lockGraded"])).cloned().collect(),
+            // A reason that cannot alter a test, or only the named packages' (`packageGraded`: a lockfile whose changed packages the plan
+            // read, a ci.yml change that runs no test), narrows the grade like a Cargo reach.
+            cargo_only: strings(&plan["cargoOnly"])
+                .union(&strings(&plan["packageGraded"]))
+                .cloned()
+                .collect(),
             ..Touched::default()
         }
     }
@@ -853,7 +862,7 @@ pub fn touched_since_base(
 pub fn first_parent_before(root: &std::path::Path, sha: &str) -> Vec<String> {
     let range = format!("{sha}^");
     let n = MAX_COMMITS.to_string();
-    crate::plan_repo::git_text(root, &["rev-list", "--first-parent", "-n", &n, &range])
+    crate::git::git_text(root, &["rev-list", "--first-parent", "-n", &n, &range])
         .map(|t| t.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
         .unwrap_or_default()
 }
@@ -867,9 +876,9 @@ pub fn first_parent_before(root: &std::path::Path, sha: &str) -> Vec<String> {
 pub fn push_chain(root: &std::path::Path, sha: &str, before: Option<&str>) -> Vec<String> {
     let usable = before.filter(|b| b.len() == 40 && b.bytes().all(|c| c.is_ascii_hexdigit()) && b.bytes().any(|c| c != b'0') && *b != sha);
     // Exit 0 of `merge-base --is-ancestor` is the only yes; exit 1 (no) and an unknown commit are both a failure here.
-    if let Some(b) = usable.filter(|b| crate::plan_repo::git_text(root, &["merge-base", "--is-ancestor", b, sha]).is_some()) {
+    if let Some(b) = usable.filter(|b| crate::git::git_text(root, &["merge-base", "--is-ancestor", b, sha]).is_some()) {
         let n = MAX_COMMITS.to_string();
-        let chain: Vec<String> = crate::plan_repo::git_text(root, &["rev-list", "--first-parent", "-n", &n, b])
+        let chain: Vec<String> = crate::git::git_text(root, &["rev-list", "--first-parent", "-n", &n, b])
             .map(|t| t.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
             .unwrap_or_default();
         if !chain.is_empty() {
@@ -890,11 +899,11 @@ pub fn main_line(root: &std::path::Path, head: &str, include_head: bool, before:
     // `rev-list` of hashes, about 30 ms for 10,000 commits; the candidates stay bounded by the tips (at most MAX_PAGES pages of runs)
     // and the first-parent line below.
     let ancestors = |rev: &str| -> Vec<String> {
-        crate::plan_repo::git_text(root, &["rev-list", rev])
+        crate::git::git_text(root, &["rev-list", rev])
             .map(|t| t.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
             .unwrap_or_default()
     };
-    let Some(head_sha) = crate::plan_repo::git_text(root, &["rev-parse", "--verify", "--quiet", &format!("{head}^{{commit}}")])
+    let Some(head_sha) = crate::git::git_text(root, &["rev-parse", "--verify", "--quiet", &format!("{head}^{{commit}}")])
         .map(|t| t.trim().to_string())
         .filter(|t| !t.is_empty())
     else {
@@ -932,11 +941,11 @@ pub fn push_before(env: &dyn Fn(&str) -> Option<String>) -> Option<String> {
 /// and every path `base..head` changes is changed in `from..head` too (the planner plans from the changed paths). `false` whenever git
 /// cannot say: the push then runs its own.
 pub fn diff_covers(root: &std::path::Path, from: &str, base: &str, head: &str) -> bool {
-    if crate::plan_repo::git_text(root, &["merge-base", "--is-ancestor", from, base]).is_none() {
+    if crate::git::git_text(root, &["merge-base", "--is-ancestor", from, base]).is_none() {
         return false;
     }
     let paths = |a: &str| -> Option<BTreeSet<String>> {
-        crate::plan_repo::git_text(root, &["diff", "--name-only", "-z", "--no-renames", a, head])
+        crate::git::git_text(root, &["diff", "--name-only", "-z", "--no-renames", a, head])
             .map(|t| t.split('\0').filter(|p| !p.is_empty()).map(str::to_string).collect())
     };
     match (paths(from), paths(base)) {

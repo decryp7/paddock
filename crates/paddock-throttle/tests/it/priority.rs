@@ -219,9 +219,12 @@ fn unmark_withdraws_the_marker_so_the_next_run_goes_at_once() {
 }
 
 /// The queue is bounded by progress: a holder that never lets go stalls it, and the wait names who held the slot.
+/// The four stall tests run on the in-memory folder ([`Rig::mem`]): they poll thousands of times of fake time, and a real folder made
+/// each poll cost file-system calls (40 to 53 s on a Windows runner, run 9373, docs/benchmarks.md, "2026-11-28, the throttle tests off
+/// the real folder"). What they assert is the stall rule, not the OS.
 #[test]
 fn a_queue_that_makes_no_progress_ends_stalled_and_names_the_holder() {
-    let rig = Rig::new();
+    let rig = Rig::mem();
     let n = rig.agent(12);
     rig.procs.run(31, rig.now() - 50);
     let _holder = rig.plant_holder(&format!("31\nx\nholder\n{}\n/work\nsleep 9\n", rig.now()));
@@ -248,12 +251,8 @@ fn a_queue_that_makes_no_progress_ends_stalled_and_names_the_holder() {
 #[test]
 fn a_queue_that_keeps_moving_is_waited_for_past_the_stall_limit() {
     use std::sync::atomic::{AtomicU64, Ordering};
-    let rig = Rig::new();
-    // The fake clock sleeps nothing, but every poll reads and writes the real lock folder: at the rig's 200 ms poll these 20-minute waits made
-    // thousands of polls (5 to 7 s on a Mac, over a minute on a Windows runner). A 5 s poll sees the same fake minutes in a few hundred.
-    let mut cfg = rig.cfg();
-    cfg.poll = Duration::from_secs(5);
-    let n = rig.agent_with(12, cfg);
+    let rig = Rig::mem();
+    let n = rig.agent(12);
     let args = vec!["true".to_string()];
     let (swaps, last) = (AtomicU64::new(0), AtomicU64::new(rig.now()));
     let start = rig.now();
@@ -301,12 +300,8 @@ fn a_queue_that_keeps_moving_is_waited_for_past_the_stall_limit() {
 #[test]
 fn a_waiter_behind_a_live_holder_inside_its_cap_is_not_stalled() {
     use std::sync::atomic::{AtomicBool, Ordering};
-    let rig = Rig::new();
-    // The fake clock sleeps nothing, but every poll reads and writes the real lock folder: at the rig's 200 ms poll these 20-minute waits made
-    // thousands of polls (5 to 7 s on a Mac, over a minute on a Windows runner). A 5 s poll sees the same fake minutes in a few hundred.
-    let mut cfg = rig.cfg();
-    cfg.poll = Duration::from_secs(5);
-    let n = rig.agent_with(12, cfg);
+    let rig = Rig::mem();
+    let n = rig.agent(12);
     let args = vec!["true".to_string()];
     let start = rig.now();
     rig.procs.run(31, start - 50);
@@ -339,7 +334,7 @@ fn a_waiter_behind_a_live_holder_inside_its_cap_is_not_stalled() {
 /// move for the stall limit after that ends the wait.
 #[test]
 fn a_waiter_behind_a_holder_past_its_cap_stalls_after_the_limit() {
-    let rig = Rig::new();
+    let rig = Rig::mem();
     let n = rig.agent(12);
     let args = vec!["true".to_string()];
     rig.procs.run(31, rig.now() - 8000);

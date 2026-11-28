@@ -14,8 +14,8 @@
 //! It never applies to `--files`, an explicit `--base`, `--only` or `--dry-run` runs.
 
 use super::PrePushArgs;
-use super::outcome::GitRepo;
-use crate::plan_repo::git_text;
+use crate::git::git_text;
+use crate::subject::GitRepo;
 use paddock_cli::outcome::Sha;
 use paddock_cli::{CheckId, Evidence as Proof, Exit, Outcome, Report, ToolVersion, UnixSeconds};
 use serde_json::{Value, json};

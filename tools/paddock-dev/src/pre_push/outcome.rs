@@ -7,28 +7,7 @@
 //! where they stop being a status a caller could have set by hand.
 
 use super::exec::{Kind, Row, tool};
-use crate::generators::run::working_tree;
-use crate::plan_repo::git_text;
-use paddock_cli::outcome::{LiveRepo, Sha, TreeId};
 use paddock_cli::{CheckId, Finding, Outcome, Reason, Subject, UnixSeconds, Unmeasured, Verdict, measure};
-use std::path::Path;
-
-/// The repository as it is now, for `Evidence::adopt`.
-pub struct GitRepo<'a>(pub &'a Path);
-
-impl LiveRepo for GitRepo<'_> {
-    fn tree_of(&self, sha: &Sha) -> Option<TreeId> {
-        git_text(self.0, &["rev-parse", "--verify", "--quiet", &format!("{}^{{tree}}", sha.as_str())]).map(|t| TreeId::new(t.trim()))
-    }
-}
-
-/// What a run of the gates at `root` is about: the commit and its tree when `sha` names one, else the working tree.
-pub fn subject_of(root: &Path, sha: Option<&str>) -> Subject {
-    match sha.and_then(|s| GitRepo(root).tree_of(&Sha::new(s)).map(|t| (s, t))) {
-        Some((s, tree)) => Subject::Commit { sha: Sha::new(s), tree },
-        None => working_tree(root),
-    }
-}
 
 /// One row as an outcome for the shared [`Verdict`], with its next step in the text, and who excused it when a person's override did.
 fn row_outcome(id: &str, row: &Row, subject: &Subject) -> (Outcome, Option<String>) {
@@ -135,6 +114,7 @@ mod tests {
     use super::super::exec::Done;
     use super::*;
     use paddock_cli::Exit;
+    use paddock_cli::outcome::{Sha, TreeId};
 
     fn subject() -> Subject {
         Subject::Commit {

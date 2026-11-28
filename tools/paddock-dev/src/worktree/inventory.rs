@@ -4,7 +4,7 @@
 //! with `git worktree remove` (never `rm`, never `--force`): git itself refuses a locked or modified worktree, so a
 //! mistake in these checks still cannot delete one. Locked ones are listed with their owner note and kept.
 
-use super::git::{Git, Repo, WorkState, WorktreeInfo, worktrees};
+use super::git::{Repo, WorkState, WorktreeInfo, git_at, worktrees};
 use super::note::{Note, format_utc, now_secs};
 use super::ops::{git_failure, owner_failure};
 use super::owners::{Entry, OwnerStore};
@@ -110,7 +110,7 @@ pub fn rows(repo: &Repo, base: &str, with_in_use: bool) -> Result<Vec<Row>, CliE
         let dirty = if w.prunable {
             None
         } else {
-            Git::at(Path::new(&w.path))
+            git_at(Path::new(&w.path))
                 .text(&["status", "--porcelain"])
                 .ok()
                 .map(|s| !s.trim().is_empty())

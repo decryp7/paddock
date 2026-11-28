@@ -67,6 +67,9 @@ pub struct Generator {
     pub drift_marker: Vec<String>,
     /// Why there is no automatic check (an entry with `manual` has no `check` and never runs; it is listed when its paths change).
     pub manual: Option<String>,
+    /// Its check is a golden test: the pre-push `goldens` row runs it when a change reaches its inputs (`paths`, `reads`), so a stale
+    /// golden fails the push and not only a CI trial (ER-21). Its `paths` are the golden's declared inputs.
+    pub golden: bool,
     path_res: Vec<Regex>,
     output_res: Vec<Regex>,
 }
@@ -176,6 +179,7 @@ impl Registry {
                 "build",
                 "reads",
                 "setup",
+                "golden",
             ];
             for k in t.keys().filter(|k| !known.contains(&k.as_str())) {
                 errors.push(format!("{at}: unknown key `{k}` (known: {})", known.join(", ")));
@@ -188,6 +192,10 @@ impl Registry {
                 )),
                 (Some(_), false) => errors.push(format!("{at}: `manual` and `check` exclude each other")),
                 _ => {}
+            }
+            let golden = t.get("golden").and_then(toml::Value::as_bool).unwrap_or(false);
+            if golden && manual.is_some() {
+                errors.push(format!("{at}: a `golden` entry runs a test, so it has a `check` and no `manual`"));
             }
             let build = strings_of(t, "build");
             if build.is_empty() && compiles(&check) {
@@ -256,6 +264,7 @@ impl Registry {
                 requires: strings_of(t, "requires"),
                 setup: Some(text_of(t, "setup")).filter(|s| !s.is_empty()),
                 manual,
+                golden,
                 drift_marker: strings_of(t, "drift_marker"),
                 path_res,
                 output_res,
@@ -271,6 +280,16 @@ impl Registry {
     /// The generators a change to `changed` makes due, in registry order.
     pub fn due<'a>(&'a self, changed: &[String]) -> Vec<&'a Generator> {
         self.generators.iter().filter(|g| changed.iter().any(|p| g.marks(p))).collect()
+    }
+
+    /// The ids of the golden entries a change makes due: those the hand paths mark and those in `graph_due` (what the model's `reads`
+    /// reach), in registry order.
+    pub fn golden_due(&self, changed: &[String], graph_due: &BTreeSet<String>) -> Vec<String> {
+        self.generators
+            .iter()
+            .filter(|g| g.golden && (graph_due.contains(&g.id) || changed.iter().any(|p| g.marks(p))))
+            .map(|g| g.id.clone())
+            .collect()
     }
 
     /// The generator with this id.

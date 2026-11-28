@@ -531,6 +531,10 @@ pub fn locate_misbehaving() -> Result<PathBuf, String> {
 }
 
 fn locate_bin(name: &str) -> Result<PathBuf, String> {
+    // Before the look for a built program: a warm run must judge the test's name as a cold one does.
+    paddock_testkit::build_cost::charge(
+        "paddock_plugin_test::fixture::locate (cargo build -p paddock-plugin-test)",
+    );
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let dir = paddock_testkit::cargo_layout::profile_dir_for(&exe)?;
     find_or_build(&dir, name, || crate::process::build_with_cargo(name))

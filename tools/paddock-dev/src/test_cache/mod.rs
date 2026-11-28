@@ -1,6 +1,6 @@
 //! The test-result cache (ADR 0116, accepted 2026-11-25): a test target whose inputs did not change reuses its pass.
 //!
-//! One definition of reuse (ER-22, rule 55): the key is [`crate::pre_push::reuse::digest`] over the repository graph's per-node input
+//! One definition of reuse (ER-22, rule 55): the key is [`crate::input_hash::digest`] over the repository graph's per-node input
 //! hash ([`crate::repo_model::hash`], ADR 0117), the local store sits beside the gate rows' records in the git common dir, and the
 //! per-target pass is read with the one nextest reader ([`crate::nextest_log`]). What the cache adds is in the parts below:
 //! - [`config`]: `docs/test-cache.toml` (epoch, age rule, never-cached list, the shadow switch);
@@ -19,6 +19,8 @@ pub mod config;
 mod declared_tests;
 pub mod key;
 pub mod plan;
+pub mod probe;
+pub mod reasons;
 pub mod result;
 pub mod s3;
 pub mod store;
@@ -41,7 +43,8 @@ pub struct Candidate {
     /// A file of the node has uncommitted changes: the hash describes HEAD, so the target runs and is not stored.
     pub dirty: bool,
     /// The reads of its crate the graph cannot resolve (a manifest folder in a variable, `ancestors`, a join with a non-literal, ...),
-    /// one line each: its key cannot say what it reads, so it is never reused (ADR 0116 §2). Recording continues.
+    /// one line each: its key cannot say what it reads, so it is never reused (ADR 0116 §2), and its pass is not stored either: it is not looked
+    /// up, so a record would be written over an unread one, and nothing reads it (user, 2026-11-28).
     pub blind: Vec<String>,
 }
 
@@ -105,8 +108,9 @@ pub fn key_of(c: &Candidate, cfg: &Config, class: &RunnerClass, filter: &str) ->
     )
 }
 
-/// One decision per candidate, in order, from one bulk lookup. A store that errors turns reuse off for every target (fail open,
-/// §5: everything runs, never the other way round); the cause is the second answer, for one notice. `trust` is the reader-side
+/// One decision per candidate, in order, from one bulk lookup. A key the store could not answer turns reuse off for that target only
+/// ([`Why::Off`], fail open per item, §5 as amended 2026-11-28: it runs, never the other way round) and the others keep their answers; the
+/// second answer is one sentence naming how many failed and the first cause, for one notice, `None` when none failed. `trust` is the reader-side
 /// check of a record (§7); `now` is Unix seconds. `filter` is the filterset the run this lookup is for is narrowed to: a record counts
 /// only under the same filter.
 pub fn decide(
@@ -132,11 +136,18 @@ pub fn decide(
             });
         }
     }
-    let found = match store.get_many(&asks) {
-        Ok(f) if f.len() == asks.len() => f,
-        Ok(f) => return off(cands, format!("the store answered {} records for {} keys", f.len(), asks.len())),
-        Err(e) => return off(cands, e.to_string()),
-    };
+    let found = store.get_many(&asks);
+    if found.len() != asks.len() {
+        return off(cands, format!("the store answered {} records for {} keys", found.len(), asks.len()));
+    }
+    let failed: Vec<&store::StoreError> = found.iter().filter_map(|f| f.as_ref().err()).collect();
+    let notice = failed.first().map(|e| {
+        format!(
+            "the store lookup failed for {} of {} keys: {e}. Those targets run; the others keep their answers.",
+            failed.len(),
+            asks.len()
+        )
+    });
     let limit = cfg.max_age();
     let out = cands
         .iter()
@@ -151,7 +162,11 @@ pub fn decide(
                     Why::Dirty
                 });
             };
-            let Some(r) = &found[i] else { return Decision::Run(Why::Miss) };
+            let r = match &found[i] {
+                Ok(Some(r)) => r,
+                Ok(None) => return Decision::Run(Why::Miss),
+                Err(e) => return Decision::Run(Why::Off(e.to_string())),
+            };
             if limit.is_some_and(|l: Duration| now.saturating_sub(r.at) > l.as_secs()) {
                 return Decision::Run(Why::TooOld);
             }
@@ -162,7 +177,7 @@ pub fn decide(
             }
         })
         .collect();
-    (out, None)
+    (out, notice)
 }
 
 /// The blind reads of each crate, split by what covers them (ADR 0116 §2, user decision 122).
@@ -301,7 +316,11 @@ pub fn is_nightly(env: &dyn Fn(&str) -> Option<String>) -> bool {
 /// run can name each cached pass the world no longer supports (an environment drift, or a test that reads something its key lacks) and
 /// open a fix item for the key's definition. A target with no record under its key is not in the answer.
 pub fn invalidate(store: &dyn Store, failed: &[Lookup]) -> Result<Vec<Record>, store::StoreError> {
-    Ok(store.delete_many(failed)?.into_iter().flatten().collect())
+    let mut gone = Vec::new();
+    for answer in store.delete_many(failed) {
+        gone.extend(answer?);
+    }
+    Ok(gone)
 }
 
 /// Where a record came from.
@@ -436,18 +455,17 @@ pub fn run_outcome(ran: &[&Candidate], matched: &[&Candidate], judged: &result::
 /// one too old, or one the trust check refused. Write-once while trusted, as remote build caches do: a trusted record ([`Decision::Reuse`])
 /// is never replaced, so a red run's leg or a local run cannot make every later lookup untrusted (run 9209 replaced run 9180's records).
 /// Nothing is replaced on an answer that is not definite either: a trust check that could not answer ([`Why::Undecided`]) or a lookup
-/// that did not run or failed ([`Why::Off`]). The second answer is how many records were held back.
-pub fn not_overwriting_trusted(put: Vec<Record>, cands: &[Candidate], decisions: &[Decision]) -> (Vec<Record>, usize) {
-    let replaceable: std::collections::BTreeSet<&str> = cands
-        .iter()
-        .zip(decisions)
-        .filter(|(_, d)| matches!(d, Decision::Run(Why::Miss | Why::TooOld | Why::Untrusted(_))))
-        .map(|(c, _)| c.target.id.as_str())
-        .collect();
-    let before = put.len();
-    let kept: Vec<Record> = put.into_iter().filter(|r| replaceable.contains(r.target.as_str())).collect();
-    let n = before - kept.len();
-    (kept, n)
+/// that did not run or failed ([`Why::Off`]); a target that was never looked up (never cached, blind, dirty) is not replaced either.
+/// The second answer counts the records held back by the reason of their decision ([`reasons::Tally::held_line`]).
+pub fn not_overwriting_trusted(put: Vec<Record>, cands: &[Candidate], decisions: &[Decision]) -> (Vec<Record>, reasons::Tally) {
+    let decision_of: std::collections::BTreeMap<&str, &Decision> =
+        cands.iter().zip(decisions).map(|(c, d)| (c.target.id.as_str(), d)).collect();
+    let replaceable = |d: &Decision| matches!(d, Decision::Run(Why::Miss | Why::TooOld | Why::Untrusted(_)));
+    let (kept, held): (Vec<Record>, Vec<Record>) = put
+        .into_iter()
+        .partition(|r| decision_of.get(r.target.as_str()).is_some_and(|d| replaceable(d)));
+    let tally = reasons::Tally::of(held.iter().filter_map(|r| decision_of.get(r.target.as_str()).copied()));
+    (kept, tally)
 }
 
 /// The records a lookup found but did not trust, counted by why: `untrusted 57 (57: job ... did not end success)`, and those whose trust

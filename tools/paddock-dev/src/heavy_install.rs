@@ -220,6 +220,11 @@ fn sweep(dir: &Path) {
     }
 }
 
+/// The curl config that carries the download token, through the shared writer (`curl_config`).
+fn token_config(token: &str) -> String {
+    crate::curl_config::line("header", &format!("Authorization: token {token}"))
+}
+
 fn download(i: &Install, work: &Path, file: &str) -> Result<PathBuf, String> {
     let url = format!("{}/throttle-v{}/{file}", i.base.trim_end_matches('/'), i.version);
     let dest = work.join(file);
@@ -231,7 +236,7 @@ fn download(i: &Install, work: &Path, file: &str) -> Result<PathBuf, String> {
     if let Some(t) = i.token {
         // The token goes in through a config file only this user reads (so no process list shows it) and is masked if curl echoes it.
         let cfg = work.join("curl.cfg");
-        write_private(&cfg, &format!("header = \"Authorization: token {t}\"\n")).map_err(|e| {
+        write_private(&cfg, &token_config(t)).map_err(|e| {
             error(
                 &format!("cannot write {}: {e}.", cfg.display()),
                 "make the dev-targets folder writable.",
@@ -387,7 +392,7 @@ pub fn command(a: &InstallArgs) -> Result<Report, CliError> {
 
 /// The version in this checkout's `tools/throttle/Cargo.toml`.
 fn checkout_version(from: &Path) -> Result<String, CliError> {
-    let root = crate::worktree::git::Git::at(from)
+    let root = crate::worktree::git::git_at(from)
         .text(&["rev-parse", "--show-toplevel"])
         .map(|t| PathBuf::from(t.trim()))
         .map_err(|e| CliError::failure(format!("throttle-install: {e}; run it in a Paddock checkout or pass --version")))?;
@@ -404,6 +409,15 @@ fn checkout_version(from: &Path) -> Result<String, CliError> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_download_token_goes_through_the_shared_curl_writer() {
+        assert_eq!(
+            token_config("a\\b\"c"),
+            crate::curl_config::line("header", "Authorization: token a\\b\"c")
+        );
+        assert_eq!(token_config("a\\b\"c"), "header = \"Authorization: token a\\\\b\\\"c\"\n");
+    }
+
     use super::*;
 
     #[test]

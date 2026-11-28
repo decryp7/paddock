@@ -2,7 +2,7 @@
 
 use super::budget::Timing;
 use super::exec::{Done, Exec, Kind, Limits, Row, RunOpts, run_all_timed, run_all_with, test_subject};
-use super::gates::{AUDIT_PROFILE, Change, Facts, Gate, Need, Planned, plan_gates, windows_skip_reason};
+use super::gates::{AUDIT_PROFILE, Change, Facts, Gate, Need, Planned, audit_dev_filter, plan_gates, windows_skip_reason};
 use super::{accept_not_measured, parse_refs, render, render_timed};
 use crate::throttle::QUEUE_STALL;
 use paddock_cli::Exit;
@@ -42,6 +42,7 @@ fn facts() -> Facts {
         test_filters: Default::default(),
         nextest_config: Default::default(),
         reached: Default::default(),
+        goldens: Ok(Vec::new()),
     }
 }
 
@@ -293,7 +294,9 @@ fn the_row_set_of_a_pass_record_is_every_fixed_row_the_planner_can_plan() {
         ranges: vec!["abc..HEAD".into()],
         ..Change::default()
     };
-    let planned = plan_gates(&plan(), &c, &facts());
+    let mut f = facts();
+    f.goldens = Ok(vec!["ci-run-golden".into()]);
+    let planned = plan_gates(&plan(), &c, &f);
     let mut fixed: Vec<String> = ids(&planned)
         .into_iter()
         .filter(|id| !super::gates::PER_WORKSPACE_PREFIXES.iter().any(|p| id.starts_with(p)))
@@ -302,6 +305,61 @@ fn the_row_set_of_a_pass_record_is_every_fixed_row_the_planner_can_plan() {
     let mut want: Vec<String> = super::gates::ROW_SET.iter().map(|s| s.to_string()).collect();
     want.sort();
     assert_eq!(fixed, want, "add the new row to gates::ROW_SET");
+}
+
+/// The registry of the real tree (`docs/generators.toml`): the golden row's inputs are declared there once, so a test of the row reads
+/// them from it and not from a hand list (ER-42).
+fn real_registry() -> crate::generators::registry::Registry {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    crate::generators::load(&root).unwrap_or_else(|e| panic!("{e:?}"))
+}
+
+/// The golden row (recurring class, ER-21: a change altered what a golden records, the push passed because it ran no golden test, and a
+/// CI trial went red three times in two days): a change to a file a golden reads plans `./dev gen check --only <the goldens it reaches>`,
+/// and a change nothing reaches skips the row with the reason. The inputs are read from the registry, not typed here.
+#[test]
+fn a_change_to_a_file_a_golden_reads_plans_the_golden_row_and_any_other_change_skips_it() {
+    let reg = real_registry();
+    for (file, golden) in [
+        (".gitea/actions/setup-rust/action.yml", "ci-run-golden"),
+        ("tools/paddock-dev/src/ci_run/mod.rs", "ci-run-golden"),
+        ("tools/paddock-dev/src/plan.rs", "planner-golden"),
+        ("docs/repo-graph.toml", "planner-golden"),
+        ("tools/paddock-dev/src/ci_host/mod.rs", "ci-host-golden"),
+    ] {
+        let mut f = facts();
+        f.goldens = Ok(reg.golden_due(&[file.to_string()], &BTreeSet::new()));
+        let planned = plan_gates(&plan(), &change(&[file]), &f);
+        let row = run_gates(&planned)
+            .into_iter()
+            .find(|g| g.id == "goldens")
+            .unwrap_or_else(|| panic!("{file} plans no goldens row: {:?}", ids(&planned)));
+        assert_eq!(&row.args[..2], ["gen", "check"], "{file}: {:?}", row.args);
+        assert!(
+            row.args.iter().any(|a| a.split(',').any(|id| id == golden)),
+            "{file} must run {golden}: {:?}",
+            row.args
+        );
+    }
+    let mut f = facts();
+    f.goldens = Ok(reg.golden_due(&["docs/x.md".to_string()], &BTreeSet::new()));
+    let planned = plan_gates(&plan(), &change(&["docs/x.md"]), &f);
+    assert!(
+        planned
+            .iter()
+            .any(|p| matches!(p, Planned::Skip { id, reason } if id == "goldens" && reason.contains("golden"))),
+        "{:?}",
+        ids(&planned)
+    );
+    // A model that could not be asked is not a pass: the row says so (ER-33).
+    f.goldens = Err("the model could not be built".into());
+    let planned = plan_gates(&plan(), &change(&["docs/x.md"]), &f);
+    assert!(
+        planned
+            .iter()
+            .any(|p| matches!(p, Planned::NotMeasured { id, .. } if id == "goldens")),
+        "{planned:?}"
+    );
 }
 
 /// The shared-crate dependency guard runs when a manifest, a lockfile, the hack config or the pins file changed, with `./dev locks guard`
@@ -663,26 +721,61 @@ fn every_lib_clause_of_the_member_audits_selects_a_test_of_the_lib() {
     );
 }
 
-/// A developer's push does not run the audits (minutes would be added to every push); it says why. The member gate does.
+/// A developer's push runs the audits when the change reaches anything they read (they scan the whole tree: the tool's sources, the
+/// shared crates, conformance, the registers), so a builder meets safe_remove_lint, the parity corpus and the allow-list parity before
+/// the train does (the recurring miss of 2026-11-28: a push passed, the member gate failed member-audits). It skips with a reason only
+/// when every changed file is prose no audit reads ([`AUDIT_BLIND`]), and the member gate runs them whatever changed.
 #[test]
-fn a_developers_push_skips_the_member_audits_with_a_reason_and_the_member_gate_runs_them() {
+fn a_developers_push_runs_the_member_audits_when_a_change_reaches_what_they_read_and_skips_prose_only_changes() {
     let off = Facts {
         member_gate: false,
         ..facts()
     };
-    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &off);
-    assert!(!ids(&planned).contains(&"member-audits".to_string()), "{:?}", ids(&planned));
+    for files in [
+        &["tools/paddock-dev/src/test_cache/probe.rs"][..],
+        &["crates/a.rs"],
+        &["docs/gates.toml"],
+        &["docs/adr/0001-x.md", "tools/paddock-dev/src/a.rs"],
+        &["Mystery"],
+        &[],
+    ] {
+        let planned = plan_gates(&plan(), &change(files), &off);
+        assert!(ids(&planned).contains(&"member-audits".to_string()), "{files:?}: {planned:?}");
+    }
+    for files in [&["docs/adr/0999-x.md"][..], &["docs/research/a.md", "docs/plans/b.md"]] {
+        let planned = plan_gates(&plan(), &change(files), &off);
+        assert!(
+            !ids(&planned).contains(&"member-audits".to_string()),
+            "{files:?}: {:?}",
+            ids(&planned)
+        );
+        assert!(
+            planned
+                .iter()
+                .any(|p| matches!(p, Planned::Skip { id, reason } if id == "member-audits" && reason.contains("no audit reads"))),
+            "skipped with its reason: {planned:?}"
+        );
+    }
+    // The developer's run is the source audits only: the member gate's command plus the declared filter; the gate itself has none.
+    let dev = plan_gates(&plan(), &change(&["tools/paddock-dev/src/test_cache/probe.rs"]), &off);
+    let g = run_gates(&dev).into_iter().find(|g| g.id == "member-audits").expect("planned");
+    let args = g.args.join(" ");
+    assert!(args.ends_with(&format!("-E {}", audit_dev_filter())), "{args}");
     assert!(
-        planned
-            .iter()
-            .any(|p| matches!(p, Planned::Skip { id, reason } if id == "member-audits" && reason.contains("--member-gate"))),
-        "skipped with its reason: {planned:?}"
+        audit_dev_filter().contains("test(/(^|::)graph_[^:]*$/)") && audit_dev_filter().contains("test(/(^|::)tree_[^:]*$/)"),
+        "the class filters come from test_cost::Class: {}",
+        audit_dev_filter()
     );
-    let on = Facts {
-        member_gate: true,
-        ..facts()
+    let gate = plan_gates(&plan(), &change(&["tools/paddock-dev/src/test_cache/probe.rs"]), &facts());
+    let g = run_gates(&gate).into_iter().find(|g| g.id == "member-audits").expect("planned");
+    assert!(!g.args.iter().any(|a| a == "-E"), "the member gate runs every audit: {:?}", g.args);
+    // Positive control (ER-33): a change with an unknown base is never judged prose-only, and the member gate runs whatever changed.
+    let unknown = Change {
+        base: None,
+        ..change(&["docs/adr/0999-x.md"])
     };
-    assert!(ids(&plan_gates(&plan(), &change(&["crates/a.rs"]), &on)).contains(&"member-audits".to_string()));
+    assert!(ids(&plan_gates(&plan(), &unknown, &off)).contains(&"member-audits".to_string()));
+    assert!(ids(&plan_gates(&plan(), &change(&["docs/adr/0999-x.md"]), &facts())).contains(&"member-audits".to_string()));
 }
 
 /// ADR 0123 §7: the job-model check is a member-gate row (a layout change fails before a train, ER-9, ER-53), runs `./dev ci job-model check`
@@ -855,7 +948,7 @@ impl Exec for Fake {
             success: !fail,
             how: if fail { "exit 1".into() } else { "exit 0".into() },
             tail: if fail { "error: boom".into() } else { String::new() },
-            log: None,
+            log: fail.then(|| format!("/logs/{}.log", g.id)),
             timing: self.timing,
             ending: crate::pre_push::exec::Ending::Exited,
         })
@@ -891,6 +984,31 @@ fn a_missing_xwin_is_not_measured_with_the_install_line() {
         2,
     );
     assert!(matches!(nm(&verdicts(&rows)["clippy-windows crates"]), Some((_, next)) if next.contains("cargo install cargo-xwin")));
+}
+
+/// The JSON a reader gets names a failed row's cause and its step log, not the verdict alone (ER-27): `merge sync-member` read only
+/// the verdict, so train z's failed `gates-register` printed no reason and no log. A pass carries neither.
+#[test]
+fn a_failed_row_names_its_cause_and_its_log_in_the_json() {
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
+    let rows = run_all(
+        &planned,
+        &Fake {
+            fail: vec!["fmt crates".into()],
+            ..Fake::default()
+        },
+        2,
+    );
+    let report = render("h", &rows);
+    let gates = report.data["gates"].as_array().expect("gates");
+    let row = |id: &str| gates.iter().find(|g| g["id"] == id).unwrap_or_else(|| panic!("{id}: {gates:?}"));
+    let failed = row("fmt crates");
+    assert_eq!(failed["verdict"], "failed");
+    assert!(failed["reason"].as_str().is_some_and(|r| r.contains("exit 1")), "{failed}");
+    assert_eq!(failed["log"], "/logs/fmt crates.log", "{failed}");
+    assert!(failed["next"].as_str().is_some_and(|n| n.contains("Re-run alone")), "{failed}");
+    let passed = row("lockfile crates");
+    assert!(passed.get("reason").is_none() && passed.get("log").is_none(), "{passed}");
 }
 
 #[test]
@@ -1295,7 +1413,7 @@ fn the_override_names_full_row_ids_and_is_announced() {
 /// A pushed commit is checked out on its own and removed after: a dirty main tree cannot change what is checked.
 #[test]
 fn a_pushed_commit_is_checked_out_in_a_throw_away_worktree_that_is_removed() {
-    use crate::plan_repo::git_text;
+    use crate::git::git_text;
     let d = tempfile::tempdir().unwrap();
     let main = d.path().join("main");
     std::fs::create_dir(&main).unwrap();
@@ -1380,7 +1498,7 @@ fn the_pre_push_folder_is_never_in_the_home_folder() {
 /// A crashed run's locked worktree is found and removed by the next run, a live one is left alone.
 #[test]
 fn a_leftover_locked_worktree_of_an_ended_run_is_swept_and_a_live_ones_is_kept() {
-    use crate::plan_repo::git_text;
+    use crate::git::git_text;
     let d = tempfile::tempdir().unwrap();
     let main = d.path().join("main");
     std::fs::create_dir(&main).unwrap();
@@ -1427,7 +1545,7 @@ fn extra_pushed_refs_are_not_measured_rows_and_never_passes() {
 /// drive) keeps its record, and a leftover of ours whose folder is gone is removed.
 #[test]
 fn the_sweep_never_drops_a_foreign_worktree_whose_folder_is_missing() {
-    use crate::plan_repo::git_text;
+    use crate::git::git_text;
     let d = tempfile::tempdir().unwrap();
     let main = d.path().join("main");
     std::fs::create_dir(&main).unwrap();
@@ -1484,7 +1602,7 @@ fn a_symlink_into_home_a_relative_path_and_a_tilde_are_refused() {
 mod known_commit {
     use super::super::known::{self, Evidence, Lookups};
     use super::super::{PrePushArgs, command_in, node_env_problem};
-    use crate::plan_repo::git_text;
+    use crate::git::git_text;
     use paddock_cli::Exit;
     use std::path::{Path, PathBuf};
 
@@ -1557,7 +1675,7 @@ mod known_commit {
 
     /// A pass of the push gate for `sha`, made the only way a pass is made: through `measure`.
     fn pass_for(r: &Path, sha: &str) -> paddock_cli::Outcome {
-        let subject = crate::pre_push::outcome::subject_of(r, Some(sha));
+        let subject = crate::subject::subject_of(r, Some(sha));
         paddock_cli::measure(
             paddock_cli::CheckId::new("pre-push"),
             subject,
@@ -1963,7 +2081,7 @@ fn a_missing_conformance_install_is_environment_not_ready_never_a_failure_or_pas
 mod base_choice {
     use super::super::known::Lookups;
     use super::super::{PrePushArgs, Pushed, command_in};
-    use crate::plan_repo::git_text;
+    use crate::git::git_text;
     use std::path::{Path, PathBuf};
 
     /// A new ref `w` at `tip` pushed to `remote`: the shape most tests here need.
@@ -2209,7 +2327,7 @@ impl Repo {
     }
 
     fn git(&self, args: &[&str]) -> String {
-        crate::plan_repo::git_text(&self.root, args).unwrap_or_else(|| panic!("git {args:?}"))
+        crate::git::git_text(&self.root, args).unwrap_or_else(|| panic!("git {args:?}"))
     }
 
     /// A commit that changes `file`, on the current branch; its sha.
@@ -3889,5 +4007,32 @@ mod member_tests {
             "{:?}",
             tool.args
         );
+    }
+}
+
+/// The approvals' stage (user decision 2026-11-27): a developer's push judges a missing approval as a warning, the member gate as an
+/// error. The rows that judge approvals (the Rust conformance checks and C100) get it from the environment.
+#[test]
+fn the_rows_that_judge_approvals_carry_the_stage_of_the_run() {
+    let stage_of = |member_gate: bool, id: &str| {
+        let f = Facts { member_gate, ..facts() };
+        let planned = plan_gates(
+            &json!({"conformance": false, "apps": [], "packages": {}}),
+            &change(&["docs/x.md"]),
+            &f,
+        );
+        let row = run_gates(&planned)
+            .into_iter()
+            .find(|g| g.id == id)
+            .cloned()
+            .unwrap_or_else(|| panic!("{id} is not run: {planned:?}"));
+        row.env
+            .iter()
+            .find(|(k, _)| k == crate::check::growth_approval::STAGE_ENV)
+            .map(|(_, v)| v.clone())
+    };
+    for id in ["conformance", "gates-register"] {
+        assert_eq!(stage_of(false, id).as_deref(), Some("branch-push"), "{id}: a push");
+        assert_eq!(stage_of(true, id).as_deref(), Some("member-gate"), "{id}: the member gate");
     }
 }

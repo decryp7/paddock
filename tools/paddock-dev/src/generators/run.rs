@@ -273,7 +273,7 @@ impl Runner for Real {
             match crate::heavy_tool::throttle_command_for(
                 &self.root,
                 &env,
-                &|p| crate::throttle::on_path(&self.env, p),
+                &|p| crate::pathfind::on_path(&self.env, p),
                 &self.built_throttle,
                 limit,
             ) {
@@ -327,27 +327,7 @@ impl Runner for Real {
     }
 
     fn subject(&self, root: &Path) -> Subject {
-        working_tree(root)
-    }
-}
-
-/// The head and a SHA-256 of the working tree's state (`git diff HEAD` and the untracked files' names): what a generator check
-/// that reads files is a check of. A git that cannot answer gives `unknown`, which no consumer matches to a commit.
-pub fn working_tree(root: &Path) -> Subject {
-    use sha2::{Digest, Sha256};
-    let git = crate::merge_check::git::Git::new(root);
-    let head = git
-        .text(&["rev-parse", "HEAD"])
-        .map(|t| t.trim().to_string())
-        .unwrap_or_else(|_| "unknown".into());
-    let mut h = Sha256::new();
-    for args in [&["diff", "HEAD"][..], &["ls-files", "--others", "--exclude-standard"][..]] {
-        h.update(git.text(args).unwrap_or_default());
-    }
-    let hex: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
-    Subject::Files {
-        head: paddock_cli::outcome::Sha::new(head),
-        digest: paddock_cli::outcome::Sha256::new(hex),
+        crate::subject::working_tree(root)
     }
 }
 

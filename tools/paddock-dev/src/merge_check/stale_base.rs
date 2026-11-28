@@ -16,7 +16,7 @@
 //! commit ([`Base::Unknown`], ER-33); a target that is main or `origin/main` by name, or not ahead of `origin/main`
 //! ([`Base::NotATrain`]).
 
-use super::git::{Git, short};
+use crate::git::{Git, short};
 
 /// Whether a member without the base fails the check. True by the user's decision of 2026-11-25 (the old-base block; ER-41's
 /// report-only phase is over); turning it off again is a change of that record too.

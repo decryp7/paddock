@@ -1,20 +1,10 @@
 //! The `./dev gates` subcommands: argument handling and output only.
 
 use super::{ci, edge, evaluate, register::Date};
-use crate::input_hash;
+use crate::repo_root::repo_root;
 use paddock_cli::{CliError, Report};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
-
-/// The repository root: the given one, or git's top level from the current folder.
-pub fn repo_root(given: Option<&Path>) -> Result<PathBuf, CliError> {
-    if let Some(r) = given {
-        return Ok(r.to_path_buf());
-    }
-    let cwd = std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder cannot be read: {e}.")))?;
-    let out = input_hash::Exec::run(&input_hash::Real, "git", &["rev-parse", "--show-toplevel"], &cwd, None)?;
-    Ok(PathBuf::from(out.trim()))
-}
 
 /// `dev gates model`.
 pub fn model(root: Option<&Path>) -> Result<Report, CliError> {
@@ -56,6 +46,8 @@ pub struct CheckArgs {
     pub warn: bool,
     /// The revision the register may only shrink against.
     pub base: String,
+    /// Where the check runs ([`paddock_approvals::Stage`]).
+    pub stage: paddock_approvals::Stage,
 }
 
 /// `dev gates check`.
@@ -87,6 +79,7 @@ pub fn check(a: &CheckArgs, dev_commands: std::collections::BTreeSet<String>) ->
         planner: &planner,
         warn: a.warn,
         shallow: edge::is_shallow(&root),
+        stage: a.stage,
     };
     let out = evaluate::evaluate(&input);
     let table = evaluate::summary(&out.rows);
@@ -149,6 +142,7 @@ pub fn list(root: Option<&Path>, base: &str, dev_commands: std::collections::BTr
         planner: &planner,
         warn: true,
         shallow: false,
+        stage: paddock_approvals::Stage::Landing,
     };
     let out = evaluate::evaluate(&input);
     let rows: Vec<Value> = out

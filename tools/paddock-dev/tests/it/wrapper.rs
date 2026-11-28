@@ -2042,6 +2042,9 @@ fn the_cached_tool_holds_itself_for_its_run_and_completes_when_its_cache_entry_i
         // `wait` keeps its one-waiter lock in the git folder of the repository it runs in: run it in a repository of the test's own,
         // never the checkout (ER-45; the checkout is read-only in the Linux container, where the lock write failed the run).
         .current_dir(&repo)
+        // The harness points the lock folder at the test's private folder (STATE_FOLDERS); this test is about the repository's own, so the
+        // setting is removed (the repository is the test's own, never the checkout).
+        .env_remove("PADDOCK_WAIT_STATE")
         .env("PADDOCK_DEV_HOME", &home)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())

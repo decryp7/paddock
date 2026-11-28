@@ -20,13 +20,13 @@
 //! Log lines of `--ci` go to standard error (the script printed them to standard output unless `--app` was given); the job log
 //! shows both streams.
 
+use crate::git::git_text;
 use crate::host_tests::HostTests;
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_ci::{
     BaseInput, MatrixOpts, USAGE, choose_base, ci_outputs, coverage_run, full_os, matrix, member_run, only_app, package_filters,
     parse_args, summary, wants_webkit, workspace_legs,
 };
-use crate::plan_repo::git_text;
 use crate::plan_since::{APP_WORKFLOWS, GiteaRuns, SincePlan};
 use crate::run_scope::{ExpectedMap, PlannedLegs, Scope, ci_scope, expected_of, load_model, scope_of};
 use crate::wait::{CurlHttp, Http};
@@ -112,15 +112,6 @@ pub(crate) fn green_base_over(
     }
 }
 
-fn repo_root(root: Option<PathBuf>) -> Result<PathBuf, CliError> {
-    if let Some(r) = root {
-        return Ok(r);
-    }
-    let cwd = std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder cannot be read: {e}.")))?;
-    let out = crate::input_hash::Exec::run(&crate::input_hash::Real, "git", &["rev-parse", "--show-toplevel"], &cwd, None)?;
-    Ok(PathBuf::from(out.trim()))
-}
-
 fn append(path: &str, text: &str) -> Result<(), CliError> {
     let mut f = std::fs::OpenOptions::new()
         .append(true)
@@ -137,7 +128,7 @@ fn env_var(k: &str) -> Option<String> {
 
 /// `dev plan`: `args` are the arguments after `plan`.
 pub fn command(args: &[String], root: Option<PathBuf>) -> Result<Report, CliError> {
-    let root = repo_root(root)?;
+    let root = crate::repo_root::repo_root(root.as_deref())?;
     let env = env_var;
     // A sparse checkout makes the planner read a tree with folders missing and answer for it; say so first (local runs only).
     if let Some(line) = crate::gates::edge::sparse_problem(&root) {
@@ -1097,7 +1088,6 @@ mod tests {
         let mut warned = String::new();
         let root = tempfile::tempdir().unwrap();
         let mut client = crate::ci_runs::client::Client::new(&mut http, "https://gitea.invalid", "decryp7/paddock", "t");
-        client.backoff_ms = 0;
         let got = green_base_in(&mut client, root.path(), "HEAD", None, &mut |w| warned = w.to_string());
         assert!(got.is_err(), "{got:?}");
         assert!(warned.starts_with("::warning::the CI runs of main could not be read ("), "{warned}");

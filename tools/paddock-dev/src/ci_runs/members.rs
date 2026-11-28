@@ -4,7 +4,7 @@
 //! [`crate::queue::blame::suspects`], the queue's own: a failure that is new (or flaky) goes to every member whose plan reaches
 //! its project, or that changes a file the failing gate's log names; none is ever bisected or dropped. It never writes.
 
-use crate::merge_check::git::Git;
+use crate::git::Git;
 use crate::queue::blame::{self, Reach};
 use crate::queue::ports::{Blame, Failure};
 use crate::queue::real::projects_of_plan;
