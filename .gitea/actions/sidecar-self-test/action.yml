@@ -30,7 +30,8 @@ runs:
         set -euo pipefail
         folder="$DIR"
         if [ -n "$DEB" ]; then
-          deb=$(ls $DEB | head -1)
+          deb=$(ls $DEB)
+          deb=${deb%%$'\n'*}
           [ -n "$deb" ] || { echo "::error::no .deb matches $DEB"; exit 1; }
           unpacked=$(mktemp -d)
           dpkg-deb -x "$deb" "$unpacked"

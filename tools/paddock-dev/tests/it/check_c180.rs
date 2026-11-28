@@ -112,3 +112,39 @@ fn live_c180_the_real_tree_runs_and_blocks_nothing() {
     });
     assert_eq!(r.errors(), 0, "report-only: {:?}", r.findings);
 }
+
+/// Where a release or a tag run reads shell: the workflows and actions, the demo and Dyno bundle verifiers, Debrief's macOS verifier
+/// and the release-notes and publish scripts. A finding here means a release can say "check broken" or "not signed" for a bundle that
+/// is fine (user decision 130c, 2026-11-27: the release-path copies C180 reported are fixed in one batch).
+const RELEASE_PATH: &[&str] = &[
+    ".gitea/",
+    "scripts/demo/",
+    "conformance/ci/",
+    "conformance/release/",
+    "apps/debrief/scripts/ci/",
+    "apps/dyno/scripts/check-bundle.sh",
+];
+
+/// This working tree: no stage of a release-path script or step leaves its input early under pipefail. Fails when one is added back.
+#[test]
+fn live_c180_the_release_path_has_no_finding() {
+    let root = repo_root();
+    let r = paddock_testkit::guarded("the Rust C180 over the live tree's release path", LIVE_STALL, {
+        let root = root.clone();
+        move |progress| {
+            let tree = Tree::open(&root).with_progress(move || progress.tick());
+            run_checks_in(&tree, &options(&root, "paddock"), &registry()).unwrap()
+        }
+    });
+    let found: Vec<String> = r
+        .findings
+        .iter()
+        .filter(|f| RELEASE_PATH.iter().any(|p| f.file.starts_with(p)))
+        .map(|f| format!("{}:{} {}", f.file, f.line, f.message))
+        .collect();
+    assert!(
+        found.is_empty(),
+        "release-path stages that stop reading early under pipefail:\n{}",
+        found.join("\n")
+    );
+}

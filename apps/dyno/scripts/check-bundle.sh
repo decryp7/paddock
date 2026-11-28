@@ -43,7 +43,8 @@ launch_view() {
   for _ in $(seq 1 100); do [[ -s "$view" || -s "$view.err" ]] && break; sleep 0.2; done
   if [[ ! -s "$view" && ! -s "$view.err" ]]; then
     # Neither output file got a byte in 20 s: the job did not run or could not open them. Say what launchd knows.
-    state="$(launchctl print "gui/$(id -u)/$label" 2>&1 | grep -E 'state =|last exit code|exit status|spawn' | tr -s ' \t' ' ' | paste -sd';' - | head -c 400 || true)"
+    state="$(launchctl print "gui/$(id -u)/$label" 2>&1 | grep -E 'state =|last exit code|exit status|spawn' | tr -s ' \t' ' ' | paste -sd';' - || true)"
+    state="${state:0:400}"
     err "the launchd job $label (dyno-agent view, output in $view) wrote nothing in 20 s; launchctl print: ${state:-nothing}; TMPDIR=${TMPDIR:-unset}, output folder $view_root (macOS denies a launchd job a folder on an external volume, TCC Removable Volumes: see conformance/ci/boot-volume.sh); this is not a code-signing identifier problem"
     return 0
   fi
@@ -63,7 +64,8 @@ if [[ "$bundle" == --launch-view ]]; then launch_view "${2:?path of the bundled 
 
 case "$(uname -s)" in
   Linux)
-    deb=$(find "$bundle/deb" -name '*.deb' 2>/dev/null | head -n 1)
+    debs=$(find "$bundle/deb" -name '*.deb' 2>/dev/null || true)
+    deb=${debs%%$'\n'*}
     [[ -n "$deb" ]] || { echo "::error::no .deb under $bundle/deb"; exit 1; }
     tree=$(mktemp -d)
     trap 'rm -rf "$tree"' EXIT
@@ -71,7 +73,8 @@ case "$(uname -s)" in
     found_app=0 found_agent=0 found_cli=0 found_bench=0 found_gpu=0
     while IFS= read -r f; do
       case "$(basename "$f")" in dyno-app) found_app=1 ;; dyno) found_cli=1 ;; dyno-agent) found_agent=1 ;; dyno-bench) found_bench=1 ;; dyno-bench-gpu) found_gpu=1 ;; esac
-      file -b "$f" | grep -q '^ELF' || continue
+      kind=$(file -b "$f" 2>/dev/null || true)
+      [[ $kind == ELF* ]] || continue
       paths=$(readelf -d "$f" 2>/dev/null | sed -n 's/.*(R\(UN\)\{0,1\}PATH).*\[\(.*\)\]/\2/p')
       echo "run paths of ${f#"$tree"}: ${paths:-none}"
       IFS=: read -ra entries <<< "$paths"
@@ -90,7 +93,7 @@ case "$(uname -s)" in
     [[ -f "$unit" ]] || err "the .deb has no dyno-helper.service"
     grep -q '^ExecStart="/usr/bin/dyno-helper" "serve"' "$unit" 2>/dev/null || err "dyno-helper.service does not run /usr/bin/dyno-helper serve"
     grep -q '^NoNewPrivileges=yes' "$unit" 2>/dev/null || err "dyno-helper.service lacks the sandbox (NoNewPrivileges=yes)"
-    if find "$tree/etc/systemd" -name 'dyno-helper*' 2>/dev/null | grep -q .; then err "the .deb enables the helper's unit (it ships disabled; the user's click turns it on)"; fi
+    if [[ -n $(find "$tree/etc/systemd" -name 'dyno-helper*' 2>/dev/null) ]]; then err "the .deb enables the helper's unit (it ships disabled; the user's click turns it on)"; fi
     rule="$tree/usr/share/polkit-1/rules.d/50-dyno-helper.rules"
     [[ -f "$rule" ]] || err "the .deb has no polkit rule for the helper"
     grep -q 'verb") == "start"' "$rule" 2>/dev/null || err "the polkit rule does not limit itself to starting the unit"
@@ -107,7 +110,8 @@ case "$(uname -s)" in
     (( found_gpu )) || err "the .deb has no dyno-bench-gpu executable (the GPU benchmark runner, ADR 0030)"
     ;;
   Darwin)
-    app=$(find "$bundle/macos" -maxdepth 1 -name '*.app' 2>/dev/null | head -n 1)
+    apps=$(find "$bundle/macos" -maxdepth 1 -name '*.app' 2>/dev/null || true)
+    app=${apps%%$'\n'*}
     [[ -n "$app" ]] || { echo "::error::no .app under $bundle/macos"; exit 1; }
     codesign --verify --deep --strict "$app" || err "$app does not verify (broken or missing seal)"
     codesign -dv "$app" 2>&1 | grep -E 'Signature|Identifier|flags' || true
@@ -117,7 +121,8 @@ case "$(uname -s)" in
       [[ "$(basename "$f")" == dyno ]] && found_cli=1
       [[ "$(basename "$f")" == dyno-bench ]] && found_bench=1
       [[ "$(basename "$f")" == dyno-bench-gpu ]] && found_gpu=1
-      file -b "$f" | grep -q 'Mach-O' || continue
+      kind=$(file -b "$f" 2>/dev/null || true)
+      [[ $kind == *Mach-O* ]] || continue
       paths=$(otool -l "$f" | awk '/cmd LC_RPATH/ { getline; getline; print $2 }')
       echo "run paths of ${f#"$app"/}: $(echo "$paths" | paste -sd: -)"
       while IFS= read -r p; do

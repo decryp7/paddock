@@ -11,8 +11,10 @@ demo="${1:?app, e.g. shell-demo}"
 sidecars="$(node scripts/demo-release.mjs "$demo" sidecars)"
 dir="${CARGO_TARGET_DIR:-apps/$demo/src-tauri/target}"
 bundle="$dir/release/bundle"
-app="${2:-$(find "$bundle/macos" -maxdepth 1 -name '*.app' | head -1)}"
-dmg="${3:-$(find "$bundle/dmg" -maxdepth 1 -name '*.dmg' 2>/dev/null | head -1 || true)}"
+# The first match of a find, read from a captured output: `find | head -1` under pipefail gives find SIGPIPE (rule 82, C180).
+first_found() { local out; out=$(find "$@" 2>/dev/null || true); printf '%s' "${out%%$'\n'*}"; }
+app="${2:-$(first_found "$bundle/macos" -maxdepth 1 -name '*.app')}"
+dmg="${3:-$(first_found "$bundle/dmg" -maxdepth 1 -name '*.dmg')}"
 [ -d "${app:-}" ] || { echo "::error::no .app bundle found (looked in $bundle/macos)"; exit 1; }
 [ -f "${dmg:-}" ] || { echo "::error::no .dmg found (looked in $bundle/dmg)"; exit 1; }
 
@@ -21,23 +23,23 @@ check_app() {
   codesign --verify --deep --strict --verbose=2 "$app"
   sig=$(codesign -dvvv "$app" 2>&1)
   echo "$sig"
-  if echo "$sig" | grep -q 'flags=.*linker-signed'; then
+  if grep -q 'flags=.*linker-signed' <<<"$sig"; then
     echo "::error::$app is only linker-signed: set bundle.macOS.signingIdentity to \"-\" (ad-hoc seal)"
     return 1
   fi
-  if echo "$sig" | grep -Eq 'flags=0x[0-9a-f]+\(.*adhoc'; then
+  if grep -Eq 'flags=0x[0-9a-f]+\(.*adhoc' <<<"$sig"; then
     # Ad-hoc code under the hardened runtime cannot load vendor-signed libraries (rule 23): it stays off until the app
     # has a real signing identity.
-    if echo "$sig" | grep -Eq 'flags=0x[0-9a-f]+\(.*runtime'; then
+    if grep -Eq 'flags=0x[0-9a-f]+\(.*runtime' <<<"$sig"; then
       echo "::error::$app is ad-hoc signed with the hardened runtime on: set bundle.macOS.hardenedRuntime to false"
       return 1
     fi
   else
-    echo "$sig" | grep -q 'Authority=' || { echo "::error::$app is neither ad-hoc nor identity signed"; return 1; }
+    grep -q 'Authority=' <<<"$sig" || { echo "::error::$app is neither ad-hoc nor identity signed"; return 1; }
     echo "::notice::$app is signed with a real identity"
   fi
   team=$(echo "$sig" | sed -n 's/^TeamIdentifier=//p')
-  if echo "$sig" | grep -q 'Sealed Resources=none' || ! echo "$sig" | grep -q 'Sealed Resources'; then
+  if grep -q 'Sealed Resources=none' <<<"$sig" || ! grep -q 'Sealed Resources' <<<"$sig"; then
     echo "::error::$app has no sealed resources"
     return 1
   fi
@@ -46,7 +48,7 @@ check_app() {
     [[ "$kind" == *Mach-O* ]] || continue
     codesign --verify --strict "$bin" || { echo "::error::$bin does not verify"; return 1; }
     bin_sig=$(codesign -dv "$bin" 2>&1)
-    if echo "$bin_sig" | grep -q 'flags=.*linker-signed'; then
+    if grep -q 'flags=.*linker-signed' <<<"$bin_sig"; then
       echo "::error::$bin is only linker-signed"
       return 1
     fi
@@ -72,12 +74,12 @@ check_app "$app"
 codesign --verify --deep --strict --verbose=2 "$dmg"
 # Read into a variable first: under pipefail, `grep -q` closing the pipe early fails codesign with SIGPIPE.
 dmg_sig=$(codesign -dv "$dmg" 2>&1)
-echo "$dmg_sig" | grep -Eq 'flags=0x[0-9a-f]+\(.*adhoc|Authority=' || { echo "::error::$dmg is not signed"; exit 1; }
+grep -Eq 'flags=0x[0-9a-f]+\(.*adhoc|Authority=' <<<"$dmg_sig" || { echo "::error::$dmg is not signed"; exit 1; }
 hdiutil verify -quiet "$dmg"
 mnt=$(mktemp -d)
 trap 'hdiutil detach "$mnt" -quiet || true; rmdir "$mnt" 2>/dev/null || true' EXIT
 hdiutil attach "$dmg" -nobrowse -readonly -noautoopen -mountpoint "$mnt" -quiet
-inner=$(find "$mnt" -maxdepth 1 -name '*.app' | head -1)
+inner=$(first_found "$mnt" -maxdepth 1 -name '*.app')
 [ -d "$inner" ] || { echo "::error::no .app inside $dmg"; exit 1; }
 check_app "$inner"
 echo "dmg OK: $dmg"

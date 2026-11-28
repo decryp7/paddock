@@ -61,7 +61,8 @@ jobs:
         working-directory: tools/throttle
         run: |
           want="${GITHUB_REF_NAME#throttle-v}"
-          have=$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)
+          have=$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml)
+          have=${have%%$'\n'*}
           [ "$want" = "$have" ] || { echo "::error::the tag $GITHUB_REF_NAME says $want, tools/throttle/Cargo.toml says $have. Next step: bump the version, then request the tag again."; exit 1; }
           echo "VERSION=$have" >> "$GITHUB_ENV"
 
@@ -133,7 +134,8 @@ jobs:
         working-directory: tools/throttle
         run: |
           want="${GITHUB_REF_NAME#throttle-v}"
-          have=$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)
+          have=$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml)
+          have=${have%%$'\n'*}
           [ "$want" = "$have" ] || { echo "::error::the tag $GITHUB_REF_NAME says $want, tools/throttle/Cargo.toml says $have. Next step: bump the version, then request the tag again."; exit 1; }
           echo "VERSION=$have" >> "$GITHUB_ENV"
 

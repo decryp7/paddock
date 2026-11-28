@@ -41,7 +41,7 @@ find "$dir/release/bundle" -type f \( -name '*-setup.exe' -o -name '*.dmg' -o -n
   -exec cp {} apps/$app/dist/ \;
 ls -la apps/$app/dist
 version="$(node scripts/demo-release.mjs "$app" version)"
-if ! ls apps/$app/dist | grep -q .; then
+if [ -z "$(ls apps/$app/dist)" ]; then
   echo "::error::no installers were built for $bundles"
   exit 1
 fi
