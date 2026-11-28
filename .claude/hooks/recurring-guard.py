@@ -11,6 +11,10 @@ HUMAN = re.compile(rb'"kind"\s*:\s*"human"')
 CAND = re.compile(rb'Subagent hand-back|<agent-message|"name"\s*:\s*"(?:AskUserQuestion|Agent|SendMessage)"')
 LINE = re.compile(r"^\s*(?:[-*+]\s*)?(?:\*\*|__)?\s*Recurring\s*(?::\s*(?:\*\*|__)?|(?:\*\*|__)\s*:?)\s*(.*)$", re.I)
 NONE = re.compile(r"^(none|no new|no\b|n/?a\b|nothing)", re.I)
+# A class needs two or more instances (ER-21). A line that says there is only one, or none, names no class, unless it also
+# says a second one was seen.
+NEGATIVE = re.compile(r"\bonly instance\b|\bfirst (?:instance|time)\b|\bnot (?:yet )?a (?:recurring )?class\b|\bno (?:other|earlier|prior) instance", re.I)
+POSITIVE = re.compile(r"\btwice\b|\b(?:second|third|fourth|2nd|3rd) (?:instance|time|occurrence)\b|\bagain\b|\b(?:two|three|four|\d+) (?:earlier |prior |previous )?(?:instances|times|occurrences)\b|\bearlier:", re.I)
 FOLLOW = {"AskUserQuestion", "Agent", "SendMessage"}
 
 
@@ -75,6 +79,8 @@ def recurring_value(report):
         return ""
     v = re.sub(r"^[\s*_`\"'(\[]+", "", found)
     if not v or NONE.match(v):
+        return ""
+    if NEGATIVE.search(v) and not POSITIVE.search(v):
         return ""
     return found.strip("*_` ")
 

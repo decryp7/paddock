@@ -83,6 +83,14 @@ t block "peer-origin user message form" "$(mk k "$peer")"
 pad=$(jq -nc '{type:"attachment",pad:("x" * 1100000)}')
 t block "report followed by 1.1 MB line (FN: outside tail)" "$(mk l "$(rep '  Recurring: flaky sleeps')" "$pad")"
 
+# Negatives and positives of the class wording (a class needs two or more instances): the hook only warns, never blocks.
+for n in "none new" "none yet, first instance" "the lock leak is the only instance I looked at" "first instance of a stale pid; not yet a class" "not yet a class" "no new instance"; do
+  t allow "negative: Recurring: $n" "$(mk "neg$RANDOM" "$(rep "  Recurring: $n")")"
+done
+for n in "seen twice: stale pid kills (rule 53, lesson 4)" "second instance of the scratch-root write" "third time the e2e port clash shows up" "two earlier instances: a1, b2 of flaky sleeps"; do
+  t block "positive: Recurring: $n" "$(mk "pos$RANDOM" "$(rep "  Recurring: $n")")"
+done
+
 # A transcript with no human message within the scan limit is too large to scan: allow with a warning.
 pad=$(jq -nc '{type:"attachment",pad:("x" * 100000)}'); { for i in 1 2 3 4 5 6; do echo "$pad"; done; rep '  Recurring: flaky sleeps'; } > "$R/nohuman.jsonl"
 out=$(jq -nc --arg p "$R/nohuman.jsonl" '{transcript_path:$p}' | RECURRING_GUARD_MAX_SCAN=300000 "$H" 2>"$R/err.txt")
