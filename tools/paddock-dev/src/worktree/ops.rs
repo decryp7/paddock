@@ -292,8 +292,8 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
     let git = repo.git();
     let base_sha = git
         .text(&["rev-parse", "--verify", "--quiet", &format!("{}^{{commit}}", req.base)])
-        .map_err(|_| {
-            CliError::usage(format!("The base `{}` is not a commit here.", req.base))
+        .map_err(|e| {
+            CliError::usage(e.explain(&format!("The base `{}` is not a commit here.", req.base)))
                 .with_hint("Fetch it (`git fetch origin`) or name another base.")
         })?
         .trim()

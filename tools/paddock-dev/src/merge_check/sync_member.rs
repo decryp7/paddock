@@ -40,7 +40,7 @@ fn member_name(git: &Git, member: Option<&str>) -> Result<String, String> {
     }
     git.text(&["symbolic-ref", "--quiet", "--short", "HEAD"])
         .map(|b| b.trim().to_string())
-        .map_err(|_| "HEAD is not on a branch, so the member's name is unknown".to_string())
+        .map_err(|e| e.explain("HEAD is not on a branch, so the member's name is unknown"))
 }
 
 /// The member's tip before it merged the train: the first parent of the oldest merge on HEAD's first-parent line that brought the
