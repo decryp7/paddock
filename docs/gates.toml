@@ -1252,3 +1252,11 @@ owner = "ER-21 class: producer | grep -q under pipefail (run 9247 check broken i
 since = 2026-11-27
 review_by = 2026-12-11
 approved = "user"
+
+[[report_only]]
+id = "C182"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c182.rs, then flip the mode to Gate. A `uses:` of a remote action or reusable workflow (jobs.<id>.uses, jobs.<id>.steps[].uses, runs.steps[].uses of .gitea/workflows/*.yml and .gitea/actions/**.yml, read through paddock-ci-config's YAML reader, ER-42) that is not pinned to a full 40-hex commit SHA is a warning, because a tag or branch moves under the job (ER-26). Local paths (`./...`) and `docker://` images are exempt. No baseline file (ER-46): the report is the list. Positive control in the check and tests/it/check_c182.rs: a tag, a branch, an abbreviated SHA and a reusable workflow on a tag go red; a SHA with its version comment, local paths, an image, a comment and a run body stay green; a test fails when the check is deleted from the registry, the reservation or conformance.rust"
+owner = "ER-26 and ER-57: the user decided on 2026-11-28 (in chat) to pin every remote action to its commit SHA, with the version as a trailing comment; Renovate (helpers:pinGitHubActionDigests) bumps the pins"
+since = 2026-11-28
+review_by = 2026-12-12
+approved = "coordinator"

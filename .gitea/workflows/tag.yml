@@ -85,7 +85,7 @@ jobs:
           fi
 
       # The trusted code: main, the dispatch ref, in its own folder. The tagged commit is never checked out.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: main
           path: trusted

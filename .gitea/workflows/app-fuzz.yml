@@ -78,9 +78,9 @@ jobs:
       # setup-rust runs ./dev (docs/plans/ci-in-rust.md): no read credential here, so it builds from source; never from the store on a tag.
       PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: decryp7/paddock
           ref: ${{ inputs.paddock-ref }}
@@ -185,7 +185,7 @@ jobs:
       # One artifact per shard: the reproducers of every target that crashed, in artifacts/<target>/.
       - name: Upload crashes
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
         with:
           name: crashes-shard-${{ matrix.shard }}
           path: ${{ inputs.fuzz-dir }}/artifacts/
