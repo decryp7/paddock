@@ -111,8 +111,8 @@ fn check_origin(exec: &dyn Exec, root: &Path, base: &str) -> Result<Origin, CliE
             root,
             None,
         )
-        .map_err(|_| {
-            CliError::failure(format!("{base} is not a revision in this repository."))
+        .map_err(|e| {
+            CliError::failure(format!("{base} is not a revision in this repository ({}).", e.message.trim()))
                 .with_hint("Run git fetch origin, or pass --local to install this binary without the check.")
         })?
         .trim()

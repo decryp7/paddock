@@ -92,10 +92,16 @@ pub fn package_filter(plan: &Value, graph: &RepoGraph, cargo_dir: &str, project:
     // or a script reaches tests that no package list names, so the project then runs whole. A plan without the list narrows nothing.
     let cargo_only = plan["cargoOnly"].as_array().is_some_and(|a| a.iter().any(|p| p == project));
     if narrow && !all && cargo_only && !hit.is_empty() && hit.len() < members {
-        hit.iter().map(|n| format!("package(={n})")).collect::<Vec<_>>().join(" | ")
+        package_filterset(&hit)
     } else {
         String::new()
     }
+}
+
+/// The nextest filterset (`package(=a) | package(=b)`) of the named packages: the one spelling of it ([`package_filter`] and the
+/// `overlap-tests` row of `check --pre-push`).
+pub fn package_filterset(names: &[String]) -> String {
+    names.iter().map(|n| format!("package(={n})")).collect::<Vec<_>>().join(" | ")
 }
 
 /// The package filters of the two workspaces that are not apps, as the plan's `filters` object (`crates`, `paddockDev`; empty: every

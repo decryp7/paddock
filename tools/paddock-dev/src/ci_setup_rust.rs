@@ -259,6 +259,39 @@ pub fn s3_health_verdict(url: &str, ran: Result<crate::ci_tool::Ran, String>) ->
     }
 }
 
+/// The size of the object the startup write probe puts: sccache's own startup check puts 13 bytes, which a store over its quota still takes
+/// (runs 9381 and 9388), so a refusal of real writes showed only as "writes 0" at the end of the job.
+pub const S3_WRITE_PROBE_BYTES: usize = 256 * 1024;
+
+/// The curl config (read from curl's standard input, never an argument: it holds the key) of the startup write probe: a signed PUT of
+/// `body` to `object_url`, or a DELETE of it when `body` is `None`. The answer's body, then its status on a last line.
+pub fn s3_write_probe_config(object_url: &str, key: (&str, &str), body: Option<&Path>) -> String {
+    use crate::curl_config::line;
+    let mut c = line("url", object_url);
+    c.push_str("aws-sigv4 = \"aws:amz:auto:s3\"\n");
+    c.push_str(&line("user", &format!("{}:{}", key.0, key.1)));
+    c.push_str("silent\nshow-error\nconnect-timeout = 3\nmax-time = 20\nwrite-out = \"\\n%{http_code}\"\n");
+    match body {
+        Some(f) => c.push_str(&line("upload-file", &f.display().to_string())),
+        None => c.push_str("request = \"DELETE\"\n"),
+    }
+    c
+}
+
+/// What the probe's PUT answered: `Ok` for a 2xx, else one sentence with the store's own reason (its S3 `Code` and `Message`, never the key).
+pub fn s3_write_probe_verdict(curl_stdout: &str) -> Result<(), String> {
+    let (body, status) = curl_stdout.trim_end().rsplit_once('\n').unwrap_or(("", curl_stdout.trim()));
+    match status.trim().parse::<u16>() {
+        Ok(200..=299) => Ok(()),
+        Ok(code) => Err(format!(
+            "the store answered {code} to a write of {} KiB{}",
+            S3_WRITE_PROBE_BYTES / 1024,
+            crate::test_cache::s3::s3_error(body)
+        )),
+        Err(_) => Err("the store gave no status to a write probe".to_string()),
+    }
+}
+
 /// The store's health URL for `host:port` and the scheme.
 pub fn s3_health_url(ssl: bool, endpoint: &str) -> String {
     format!("{}://{endpoint}{S3_HEALTH_PATH}", if ssl { "https" } else { "http" })
@@ -876,7 +909,49 @@ impl Step<'_> {
     fn health(&mut self, s3: &S3Ci) -> Result<(), S3Off> {
         let url = s3_health_url(s3.ssl, &s3.endpoint);
         let ran = self.run(&s3_health_call(&url));
-        s3_health_verdict(&url, ran).map_err(|why| S3Off { warn: true, why })
+        s3_health_verdict(&url, ran).map_err(|why| S3Off { warn: true, why })?;
+        self.write_probe(s3);
+        Ok(())
+    }
+
+    /// A signed PUT of [`S3_WRITE_PROBE_BYTES`] under the job's prefix, then its DELETE: sccache's own startup check puts 13 bytes, which a
+    /// store over its quota still accepts, so this is where a refusal of real writes shows at the start (ER-27). A refusal is a warning,
+    /// never a stop: reads still help, and `sccache-stats` says the same at the end. The key goes to curl's standard input only.
+    fn write_probe(&mut self, s3: &S3Ci) {
+        use paddock_proc::{Limits, run_bounded_with_input};
+        let scheme = if s3.ssl { "https" } else { "http" };
+        let url = format!(
+            "{scheme}://{}/{}/{}/.paddock-write-probe-{}",
+            s3.endpoint,
+            s3.bucket,
+            s3.prefix,
+            std::process::id()
+        );
+        let body = self.temp_base().join(format!("s3-write-probe-{}", std::process::id()));
+        if std::fs::write(&body, vec![0u8; S3_WRITE_PROBE_BYTES]).is_err() {
+            return;
+        }
+        let key = (s3.key.0.expose(), s3.key.1.expose());
+        let curl = |config: String| {
+            let mut cmd = paddock_proc::command("curl");
+            cmd.args(["-q", "-K", "-"]);
+            run_bounded_with_input(cmd, config.into_bytes(), Limits::new(Duration::from_secs(30)))
+        };
+        let verdict = match curl(s3_write_probe_config(&url, key, Some(&body))) {
+            Ok(out) => s3_write_probe_verdict(&out.stdout_text()),
+            Err(e) => Err(format!("the write probe could not run curl: {e}")),
+        };
+        let _ = std::fs::remove_file(&body);
+        match verdict {
+            Ok(()) => {
+                let _ = curl(s3_write_probe_config(&url, key, None));
+                self.say(format!("sccache: S3 write probe ok ({} KiB put and removed)", S3_WRITE_PROBE_BYTES / 1024));
+            }
+            Err(why) => self.say(format!(
+                "::warning::sccache: S3 writes refused: {why}; this job reads from S3 but its writes will fail. Free space or raise the quota on the bucket {}.",
+                s3.bucket
+            )),
+        }
     }
 
     /// Starts the timeout guard in front of the store ([`crate::ci_s3_guard`]): detached, so it outlives this step; its port comes on
@@ -1232,6 +1307,24 @@ mod tests {
 
     fn vars(pairs: &[(&str, &str)]) -> paddock_env::MapVars {
         pairs.iter().fold(paddock_env::MapVars::new(), |m, (k, v)| m.with(k, *v))
+    }
+
+    #[test]
+    fn the_write_probe_names_the_stores_reason_and_never_the_key() {
+        let quota = "<?xml version=\"1.0\"?><Error><Code>InvalidRequest</Code><Message>Bucket quota exceeded. Current usage 5, limit 5</Message></Error>\n400";
+        let why = s3_write_probe_verdict(quota).unwrap_err();
+        assert!(
+            why.contains("answered 400") && why.contains("256 KiB") && why.contains("Bucket quota exceeded. Current usage 5, limit 5"),
+            "{why}"
+        );
+        assert_eq!(s3_write_probe_verdict("\n200"), Ok(()));
+        assert!(s3_write_probe_verdict("").unwrap_err().contains("no status"));
+        let put = s3_write_probe_config("http://192.0.2.10:15000/b/p/o", ("kid", "ksecret"), Some(Path::new("probe-body")));
+        assert!(
+            put.contains("upload-file = \"probe-body\"") && put.contains("user = \"kid:ksecret\"") && !put.contains("DELETE"),
+            "{put}"
+        );
+        assert!(s3_write_probe_config("http://h/b/o", ("k", "s"), None).contains("request = \"DELETE\""));
     }
 
     fn s3_health_url_of(s3: &S3Ci) -> String {

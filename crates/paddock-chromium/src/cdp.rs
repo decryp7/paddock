@@ -71,6 +71,8 @@ pub struct Connection {
     out: Sender<String>,
     inner: Arc<Inner>,
     next: AtomicU64,
+    /// A handle on the same socket, to read its options and to end its blocked read when the connection is dropped.
+    socket: TcpStream,
 }
 
 impl Connection {
@@ -87,9 +89,6 @@ impl Connection {
         cfg.max_frame_size = Some(MAX_MESSAGE);
         let (ws, _) = tungstenite::client::client_with_config(req, stream, Some(cfg))
             .map_err(|e| Error::Connection(e.to_string()))?;
-        let _ = ws
-            .get_ref()
-            .set_read_timeout(Some(Duration::from_millis(20)));
         let inner = Arc::new(Inner {
             pending: Mutex::new(HashMap::new()),
             events: Mutex::new(Events::default()),
@@ -97,16 +96,40 @@ impl Connection {
             closed: AtomicBool::new(false),
             watched: Mutex::new(HashMap::new()),
         });
+        let socket = ws
+            .get_ref()
+            .try_clone()
+            .map_err(|e| Error::Connection(e.to_string()))?;
+        let writer = tungstenite::WebSocket::from_raw_socket(
+            socket
+                .try_clone()
+                .map_err(|e| Error::Connection(e.to_string()))?,
+            tungstenite::protocol::Role::Client,
+            Some(cfg),
+        );
         let (out, rx) = channel();
-        let i2 = inner.clone();
+        let (i_read, i_write) = (inner.clone(), inner.clone());
+        let (s_read, s_write) = (
+            socket
+                .try_clone()
+                .map_err(|e| Error::Connection(e.to_string()))?,
+            socket
+                .try_clone()
+                .map_err(|e| Error::Connection(e.to_string()))?,
+        );
         std::thread::Builder::new()
-            .name("cdp-io".into())
-            .spawn(move || io_loop(ws, rx, i2))
+            .name("cdp-read".into())
+            .spawn(move || read_loop(ws, i_read, s_read))
+            .map_err(|e| Error::Connection(e.to_string()))?;
+        std::thread::Builder::new()
+            .name("cdp-write".into())
+            .spawn(move || write_loop(writer, rx, i_write, s_write))
             .map_err(|e| Error::Connection(e.to_string()))?;
         Ok(Connection {
             out,
             inner,
             next: AtomicU64::new(1),
+            socket,
         })
     }
 
@@ -263,34 +286,47 @@ impl Drop for Pending<'_> {
 impl Drop for Connection {
     fn drop(&mut self) {
         self.inner.closed.store(true, Ordering::Release);
+        // Ends the reader's blocked read at once (and with it the connection).
+        let _ = self.socket.shutdown(std::net::Shutdown::Both);
     }
 }
 
 type Ws = tungstenite::WebSocket<TcpStream>;
 
-fn io_loop(mut ws: Ws, rx: Receiver<String>, inner: Arc<Inner>) {
-    // Sends what callers queued; a failed send ends the loop like a failed read.
-    let flush = |ws: &mut Ws| {
-        std::iter::from_fn(|| rx.try_recv().ok()).all(|m| ws.send(Message::text(m)).is_ok())
-    };
-    while !inner.closed.load(Ordering::Acquire) && flush(&mut ws) {
+/// The reader: one blocking read at a time, with no receive timeout. Winsock documents that a receive that times out leaves
+/// the connection "in an indeterminate state" that "should be closed" (`SO_RCVTIMEO`, learn.microsoft.com, read
+/// 2026-11-28), so the connection never polls with one; it is ended by closing the socket ([`Connection`]'s drop,
+/// the writer's failure), which wakes this read. Chrome sends no pings, so the reader never has a reply to write.
+fn read_loop(mut ws: Ws, inner: Arc<Inner>, socket: TcpStream) {
+    let ended = loop {
         match ws.read() {
             Ok(Message::Text(t)) => dispatch(&inner, t.as_str()),
-            Ok(Message::Close(_)) => break,
+            Ok(Message::Close(_)) => break "the browser closed it".to_string(),
             Ok(_) => {}
-            Err(e) if idle(&e) => {}
-            Err(_) => break,
+            Err(e) => break format!("a read failed: {e}"),
         }
-    }
-    inner.closed.store(true, Ordering::Release);
-    lock(&inner.pending).clear();
-    inner.cv.notify_all();
-    let _ = ws.close(None);
+    };
+    end(&inner, &socket, &ended);
 }
 
-/// A read that found nothing within the poll time (not an error).
-fn idle(e: &tungstenite::Error) -> bool {
-    matches!(e, tungstenite::Error::Io(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut))
+/// The writer: sends what callers queued, in order, until the connection ends or its owner is gone.
+fn write_loop(mut ws: Ws, rx: Receiver<String>, inner: Arc<Inner>, socket: TcpStream) {
+    while let Ok(m) = rx.recv() {
+        if let Err(e) = ws.send(Message::text(m)) {
+            end(&inner, &socket, &format!("a write failed: {e}"));
+            return;
+        }
+    }
+}
+
+/// Marks the connection ended (once), wakes every waiter and closes the socket, saying why when nobody asked for it.
+fn end(inner: &Inner, socket: &TcpStream, why: &str) {
+    if !inner.closed.swap(true, Ordering::AcqRel) {
+        log::info!("The DevTools connection ended: {why}");
+    }
+    lock(&inner.pending).clear();
+    inner.cv.notify_all();
+    let _ = socket.shutdown(std::net::Shutdown::Both);
 }
 
 /// Whether an event goes into the bounded log. Network events are only wanted for documents (a failed load's trace,
@@ -361,6 +397,93 @@ fn mark_gone(inner: &Inner, params: &Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A DevTools-like WebSocket server on loopback: accepts one client and hands its socket to `serve`.
+    fn serve_one(
+        serve: impl FnOnce(tungstenite::WebSocket<TcpStream>) + Send + 'static,
+    ) -> (u16, std::thread::JoinHandle<()>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let h = std::thread::spawn(move || {
+            let (s, _) = listener.accept().unwrap();
+            serve(tungstenite::accept(s).unwrap());
+        });
+        (port, h)
+    }
+
+    /// Microsoft's Winsock documentation for `SO_RCVTIMEO` (read 2026-11-28, learn.microsoft.com, "Socket options"):
+    /// "If a blocking receive call times out, the connection is in an indeterminate state and should be closed." The
+    /// connection polled its socket with a 20 ms receive timeout and kept using it, so on Windows a poll that raced a
+    /// reply could lose bytes and end the connection (`Error::Closed`, `real_browser::a_new_tab_loads_a_page_at_once`,
+    /// CI run 9276). The mechanism: no receive timeout is ever set.
+    #[test]
+    fn the_socket_has_no_receive_timeout() {
+        let (port, server) = serve_one(|mut ws| {
+            let _ = ws.read();
+        });
+        let conn = Connection::connect(port, "/").unwrap();
+        assert_eq!(conn.socket.read_timeout().unwrap(), None);
+        drop(conn);
+        server.join().unwrap();
+    }
+
+    /// A frame that arrives in pieces is read whole, and a reply is matched to its command: the reader waits on the socket
+    /// for as long as it takes (no poll of its own to race the bytes).
+    #[test]
+    fn a_frame_written_in_pieces_is_read_whole_and_a_command_gets_its_reply() {
+        use std::io::Write;
+        let (port, server) = serve_one(|mut ws| {
+            let Ok(Message::Text(cmd)) = ws.read() else {
+                panic!("the client sends its command first");
+            };
+            let id = serde_json::from_str::<Value>(cmd.as_str()).unwrap()["id"].clone();
+            let event = json!({"method": "Page.loadEventFired", "params": {}, "sessionId": "S1"})
+                .to_string();
+            let reply = json!({"id": id, "result": {"ok": true}}).to_string();
+            // Unmasked text frames (a server's), each written in three pieces, each flushed on its own.
+            let raw = ws.get_mut();
+            for payload in [event, reply] {
+                let mut frame = vec![0x81, payload.len() as u8];
+                frame.extend_from_slice(payload.as_bytes());
+                for part in frame.chunks(frame.len() / 3 + 1) {
+                    raw.write_all(part).unwrap();
+                    raw.flush().unwrap();
+                }
+            }
+            let _ = ws.read();
+        });
+        let conn = Connection::connect(port, "/").unwrap();
+        let mark = conn.mark();
+        let reply = conn
+            .call(None, "Test.command", json!({}), Duration::from_secs(30))
+            .unwrap();
+        assert_eq!(reply["ok"], true);
+        let seen = conn.wait_event(mark, Duration::from_secs(30), |e| {
+            e.method == "Page.loadEventFired" && e.session.as_deref() == Some("S1")
+        });
+        assert!(seen.is_some(), "the event cut in pieces arrived whole");
+        drop(conn);
+        server.join().unwrap();
+    }
+
+    /// The connection ends when the browser closes it: pending commands fail with `Closed` at once and later ones too.
+    #[test]
+    fn a_connection_the_browser_closes_ends_what_is_pending() {
+        let (port, server) = serve_one(|mut ws| {
+            let _ = ws.read();
+            let _ = ws.close(None);
+            while ws.read().is_ok() {}
+        });
+        let conn = Connection::connect(port, "/").unwrap();
+        let r = conn.call(None, "Test.command", json!({}), Duration::from_secs(30));
+        assert!(matches!(r, Err(Error::Closed)), "{r:?}");
+        assert!(matches!(
+            conn.send(None, "Test.later", json!({})),
+            Err(Error::Closed)
+        ));
+        drop(conn);
+        server.join().unwrap();
+    }
 
     fn inner() -> Inner {
         Inner {

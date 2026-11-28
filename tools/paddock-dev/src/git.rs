@@ -31,6 +31,22 @@ impl std::fmt::Display for GitError {
     }
 }
 
+impl GitError {
+    /// Git's own words, when it printed any: `--quiet` questions answer "no" with exit status 1 and nothing on standard error, while
+    /// a git that could not run or open the repository says why (ER-27), and a caller that turns the error into its own message keeps it.
+    pub fn cause(&self) -> Option<&str> {
+        Some(self.stderr.trim()).filter(|s| !s.is_empty())
+    }
+
+    /// `message`, with git's words after it in parentheses when it printed any.
+    pub fn explain(&self, message: &str) -> String {
+        match self.cause() {
+            Some(c) => format!("{message} ({c})"),
+            None => message.to_string(),
+        }
+    }
+}
+
 impl From<GitError> for String {
     fn from(e: GitError) -> String {
         e.to_string()
@@ -434,6 +450,14 @@ impl<'a> Git<'a> {
     }
 }
 
+/// The folder `safe.directory` names for a read of `root`: its resolved path in the spelling a program takes (git compares resolved
+/// paths, and the verbatim `\\?\` spelling of Windows is not one it matches); `root` as given when it cannot be resolved. The scrubbed child reads no global or system configuration,
+/// where a CI image names `safe.directory` for a checkout another user owns; the folder it was asked to read is trusted here instead,
+/// on the command line (the command scope is protected configuration, git-config(1) "safe.directory"), and no other folder is.
+fn trusted(root: &Path) -> String {
+    paddock_env::winpath::real_for_tools(root).unwrap_or_else(|_| root.display().to_string())
+}
+
 /// The git child of one merge-check call (see [`Git::command_for`]).
 fn git_command(root: &Path, args: &[&str], parent: &[String], optional_locks: bool, own_environment: bool) -> std::process::Command {
     let mut cmd = crate::git_env::git();
@@ -449,6 +473,7 @@ fn git_command(root: &Path, args: &[&str], parent: &[String], optional_locks: bo
             "log.showSignature=false",
         ])
         .args(["-c", "core.hooksPath=/dev/null"])
+        .args(["-c", &format!("safe.directory={}", trusted(root))])
         .args(args);
     if !own_environment {
         crate::child_env::scrub(&mut cmd, parent);
@@ -482,7 +507,7 @@ pub fn state_dir(root: &Path) -> PathBuf {
 /// The folder a state-folder setting names (`PADDOCK_PREPUSH_STATE`, `PADDOCK_WAIT_STATE`: test-only rows of the settings register), when
 /// it is set and not empty. A tool's state otherwise lives under the git common dir, which every worktree shares; the test harness
 /// sets every one of these to the test's own folder (`paddock_testkit::process::STATE_FOLDERS`, ER-14, ER-51). In the core layer so
-/// [`state_dir`] reads it; `places::state_override` is this function.
+/// [`state_dir`] and the wait lock read it.
 pub fn state_override(name: &str) -> Option<PathBuf> {
     paddock_env::vars()
         .find(|(k, _)| k == name)
@@ -512,6 +537,20 @@ mod tests {
             .unwrap();
         assert!(out.status.success());
         d
+    }
+
+    /// The hardened child reads no global or system configuration, which is where a CI image names `safe.directory` for a checkout
+    /// another user owns ("dubious ownership"); the folder it reads is trusted on its own command line instead (git honours
+    /// `safe.directory` from the command scope: git-config(1), "protected configuration").
+    #[test]
+    fn the_child_trusts_the_folder_it_reads_on_its_own_command_line() {
+        let d = empty_repo();
+        let git = Git::new(d.path());
+        let cmd = git.command_for(&["status"], &[]);
+        let args: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        let want = format!("safe.directory={}", paddock_env::winpath::real_for_tools(d.path()).unwrap());
+        assert!(args.windows(2).any(|w| w[0] == "-c" && w[1] == want), "{args:?}");
+        assert!(git.text(&["rev-parse", "--is-inside-work-tree"]).unwrap().starts_with("true"));
     }
 
     #[test]

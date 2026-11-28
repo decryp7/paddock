@@ -298,13 +298,6 @@ pub fn command(a: &PlacesArgs) -> Result<Report, CliError> {
     Ok(Report::new(serde_json::Value::Object(data), text.trim_end().to_string()))
 }
 
-/// The folder a state-folder setting names (`PADDOCK_PREPUSH_STATE`, `PADDOCK_WAIT_STATE`: test-only rows of the settings register), when
-/// it is set and not empty. A tool's state otherwise lives under the git common dir, which every worktree shares; the test harness
-/// sets every one of these to the test's own folder (`paddock_testkit::process::STATE_FOLDERS`, ER-14, ER-51).
-pub(crate) fn state_override(name: &str) -> Option<std::path::PathBuf> {
-    crate::git::state_override(name)
-}
-
 /// Test helper: an invented folder that is absolute on this platform, the path itself on Unix and on drive `C:` on Windows (`/srv`
 /// is not absolute there). Tests name invented folders only (rule 40). Train 14 moves it to `paddock_testkit::path`.
 #[cfg(test)]

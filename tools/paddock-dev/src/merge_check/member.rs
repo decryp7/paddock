@@ -47,9 +47,9 @@ pub fn command(root: Option<&Path>, member: &str, opts: &Options) -> Result<Repo
     let train = git
         .text(&["symbolic-ref", "--quiet", "--short", "HEAD"])
         .map(|b| b.trim().to_string())
-        .map_err(|_| {
+        .map_err(|e| {
             step(
-                "HEAD is not on a branch, so the train is unknown".into(),
+                e.explain("HEAD is not on a branch, so the train is unknown"),
                 "check out the train's branch in its worktree",
             )
         })?;

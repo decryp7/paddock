@@ -19,9 +19,10 @@ pub fn repo_root_from(cwd: &Path, given: Option<&Path>) -> Result<PathBuf, CliEr
     if let Some(r) = given {
         return Ok(r.to_path_buf());
     }
-    let top = Git::new(cwd)
-        .text(&["rev-parse", "--show-toplevel"])
-        .map_err(|_| CliError::failure("This is not a git checkout.").with_hint("Run it inside the repository."))?;
+    let top = Git::new(cwd).text(&["rev-parse", "--show-toplevel"]).map_err(|e| {
+        let why = e.cause().map(|c| format!(": {c}")).unwrap_or_default();
+        CliError::failure(format!("This is not a git checkout{why}.")).with_hint("Run it inside the repository.")
+    })?;
     Ok(PathBuf::from(top.trim()))
 }
 
@@ -33,7 +34,12 @@ mod tests {
     fn outside_a_git_checkout_the_error_says_so_and_names_the_next_step() {
         let d = tempfile::tempdir().unwrap();
         let e = repo_root_from(d.path(), None).unwrap_err();
-        assert!(e.message.contains("This is not a git checkout."), "{}", e.message);
+        assert!(e.message.starts_with("This is not a git checkout: "), "{}", e.message);
+        assert!(
+            e.message.contains("not a git repository"),
+            "git's own words are kept: {}",
+            e.message
+        );
         assert_eq!(e.hint, "Run it inside the repository.");
     }
 

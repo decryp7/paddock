@@ -1,0 +1,12 @@
+2026-11-28T06:28:56.8387953Z Job: quick
+2026-11-28T06:30:25.7218385Z [32;1m    Starting[0m [1m52[0m tests across [1m2[0m binaries
+2026-11-28T06:30:35.3609743Z [32;1m     Summary[0m [   9.639s] [1m52[0m tests run: [1m52[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-28T06:30:36.8757773Z Success - Post ./.gitea/actions/sccache-stats
+2026-11-28T06:30:36.9047831Z Success - Post ./.gitea/actions/keychain
+2026-11-28T06:30:36.9456910Z Success - Post ./dev tool cache
+2026-11-28T06:30:36.9710350Z Success - Post ./.gitea/actions/setup-rust
+2026-11-28T06:30:37.0091797Z Success - Post ./dev tool cache
+2026-11-28T06:30:37.0330747Z Success - Post ./.gitea/actions/build-jobs
+2026-11-28T06:30:37.2150315Z Success - Post actions/checkout@v4
+2026-11-28T06:30:37.3510512Z Cleaning up container for job quick checks (C99, audit, heavy tool)
+2026-11-28T06:30:39.3219898Z Job succeeded

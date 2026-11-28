@@ -1,0 +1,12 @@
+2026-11-28T06:44:27.7346689Z Job: ui
+2026-11-28T06:47:48.5955497Z ::error::ci-image/Dockerfile: svg-drift: draw.io '/tmp/svg-drift-test-S42M0P/no-such-drawio' is not runnable (ENOENT), the pin is 1.2.3. Fix: use the CI image built with DRAWIO_VERSION=1.2.3 (ci-image/README.md), or set DRAWIO to that version of draw.io desktop.
+2026-11-28T06:49:10.8105335Z Success - Post ./.gitea/actions/sccache-stats
+2026-11-28T06:49:11.2866151Z Success - Post Angular build cache
+2026-11-28T06:49:11.4509878Z Success - Post npm download cache
+2026-11-28T06:49:11.4695733Z Success - Post ./dev tool cache
+2026-11-28T06:49:11.4826594Z Success - Post ./.gitea/actions/node-caches
+2026-11-28T06:49:11.5031713Z Success - Post ./dev tool cache
+2026-11-28T06:49:11.5174200Z Success - Post ./.gitea/actions/setup-rust
+2026-11-28T06:49:11.6735726Z Success - Post actions/checkout@v4
+2026-11-28T06:49:11.9295892Z Cleaning up container for job ui (tokens, contrast, components, entry points, publish dry run, ESLint preset, icons)
+2026-11-28T06:49:13.1224666Z Job succeeded

@@ -410,6 +410,28 @@ fn apply_control() {
     }
 }
 
+/// After the handshake the connection is polled on a socket that does not block, never with a receive timeout: Winsock leaves a
+/// socket "in an indeterminate state" after a receive that timed out (`SO_RCVTIMEO`, learn.microsoft.com, read 2026-11-28).
+fn ready_for_polling(ws: &tungstenite::WebSocket<std::net::TcpStream>) {
+    let _ = ws.get_ref().set_read_timeout(None);
+    let _ = ws.get_ref().set_nonblocking(true);
+}
+
+/// Nothing to read: wait one tick, and write what a send left queued (a send on a non-blocking socket may only queue).
+fn idle(ws: &mut tungstenite::WebSocket<std::net::TcpStream>) {
+    std::thread::sleep(TICK);
+    let _ = ws.flush();
+}
+
+/// A send went out, or is queued behind a full socket (non-blocking); only a real failure is false.
+fn sent(r: tungstenite::Result<()>) -> bool {
+    match r {
+        Ok(()) => true,
+        Err(tungstenite::Error::Io(e)) => e.kind() == std::io::ErrorKind::WouldBlock,
+        Err(_) => false,
+    }
+}
+
 /// The fake's side of the WebSocket upgrade (bounded by [`HANDSHAKE`]), then the connection's tick: the tick is set only
 /// after the handshake. A tick during the handshake gave up on a client whose upgrade request came later than one tick (a loaded
 /// runner) and dropped the connection (Spotter's copy of this fake, Windows CI runs 19116 and 19657, os error 10053;
@@ -418,7 +440,7 @@ fn handshake(stream: std::net::TcpStream) -> Option<tungstenite::WebSocket<std::
     // Bounded far above any scheduling delay, so a client that never sends its upgrade request cannot hold the thread.
     let _ = stream.set_read_timeout(Some(HANDSHAKE));
     let ws = tungstenite::accept(stream).ok()?;
-    let _ = ws.get_ref().set_read_timeout(Some(TICK));
+    ready_for_polling(&ws);
     Some(ws)
 }
 
@@ -447,7 +469,7 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
         {
             told_finished = true;
             let ev = json!({"method": "Page.frameStoppedLoading", "sessionId": "S1", "params": {"frameId": main_frame()}});
-            if ws.send(Message::text(ev.to_string())).is_err() {
+            if !sent(ws.send(Message::text(ev.to_string()))) {
                 return false;
             }
         }
@@ -457,7 +479,7 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
                 json!({"method": "Target.detachedFromTarget", "params": {"sessionId": "S1", "targetId": "T1"}}),
                 json!({"method": "Target.targetDestroyed", "params": {"targetId": "T1"}}),
             ] {
-                if ws.send(Message::text(ev.to_string())).is_err() {
+                if !sent(ws.send(Message::text(ev.to_string()))) {
                     return false;
                 }
             }
@@ -476,6 +498,7 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
                 ) =>
             {
+                idle(&mut ws);
                 continue;
             }
             Err(_) => return,
@@ -499,7 +522,7 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
             // More events than the client keeps.
             for i in 0..1100 {
                 let ev = json!({"method": "Debug.event", "params": {"n": i}});
-                if ws.send(Message::text(ev.to_string())).is_err() {
+                if !sent(ws.send(Message::text(ev.to_string()))) {
                     return;
                 }
             }
@@ -512,7 +535,7 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
             for (frame, loader) in [("C".to_string(), "LC"), (main_frame(), "L0")] {
                 let ev = json!({"method": "Page.frameStartedNavigating", "sessionId": "S1", "params": {
                     "frameId": frame, "loaderId": loader, "url": "about:blank", "navigationType": "differentDocument"}});
-                if ws.send(Message::text(ev.to_string())).is_err() {
+                if !sent(ws.send(Message::text(ev.to_string()))) {
                     return;
                 }
             }
@@ -608,7 +631,7 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
             reply["sessionId"] = s.clone();
         }
         hold_if_asked(&ws, method);
-        if ws.send(Message::text(reply.to_string())).is_err() {
+        if !sent(ws.send(Message::text(reply.to_string()))) {
             return;
         }
         let loads = matches!(method, "Page.navigate" | "Page.navigateToHistoryEntry")
@@ -682,8 +705,8 @@ mod tests {
         tungstenite::client(url.as_str(), raw).expect("the late handshake completes");
         assert_eq!(
             served.join().unwrap(),
-            Some(Some(TICK)),
-            "the connection ticks once the handshake is done"
+            Some(None),
+            "the connection has no receive timeout once the handshake is done (Winsock: a timed-out receive leaves the socket in an indeterminate state, SO_RCVTIMEO)"
         );
     }
 

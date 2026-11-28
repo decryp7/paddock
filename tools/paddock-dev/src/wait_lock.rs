@@ -135,7 +135,7 @@ impl Drop for WaitLock {
 
 /// The lock folder of the repository the current folder is in, if any.
 pub fn dir_for(common_dir: &Path) -> PathBuf {
-    crate::places::state_override("PADDOCK_WAIT_STATE").unwrap_or_else(|| common_dir.join("paddock").join("waits"))
+    crate::git::state_override("PADDOCK_WAIT_STATE").unwrap_or_else(|| common_dir.join("paddock").join("waits"))
 }
 
 #[cfg(test)]
