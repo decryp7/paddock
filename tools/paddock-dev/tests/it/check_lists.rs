@@ -169,9 +169,8 @@ fn check_flags_a_stale_list_and_regenerating_fixes_it() {
         said.contains(README) && said.contains(CONTRACT) && said.contains("./dev check lists"),
         "{said}"
     );
-    assert_eq!(
+    assert!(
         std::fs::read_to_string(&readme).unwrap().contains("| C18X |"),
-        true,
         "--check changes nothing"
     );
     lists::command(root.clone(), false).unwrap();

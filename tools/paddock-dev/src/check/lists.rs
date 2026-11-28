@@ -156,10 +156,10 @@ pub fn line_diff(have: &str, want: &str) -> Vec<String> {
 pub fn command(root: Option<PathBuf>, check: bool) -> Result<Report, CliError> {
     let root = crate::repo_root::repo_root(root.as_deref())?;
     if !check && std::env::var("CI").is_ok_and(|v| v == "true") {
-        return Err(CliError::refused(format!(
-            "::error::check lists: CI=true: CI checks the lists (--check) and never rewrites them."
-        ))
-        .with_hint(format!("Run `{REGENERATE}` on your machine and commit the result.")));
+        return Err(
+            CliError::refused("::error::check lists: CI=true: CI checks the lists (--check) and never rewrites them.")
+                .with_hint(format!("Run `{REGENERATE}` on your machine and commit the result.")),
+        );
     }
     let started = Instant::now();
     let registry = super::registry();
