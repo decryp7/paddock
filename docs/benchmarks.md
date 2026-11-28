@@ -3490,3 +3490,26 @@ passed the push and failed the member gate)? user, 2026-11-28, in chat (the narr
   C178 on the unlisted module); the file was removed after the run.
 - **Not measured:** a cold build folder for the whole branch, a quiet machine, and the full `./dev check --pre-push` of this branch
   (see the hand-back report).
+
+## The moved-path row in the push gate (2026-11-28, feat/moved-path-check, C183)
+
+Question: what does the `moved-paths` row cost, so a push that renames or deletes a file learns that a path register still names it before the full
+conformance run does (user, 2026-11-28, in chat: two gate rounds in the paddock-dev split)?
+
+- **Machine:** the shared Mac mini (arm64), other agents running; the release build of `./dev` warm; `/usr/bin/time -p`, three runs each.
+- **Command:** `./dev check run --only C183` (the row's command: one `git diff --name-status -M` against the merge base, 33 register files read,
+  the positive control run first).
+
+  | What | Wall s |
+  |---|---:|
+  | clean tree (no rename, no deletion), 3 runs | 0.69, 0.67, 0.67 |
+  | one staged rename of a file `docs/gates.toml` names, 3 runs | 1.17 (first), 0.71, 0.67 |
+  | `./dev check --pre-push --only moved-paths --no-reuse` with that rename (the whole gate: plan, row, table), 2 runs | 7.1, 7.2 |
+
+- **Result:** the check itself is about 0.7 s. The row runs only when the push has a rename or a deletion (`Change::moved`, one more
+  `git diff --name-status -M -z --diff-filter=DR` in `discover`); any other push skips it with its reason, so it costs nothing there. The
+  gate's 7 s are the planner and the table, paid by every row.
+- **Positive control:** the staged rename of `apps/debrief/scripts/ci/check-smoke-dialogs.mjs` gave one warning, `docs/gates.toml:181 ... moved to
+  ...-moved.mjs`; the file was moved back after the run. The fixture-repository tests in `tests/it/check_c183.rs` hold the same shape.
+- **Not measured:** a cold build of `./dev`, a quiet machine, and the row on a push that deletes hundreds of files (one `git diff` of the same size
+  as the push's own file list).

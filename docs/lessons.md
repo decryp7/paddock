@@ -4663,3 +4663,13 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   `::notice::` line names each accepted job; a failing, cancelled, skipped or missing step, a failure line, a log that stops early, or an unreadable
   log (not measured, never a pass: ER-33) still blocks. Replay shapes `lost-report-rerun` (9388) and `failing-step-rerun` (9280). Gitea's raw log has no
   per-step result line for a main step (only `Success - Post ...`), so the step results come from the job's step records.
+
+## Files moved and the path registers still named the old path (2026-11-28, feat/moved-path-check, C183)
+- **What happened.** During the paddock-dev split, files moved twice and registers keyed by path kept the old path: conformance's `mention` lines and
+  `conformance/ci/checkout-profiles.txt`, the `ci-runs-reader:` test list and paddock.ci.json `hostTests` entries. Only a full conformance run saw it, and each
+  time it cost a gate round (user, 2026-11-28, in chat). The conformance engine's allow lists and baselines already follow a rename
+  (`baseline::renames`); the hand-kept registers did not.
+- **Fix.** C183 (report-only, ER-41) reads git's own rename detection for the change range once (`git diff --name-status -M`, `Git::moves`, ER-42) and
+  names every line of the declared path registers (`c183::REGISTERS`, one list, ER-22) that still has an old path: "moved to <new path>" or "deleted", with
+  file:line. The push gate's `moved-paths` row runs it only when the push renames or deletes a file. Cost: docs/benchmarks.md, "the moved-path row in the
+  push gate".

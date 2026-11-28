@@ -52,6 +52,7 @@ fn change(files: &[&str]) -> Change {
         files: files.iter().map(|f| f.to_string()).collect(),
         ranges: vec!["abc..HEAD".into()],
         base: Some("origin/main".into()),
+        moved: false,
     }
 }
 
@@ -3495,6 +3496,70 @@ fn a_given_file_list_has_no_base_and_a_measured_change_has_one() {
     assert_eq!(measured.base.as_deref(), Some(c1.as_str()));
     let (pushed, _, _) = super::discover(&r.root, &c1, &[], std::slice::from_ref(&c2)).unwrap();
     assert_eq!(pushed.base.as_deref(), Some(c1.as_str()));
+}
+
+/// A push that renames or deletes a file measures it (`Change::moved`, git's `-M` through the shared reader): a pushed range, a working
+/// tree with an uncommitted move, and a plain change that only adds or edits say so; a list the caller gave has no base and no answer.
+#[test]
+fn a_push_says_whether_it_renames_or_deletes_a_file() {
+    let r = Repo::new();
+    r.commit("a");
+    r.commit("keep");
+    let base = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    r.remote("main", &base);
+    let c2 = r.commit("added");
+    assert!(
+        !super::discover(&r.root, &base, &[], std::slice::from_ref(&c2)).unwrap().0.moved,
+        "an addition moves nothing"
+    );
+    r.git(&["rm", "-q", "a"]);
+    r.git(&["commit", "-q", "-m", "drop"]);
+    let c3 = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    assert!(
+        super::discover(&r.root, &base, &[], std::slice::from_ref(&c3)).unwrap().0.moved,
+        "a deletion in the pushed range"
+    );
+    assert!(
+        super::discover(&r.root, &base, &[], &[]).unwrap().0.moved,
+        "and in the measured working tree"
+    );
+    r.git(&["reset", "-q", "--hard", &c2]);
+    assert!(!super::discover(&r.root, &base, &[], &[]).unwrap().0.moved);
+    r.git(&["mv", "keep", "kept"]);
+    assert!(
+        super::discover(&r.root, &base, &[], &[]).unwrap().0.moved,
+        "a staged rename that is not committed yet"
+    );
+    assert!(
+        !super::discover(&r.root, &base, &["x".to_string()], &[]).unwrap().0.moved,
+        "a given list has no base to measure from"
+    );
+}
+
+/// The moved-path row (C183) runs `./dev check run --only C183` when the push renames or deletes a file and is skipped with its reason
+/// when it does not; the row set of a pass record names it.
+#[test]
+fn the_moved_paths_row_runs_only_when_the_push_moves_or_deletes_a_file() {
+    let moved = Change {
+        moved: true,
+        ..change(&["docs/x.md"])
+    };
+    let planned = plan_gates(&plan(), &moved, &facts());
+    let row = run_gates(&planned)
+        .into_iter()
+        .find(|g| g.id == "moved-paths")
+        .unwrap_or_else(|| panic!("{:?}", ids(&planned)));
+    assert_eq!(row.args, ["check", "run", "--only", "C183"]);
+    assert!(row.next.contains("C183"), "{}", row.next);
+    let planned = plan_gates(&plan(), &change(&["docs/x.md"]), &facts());
+    assert!(
+        planned
+            .iter()
+            .any(|p| matches!(p, Planned::Skip { id, reason } if id == "moved-paths" && reason.contains("renames and deletes no file"))),
+        "{:?}",
+        ids(&planned)
+    );
+    assert!(super::gates::ROW_SET.contains(&"moved-paths"));
 }
 
 /// The contracts line of the conformance `tests` phase compiles paddock-dev's tests, so the row hands the executor the build folder

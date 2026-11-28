@@ -193,6 +193,9 @@ pub struct Change {
     pub ranges: Vec<String>,
     /// The commit the files were measured from. `None`: unknown, and the checks that judge only what the push adds run in full.
     pub base: Option<String>,
+    /// The change renames or deletes at least one file (git's `-M` against the base): the `moved-paths` row runs only then. `false` for a
+    /// list of files the caller gave (`--files`), which has no base to measure from.
+    pub moved: bool,
 }
 
 /// The rows that do not depend on a workspace, as the pass record stores them (`known::write_record`): a record made by a tool with
@@ -207,6 +210,7 @@ pub const ROW_SET: &[&str] = &[
     "job-model",
     "locks-guard",
     "member-audits",
+    "moved-paths",
     "pitwall-deny",
     "pitwall-scripts",
 ];
@@ -506,6 +510,7 @@ fn plan_rows(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
         });
     }
     out.push(locks_guard(change, facts));
+    out.push(moved_paths(change, facts));
     // C100 (ADR 0060) on every push, like the conformance row (ER-41; ER-42: a hand list of its inputs missed apps/*/paddock.ci.json,
     // so that is not kept). Checks landed unwired on 2026-11-12 (four) and 2026-11-17 (C138). `./dev gates check` is CI's own command;
     // 5 to 8 s, in parallel with the conformance tests (docs/benchmarks.md, "C100 in the push gate"). It blocks from its first run:
@@ -936,6 +941,34 @@ fn locks_guard(change: &Change, facts: &Facts) -> Planned {
                 &[],
                 1,
                 "read the warning it printed: a dependency added to a shared crate changed the workspace hack, a watched crate's features or a lockfile; regenerate with `./dev locks sync` and `./dev locks guard --write` and commit them with the change".into(),
+            )
+        },
+    )
+}
+
+/// The moved-path row (C183, user decision 2026-11-28): a push that renames or deletes a file runs the one check that finds the path
+/// registers still naming it, in seconds, before the full conformance run would (ER-9, ER-53: only a full conformance run caught it,
+/// twice in the paddock-dev split, one gate round each). Report-only until its first green run (ER-41): the check prints warnings and
+/// the row passes. The row is `./dev check run --only C183`; the same check also runs in the conformance row on every push.
+fn moved_paths(change: &Change, facts: &Facts) -> Planned {
+    if !change.moved {
+        return Planned::Skip {
+            id: "moved-paths".into(),
+            reason: "the push renames and deletes no file (git rename detection against the base)".into(),
+        };
+    }
+    dev_run(
+        facts,
+        Gate {
+            args: strs(&["check", "run", "--only", "C183"]),
+            env: approval_stage_env(facts),
+            ..gate(
+                "moved-paths".into(),
+                "",
+                "",
+                &[],
+                0,
+                "a path register still names a file this push renamed or deleted: the warning names the register line and `moved to <new path>` or `deleted`; edit that line (C183, docs/gates.toml)".into(),
             )
         },
     )
