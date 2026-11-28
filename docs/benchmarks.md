@@ -3312,6 +3312,18 @@ shards) saw 25 mutants per shard and the cap of 12 refused them, which led to ei
 detector 900 s, the run limit 3300 s. At about 12 minutes a mutant on Linux a shard measures 4 to 6, so a full read of a diff of 100 mutants needs about
 20 shards; today the job is a sample, which is acceptable only while it is report-only.
 
+**After landing, in mutants.yml (2026-11-28, ci/mutants-after-landing, user decision 143).** The job left ci.yml (its eight shards held the Linux runner and
+trains queued 43 to 62 minutes); `mutants.yml` plans the shards from the mutant count (6 mutants a shard, at most 12) and runs them one at a time.
+**Run 9374** (a dispatch on this branch, base `e01de611c`, head `08816cec2`; the diff is `command_plan`, `command_gate` and the new `scratch_parent`):
+the plan job took 3.5 minutes (`./dev mutants plan`: 4 mutants in `tools/paddock-dev`, none in `crates`, so one shard `0/1`); the shard waited
+about 35 minutes for a Linux slot (queued 01:37, started 02:13) and ran 31.1 minutes (02:13:10 to 02:44:18), of which `./dev mutants gate` took 1712 s
+for 4 mutants: 0 caught, 2 MISSED (both in `scratch_parent`: `-> Ok(Default::default())` and `delete !`), 0 timeouts, 2 unviable. **sccache
+started in this shard** (main's setup-rust, no fix from `fix/sccache-start-reliable`): 664 compile requests, Rust hits 216 of 315, 68.6 %. **Per-mutant time:**
+1712 s over 4 mutants is an upper bound of 428 s (7.1 minutes) a mutant, and that figure still holds the control crate, the checkout and the unmutated
+build and tests (two mutants did not compile, so two built and ran tests); the earlier 11 to 12 minutes (trial 9349, sccache not started) are therefore
+at least 40 % lower. Not measured: the per-mutant time alone (the gate prints only the total; cargo-mutants' own per-mutant lines are not in the
+job log), and whether sccache starts in every shard (one run: the start problem was intermittent in 9349). Limits: one run, one shard, 4 mutants.
+
 **Earlier Mac measurement** (member-gate row, train y's members, each run at the member's merged commit against its first parent; a Mac at a 15-minute
 load of 10 to 17): (a) `refactor/test-cache-outcome-type` (1229b913b, `tools/paddock-dev/src/test_cache`): 20 mutants. The unmutated build took 51 s
 and the package's tests 170 s; each mutant took 8 s of build and about 150 s of tests (about 2.7 minutes). The run was cut by the first run limit (3300 s)
