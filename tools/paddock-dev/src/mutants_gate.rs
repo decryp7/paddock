@@ -20,6 +20,8 @@
 //! dependencies of dev-dependencies are not rewritten), and mutating the member's own worktree would break the rows that run beside
 //! this one. The folder has an owner record and is removed through [`crate::safe_remove`] when the run ends, whatever its outcome.
 
+pub mod record;
+
 use crate::locks_guard::Mode;
 use paddock_cli::{CliError, Exit, Report};
 use paddock_proc::{Limits, command, run_bounded};
@@ -43,9 +45,28 @@ pub const WORKSPACES: &[&str] = &["tools/paddock-dev", "crates"];
 /// tests CI runs, with their bounds.
 pub const NEXTEST_PROFILE: &str = "ci";
 
+/// What the mutants' nextest runs add to [`NEXTEST_PROFILE`]: stop at the first failing test and end the running ones at once, and no
+/// retry. A mutant needs one failing test to be caught; the `ci` profile turns fail-fast off and retries each failure once, so a caught
+/// mutant ran the whole suite (measured: the failure at test 732 of 2990, then 248 s for all of them). cargo-mutants' book: "By default,
+/// nextest will fail fast, which is highly preferable when testing mutants. If your nextest configuration turns fail-fast off, it's
+/// recommended that you turn it back" (<https://mutants.rs/nextest.html>); `:immediate` also ends the straggling tests the book names
+/// (<https://nexte.st/docs/running/#failing-fast>). No retry changes no verdict: the profile's `flaky-result = "fail"` already fails a test
+/// that passes only on its retry. Measured: docs/benchmarks.md, "Mutation testing: the per-mutant cost".
+pub const NEXTEST_EXTRA: &[&str] = &["--max-fail=1:immediate", "--retries=0"];
+
+/// The environment cargo-mutants' builds get on top of the caller's. CI's setup-rust sets `CARGO_INCREMENTAL=0` for sccache (it cannot
+/// cache an incremental compile), which makes every mutant rebuild the whole 154,000-line `paddock-dev` crate (lib, its test harness, the
+/// binary and `tests/it`) instead of the incremental rebuild cargo-mutants is built around: "for each mutant in its shard, it does an
+/// incremental build and runs all the tests" (<https://mutants.rs/shards.html>; `--in-place` keeps the build products,
+/// <https://mutants.rs/in-place.html>). Incremental compiles are only the workspace's own crates; the dependencies stay sccache's.
+/// Measured on the Mac, docs/benchmarks.md "Mutation testing: the per-mutant cost".
+pub const MUTANTS_ENV: &[(&str, &str)] = &[("CARGO_INCREMENTAL", "1"), ("RUSTUP_AUTO_INSTALL", "0")];
+
 /// The hang detector of one mutant's build or test run, in seconds (cargo-mutants `--timeout`, `--build-timeout`): never a speed limit
-/// (ER-12). The measured test run is about 150 s (nextest's `ci` profile bounds each test itself) and the build 8 s to 51 s; 900 s is
-/// six times the longest (docs/benchmarks.md, "Mutation testing of the diff in the member gate").
+/// (ER-12). It is the bound of a mutant no test catches, which runs the whole suite: 227 s on the Mac at a 1-minute load of 13 to 46
+/// (2026-11-28) and about 6 minutes in a Linux shard (trial 9349); a caught mutant now ends at its first failure (5.5 to 12.2 s). An
+/// incremental build took 5 to 11 s, a non-incremental one 22 to 28 s. 900 s is four times the Mac's suite and 2.5 times the Linux one, and nextest's
+/// own per-test stops (300 s for most tests) end a single hung test first (docs/benchmarks.md, "Mutation testing: the per-mutant cost").
 pub const MUTANT_TIMEOUT_SECS: u64 = 900;
 
 /// The most mutants one run tests, over all workspaces. A diff with more runs one slice of consecutive mutants in source order
@@ -55,19 +76,21 @@ pub const MUTANT_TIMEOUT_SECS: u64 = 900;
 /// in `crates` a mutant took 13 s. 12 fits the run limit and the 60-minute row cap of a push step.
 pub const MAX_MUTANTS: usize = 12;
 
-/// The most mutants one planned shard (`--shard k/n`, a leg of mutants.yml's matrix) tests: a leg has a job of its own, so it is
-/// held by the run limit and not by a push step's row cap. Measured on the trial of 2026-11-27 (docs/benchmarks.md): a shard of the
-/// four-way split saw 25 mutants for the whole paddock-dev diff of this branch, which the cap of 12 refused; eight legs of at most
-/// this many hold such a diff.
-pub const MAX_PER_SHARD: usize = 16;
+/// The most mutants one planned shard (`--shard k/n`, a leg of mutants.yml's matrix) tests; a slice over it is NOT MEASURED. The plan
+/// never hands a shard more ([`shard_count`]). At the expected 2.3 minutes a mutant in a Linux shard (docs/benchmarks.md, "Mutation
+/// testing: the per-mutant cost": half of the mutants caught in seconds, a third missed at a whole suite each) and about 12 minutes of
+/// setup and unmutated build and tests, 14 is about 44 minutes, well under the job's 75; a shard of only missed mutants is cut by
+/// [`RUN_LIMIT`] and says what it did not measure.
+pub const MAX_PER_SHARD: usize = 14;
 
 /// The most mutants one planned shard tests when the plan has its way (user decision 143, 2026-11-28): a shard is one job that holds one Linux
-/// slot, so it is kept short enough that a train dispatched meanwhile waits for it only briefly. Each paddock-dev mutant runs the package's
-/// tests (about 150 s on the Mac, docs/benchmarks.md, "Mutation testing of the diff"), so six is about 20 to 25 minutes.
-pub const SHARD_TARGET: usize = 6;
+/// slot, so it is kept short enough that a train dispatched meanwhile waits for it only briefly. Ten mutants are about 35 minutes at the
+/// expected per-mutant cost of [`MAX_PER_SHARD`]'s note (six took 72.8 minutes before: each ran the whole suite, run 9400).
+pub const SHARD_TARGET: usize = 10;
 
-/// The most shards a plan makes. Shards run one at a time (mutants.yml), so this bounds the run; a diff with more mutants than
-/// `MAX_SHARDS * MAX_PER_SHARD` leaves the rest `not measured` by the shard's own cap, never silently.
+/// The most shards a run starts. Shards run one at a time (mutants.yml), so this bounds the run; a diff with more mutants than
+/// `MAX_SHARDS * MAX_PER_SHARD` (168) is split in more slices and the ones the run does not start are NOT MEASURED in the plan and the
+/// record, never silently.
 pub const MAX_SHARDS: usize = 12;
 
 /// The whole run's hang limit: the baseline, the control and [`MAX_MUTANTS`] mutants.
@@ -229,13 +252,8 @@ pub struct Real;
 
 impl Tool for Real {
     fn mutants(&self, cwd: &Path, args: &[String], tmp: &Path) -> Result<Ran, String> {
-        let mut cmd = command("cargo");
-        cmd.arg("mutants")
-            .args(args)
-            .current_dir(cwd)
-            .env("TMPDIR", scratch_tmp(tmp))
-            .env("RUSTUP_AUTO_INSTALL", "0");
-        let out = run_bounded(cmd, Limits::new(RUN_LIMIT).max_output(1 << 26)).map_err(|e| format!("cargo mutants could not run: {e}"))?;
+        let out = run_bounded(mutants_command(cwd, args, tmp), Limits::new(RUN_LIMIT).max_output(1 << 26))
+            .map_err(|e| format!("cargo mutants could not run: {e}"))?;
         Ok(Ran {
             code: exit_code(&out),
             stdout: out.stdout_text(),
@@ -276,6 +294,17 @@ impl Tool for Real {
     }
 }
 
+/// `cargo mutants <args>` in `cwd` with [`MUTANTS_ENV`] and the scratch temporary folder of `tmp` ([`scratch_tmp`]).
+fn mutants_command(cwd: &Path, args: &[String], tmp: &Path) -> std::process::Command {
+    let mut cmd = command("cargo");
+    cmd.arg("mutants")
+        .args(args)
+        .current_dir(cwd)
+        .env("TMPDIR", scratch_tmp(tmp))
+        .envs(MUTANTS_ENV.iter().copied());
+    cmd
+}
+
 /// The exit code of a bounded run; `None` when it was ended (timeout, output cap) or was killed by a signal.
 fn exit_code(out: &paddock_proc::Output) -> Option<i32> {
     match out.outcome {
@@ -312,6 +341,8 @@ pub struct Summary {
     pub broken: Option<String>,
     /// One line per workspace for the table.
     pub lines: Vec<String>,
+    /// The planned shard this run measured (`k/n`), when it is one: its result line is then printed ([`record::result_line`]).
+    pub shard: Option<String>,
 }
 
 /// The mutants `--list --json` says an `--in-diff` run would test: how many.
@@ -451,7 +482,10 @@ fn count_listed(tool: &dyn Tool, dir: &Path, diff_arg: &str, shard_arg: Option<&
 /// the repository at `root`, in a checkout of `head` under the scratch folder `scratch` (mutants are applied in place there, never in
 /// `root`). The run's findings and what it could not measure are in the [`Summary`].
 pub fn measure(tool: &dyn Tool, root: &Path, head: &str, base: &str, shard: Option<(u32, u32)>, scratch: &Path, mode: Mode) -> Summary {
-    let mut s = Summary::default();
+    let mut s = Summary {
+        shard: shard.map(|(k, n)| format!("{k}/{n}")),
+        ..Summary::default()
+    };
     if let Err(why) = check_version(tool, root, scratch) {
         s.not_measured.push(why);
         return s;
@@ -511,14 +545,16 @@ pub fn measure(tool: &dyn Tool, root: &Path, head: &str, base: &str, shard: Opti
         };
         if take == 0 {
             s.over_cap += n;
-            s.lines.push(format!(
-                "{ws}: {n} mutants not measured (the cap of {MAX_MUTANTS} {})",
-                if shard.is_some() {
-                    "per shard: plan more shards"
-                } else {
-                    "is used"
-                }
-            ));
+            let why = if shard.is_some() {
+                format!("{ws}: {n} mutants not measured (over the cap of {MAX_PER_SHARD} per shard: plan more shards)")
+            } else {
+                format!("{ws}: {n} mutants not measured (the cap of {MAX_MUTANTS} is used)")
+            };
+            // A whole slice refused is a part not measured, said as such, never only a plain line (run 9393).
+            if shard.is_some() {
+                s.not_measured.push(why.clone());
+            }
+            s.lines.push(why);
             continue;
         }
         let out = scratch.join(format!("{slug}-out"));
@@ -543,6 +579,7 @@ pub fn measure(tool: &dyn Tool, root: &Path, head: &str, base: &str, shard: Opti
             a.extend(args(&["--shard", &format!("0/{}", n.div_ceil(take))]));
         }
         a.extend(args(&["--", "--profile", NEXTEST_PROFILE]));
+        a.extend(args(NEXTEST_EXTRA));
         let ran = match tool.mutants(&dir, &a, scratch) {
             Ok(r) => r,
             Err(e) => {
@@ -639,6 +676,10 @@ pub fn report(s: &Summary, mode: Mode, started: std::time::Instant) -> Report {
         if mode == Mode::Gate { "blocking" } else { "report-only: not a failure yet (ER-41)" },
         started.elapsed().as_secs()
     ));
+    if let Some(shard) = &s.shard {
+        text.push_str(&record::result_line(shard, s, started.elapsed().as_secs()));
+        text.push('\n');
+    }
     let data = json!({
         "mode": if mode == Mode::Gate { "gate" } else { "report-only" },
         "tested": s.tested, "caught": s.caught, "missed": s.missed, "timeouts": s.timeouts, "unviable": s.unviable,
@@ -659,9 +700,12 @@ pub fn report(s: &Summary, mode: Mode, started: std::time::Instant) -> Report {
     }
 }
 
-/// How many shards the diff's `n` mutants are planned in: one more for each [`SHARD_TARGET`], at most [`MAX_SHARDS`], none for none.
+/// How many slices (`--shard k/n`, the `n`) the diff's `n` mutants are split in: one more for each [`SHARD_TARGET`] up to [`MAX_SHARDS`], and
+/// beyond that as many as keep every slice within [`MAX_PER_SHARD`], so no shard is handed more than it may test; none for none. The run
+/// starts at most [`MAX_SHARDS`] of them ([`Plan::shards`]) and names the rest NOT MEASURED (run 9393: 237 mutants in twelve slices of 20,
+/// over the cap, so ten shards refused theirs and nothing said so).
 pub fn shard_count(n: usize) -> usize {
-    n.div_ceil(SHARD_TARGET).min(MAX_SHARDS)
+    n.div_ceil(SHARD_TARGET).min(MAX_SHARDS).max(n.div_ceil(MAX_PER_SHARD))
 }
 
 /// What `mutants plan` found.
@@ -669,7 +713,9 @@ pub fn shard_count(n: usize) -> usize {
 pub struct Plan {
     /// The mutants of the diff over all workspaces.
     pub count: usize,
-    /// The shards planned for them ([`shard_count`]).
+    /// The slices the mutants are split in ([`shard_count`]): every shard is `k/slices`.
+    pub slices: usize,
+    /// The shards the run starts: the first `min(slices, MAX_SHARDS)` slices.
     pub shards: usize,
     /// Why part of the diff could not be counted: never read as "no mutants" (ER-33).
     pub not_measured: Vec<String>,
@@ -710,14 +756,33 @@ pub fn plan(tool: &dyn Tool, root: &Path, base: &str, scratch: &Path) -> Plan {
             Err(e) => p.not_measured.push(format!("{ws}: the mutants of the diff cannot be listed ({e})")),
         }
     }
-    p.shards = shard_count(p.count);
+    p.slices = shard_count(p.count);
+    p.shards = p.slices.min(MAX_SHARDS);
+    if p.slices > p.shards {
+        let per = p.count.div_ceil(p.slices);
+        p.not_measured.push(format!(
+            "about {} of the {} mutants (slices {}/{} to {}/{}) are over the run's limit of {MAX_SHARDS} shards of at most {MAX_PER_SHARD}; dispatch mutants.yml again for them after this run, or land the change in smaller parts",
+            p.count.saturating_sub(per * p.shards),
+            p.count,
+            p.shards,
+            p.slices,
+            p.slices - 1,
+            p.slices
+        ));
+    }
     p
 }
 
 /// The step outputs of a plan: `run` (whether shards follow), `count` and `shards` (a JSON list of `k/n`, the matrix of mutants.yml).
 pub fn plan_outputs(p: &Plan) -> String {
-    let list: Vec<String> = (0..p.shards).map(|k| format!("{k}/{}", p.shards)).collect();
-    format!("run={}\ncount={}\nshards={}\n", p.shards > 0, p.count, json!(list))
+    let list: Vec<String> = (0..p.shards).map(|k| format!("{k}/{}", p.slices)).collect();
+    format!(
+        "run={}\ncount={}\nslices={}\nshards={}\n",
+        p.shards > 0,
+        p.count,
+        p.slices,
+        json!(list)
+    )
 }
 
 /// The log text of a plan.
@@ -730,8 +795,11 @@ pub fn plan_text(p: &Plan) -> String {
         text.push_str(&format!("::warning::mutants plan: NOT MEASURED: {why}\n"));
     }
     text.push_str(&format!(
-        "mutants plan: {} mutants, {} shard(s) of at most {SHARD_TARGET}\n",
-        p.count, p.shards
+        "mutants plan: {} mutants in {} slice(s) of at most {}, {} shard(s) run\n",
+        p.count,
+        p.slices,
+        p.count.div_ceil(p.slices.max(1)),
+        p.shards
     ));
     text
 }
@@ -767,7 +835,7 @@ pub fn command_plan(root: Option<PathBuf>, base: &str) -> Result<Report, CliErro
         None => text.push_str(&out),
     }
     Ok(Report::new(
-        json!({"count": p.count, "shards": p.shards, "notMeasured": p.not_measured}),
+        json!({"count": p.count, "slices": p.slices, "shards": p.shards, "notMeasured": p.not_measured}),
         text,
     ))
 }
@@ -1091,10 +1159,10 @@ mod tests {
             MAX_MUTANTS * 2 + 10 - 1,
             "the fake ran one mutant: the others are not measured"
         );
-        let tail: Vec<&str> = run.iter().rev().take(3).rev().map(String::as_str).collect();
+        let after = run.iter().position(|x| x == "--").unwrap();
         assert_eq!(
-            tail,
-            ["--", "--profile", NEXTEST_PROFILE],
+            &run[after + 1..after + 3],
+            ["--profile", NEXTEST_PROFILE],
             "the mutants' tests run under CI's nextest profile"
         );
     }
@@ -1134,6 +1202,118 @@ mod tests {
             .find(|a| a.iter().any(|x| x == "--test-tool"))
             .expect("the mutants run");
         assert!(run.iter().any(|x| x == "--in-place"), "{run:?}");
+    }
+
+    /// A caught mutant needs one failing test: the mutants' nextest stops at the first and ends the running tests, and retries
+    /// nothing (the `ci` profile turns fail-fast off and retries once; docs/benchmarks.md, "Mutation testing: the per-mutant cost").
+    #[test]
+    fn the_mutants_tests_stop_at_the_first_failure_and_retry_nothing() {
+        let f = Fake::new();
+        let _ = measure_with(&f);
+        let calls = f.calls();
+        let run = calls
+            .iter()
+            .find(|a| a.iter().any(|x| x == "--test-tool"))
+            .expect("the mutants run");
+        let after = run.iter().position(|x| x == "--").expect("nextest arguments");
+        let nextest: Vec<&str> = run[after + 1..].iter().map(String::as_str).collect();
+        assert!(nextest.contains(&"--max-fail=1:immediate"), "{nextest:?}");
+        assert!(nextest.contains(&"--retries=0"), "{nextest:?}");
+        assert_eq!(&nextest[..2], ["--profile", NEXTEST_PROFILE], "still CI's profile and its bounds");
+    }
+
+    /// A shard holding more than the per-shard cap measures nothing; that is said as NOT MEASURED (a warning), never only as a plain
+    /// line a reader can miss (run 9393: ten of twelve shards refused 20 mutants each and the run read green).
+    #[test]
+    fn a_shard_over_the_cap_is_not_measured_and_names_the_cap_it_is_over() {
+        let mut over = Fake::new();
+        over.listed = MAX_PER_SHARD + 4;
+        let scratch = tempfile::tempdir().unwrap();
+        let s = measure(
+            &over,
+            scratch.path(),
+            "headsha",
+            "base",
+            Some((0, 2)),
+            scratch.path(),
+            Mode::ReportOnly,
+        );
+        assert_eq!(s.not_measured.len(), 1, "{:?}", s.not_measured);
+        assert!(
+            s.not_measured[0].contains(&format!("cap of {MAX_PER_SHARD} per shard")),
+            "{:?}",
+            s.not_measured
+        );
+        let text = report(&s, Mode::ReportOnly, std::time::Instant::now()).text;
+        assert!(text.contains("NOT MEASURED"), "{text}");
+    }
+
+    /// A diff with more mutants than the shards can hold plans every shard within the cap and names the rest NOT MEASURED in the plan
+    /// (run 9393: 237 mutants in twelve shards of 20, over the cap of 16, so ten shards measured nothing and nothing said so).
+    #[test]
+    fn a_plan_keeps_every_shard_within_the_cap_and_names_what_it_leaves_out() {
+        for n in [
+            1,
+            SHARD_TARGET,
+            SHARD_TARGET * MAX_SHARDS + 1,
+            MAX_SHARDS * MAX_PER_SHARD,
+            MAX_SHARDS * MAX_PER_SHARD + 5,
+            1000,
+        ] {
+            let mut f = Fake::new();
+            f.listed = n;
+            let scratch = tempfile::tempdir().unwrap();
+            let p = plan(&f, scratch.path(), "base", scratch.path());
+            let shards = plan_outputs(&p);
+            let list: Vec<String> = serde_json::from_str(shards.lines().find_map(|l| l.strip_prefix("shards=")).unwrap()).unwrap();
+            assert!(!list.is_empty() && list.len() <= MAX_SHARDS, "n {n}: {list:?}");
+            // Every shard is k/total of one split: total slices of at most the cap each, of which the first MAX_SHARDS run.
+            let total = parse_shard(&list[0]).unwrap().1 as usize;
+            assert!(list.iter().all(|s| parse_shard(s).unwrap().1 as usize == total), "{list:?}");
+            assert!(n.div_ceil(total) <= MAX_PER_SHARD, "n {n}: {total} slices of {}", n.div_ceil(total));
+            let fits = n <= MAX_SHARDS * MAX_PER_SHARD;
+            assert_eq!(p.not_measured.is_empty(), fits, "n {n}: {p:?}");
+            if !fits {
+                assert!(plan_text(&p).contains("NOT MEASURED"), "{}", plan_text(&p));
+            }
+        }
+    }
+
+    /// Every shard prints one result line (JSON) the record job reads, so a shard that printed none is known to have measured nothing.
+    #[test]
+    fn a_shard_prints_one_result_line_with_its_counts() {
+        let f = Fake::new();
+        let scratch = tempfile::tempdir().unwrap();
+        let s = measure(
+            &f,
+            scratch.path(),
+            "headsha",
+            "base",
+            Some((1, 4)),
+            scratch.path(),
+            Mode::ReportOnly,
+        );
+        let text = report(&s, Mode::ReportOnly, std::time::Instant::now()).text;
+        let lines: Vec<&str> = text.lines().filter_map(|l| l.strip_prefix("mutants shard result: ")).collect();
+        assert_eq!(lines.len(), 1, "{text}");
+        let v: Value = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!((v["shard"].as_str(), v["tested"].as_u64()), (Some("1/4"), Some(1)), "{v}");
+    }
+
+    /// The mutants build incrementally even where CI turned incremental builds off for sccache (`CARGO_INCREMENTAL=0`): the explicit
+    /// value on the child wins over the inherited one. Without it each mutant rebuilt the whole crate (docs/benchmarks.md).
+    #[test]
+    fn the_mutants_build_incrementally_whatever_the_caller_set() {
+        let d = tempfile::tempdir().unwrap();
+        let cmd = mutants_command(d.path(), &args(&["--list"]), d.path());
+        let envs: Vec<(String, Option<String>)> = cmd
+            .get_envs()
+            .map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned())))
+            .collect();
+        assert!(envs.contains(&("CARGO_INCREMENTAL".into(), Some("1".into()))), "{envs:?}");
+        assert!(envs.iter().any(|(k, _)| k == "TMPDIR"), "{envs:?}");
+        let argv: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(argv, ["mutants", "--list"]);
     }
 
     #[test]
@@ -1225,11 +1405,11 @@ mod tests {
     #[test]
     fn the_plan_counts_the_mutants_of_every_workspace_and_names_one_shard_for_each_slice() {
         let mut f = Fake::new();
-        f.listed = 7;
+        f.listed = SHARD_TARGET + 1;
         let scratch = tempfile::tempdir().unwrap();
         let p = plan(&f, scratch.path(), "base", scratch.path());
-        // Only `crates` has a diff in the fake: 7 mutants, two shards. Nothing is checked out or run: listing mutates nothing.
-        assert_eq!((p.count, p.shards), (7, 2), "{p:?}");
+        // Only `crates` has a diff in the fake: one more than a shard's target, two shards. Nothing is checked out or run: listing mutates nothing.
+        assert_eq!((p.count, p.shards, p.slices), (SHARD_TARGET + 1, 2, 2), "{p:?}");
         assert!(p.not_measured.is_empty(), "{p:?}");
         assert!(
             f.calls()
@@ -1240,7 +1420,10 @@ mod tests {
         );
         let out = plan_outputs(&p);
         assert!(
-            out.contains("run=true\n") && out.contains("count=7\n") && out.contains("shards=[\"0/2\",\"1/2\"]\n"),
+            out.contains("run=true\n")
+                && out.contains(&format!("count={}\n", SHARD_TARGET + 1))
+                && out.contains("slices=2\n")
+                && out.contains("shards=[\"0/2\",\"1/2\"]\n"),
             "{out}"
         );
     }

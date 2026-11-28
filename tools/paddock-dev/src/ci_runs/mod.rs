@@ -43,7 +43,7 @@ use client::Client;
 use paddock_cli::{CliError, Exit, Report};
 use std::path::PathBuf;
 
-const SERVER: &str = "https://dev.decryptology.net";
+pub(crate) const SERVER: &str = "https://dev.decryptology.net";
 
 /// Arguments of `ci cache-audit`.
 #[derive(Args)]
