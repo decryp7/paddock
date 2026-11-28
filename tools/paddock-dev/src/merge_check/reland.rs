@@ -15,9 +15,9 @@
 //! Every other finding (a file the re-land does not touch, a member that only looks like one, a revert `S` of something else) is
 //! left for a person; this never answers a finding it cannot tie. It reads and prints; it changes no merge.
 
-use super::git::{Git, short};
 use super::reverted_base::{resolve, subject_and_member, trailer_targets};
 use super::{Finding, Kind, Merge};
+use crate::git::{Git, short};
 use std::collections::HashSet;
 
 /// A commit of the member that re-lands.

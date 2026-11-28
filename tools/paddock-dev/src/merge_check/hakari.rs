@@ -8,8 +8,8 @@
 //! verified here.
 //! A tree without `crates/.config/hakari.toml` has nothing to check.
 
-use super::git::Git;
 use super::{Finding, Kind};
+use crate::git::Git;
 use paddock_proc::{Limits, command, run_bounded};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

@@ -55,7 +55,7 @@ fn the_shipped_file_parses_and_holds_its_invariants() {
         }
     }
     // the text a tool edits stays editable: the line `with_green_run` rewrites is there
-    let text = std::fs::read_to_string(root.join(super::config::FILE)).unwrap();
+    let text = std::fs::read_to_string(root.join(crate::registers::TEST_CACHE)).unwrap();
     assert!(
         with_green_run(&text, 1).is_ok(),
         "shadow-run --write can still add a run to the shipped file"

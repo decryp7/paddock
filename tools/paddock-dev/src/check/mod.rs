@@ -78,7 +78,7 @@ use record::{Precondition, RunRecord, Scope};
 use serde_json::{Value, json};
 use std::cell::OnceCell;
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::rc::Rc;
 use tree::Tree;
 
@@ -763,18 +763,9 @@ pub struct Args {
     pub out: Option<PathBuf>,
 }
 
-fn find_root(given: Option<PathBuf>) -> Result<PathBuf, CliError> {
-    if let Some(r) = given {
-        return Ok(r);
-    }
-    let cwd = std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder cannot be read: {e}.")))?;
-    let out = crate::input_hash::Exec::run(&crate::input_hash::Real, "git", &["rev-parse", "--show-toplevel"], &cwd, None)?;
-    Ok(Path::new(out.trim()).to_path_buf())
-}
-
 /// `./dev check run`: runs the checks and reports. Exit 5 (findings) when an error was found.
 pub fn command(args: Args) -> Result<Report, CliError> {
-    let root = find_root(args.root)?;
+    let root = crate::repo_root::repo_root(args.root.as_deref())?;
     let config = Config::load(&root, Some(&args.app)).map_err(CliError::failure)?;
     let opts = RunOptions {
         root,

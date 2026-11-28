@@ -302,11 +302,7 @@ pub fn command(a: &PlacesArgs) -> Result<Report, CliError> {
 /// it is set and not empty. A tool's state otherwise lives under the git common dir, which every worktree shares; the test harness
 /// sets every one of these to the test's own folder (`paddock_testkit::process::STATE_FOLDERS`, ER-14, ER-51).
 pub(crate) fn state_override(name: &str) -> Option<std::path::PathBuf> {
-    paddock_env::vars()
-        .find(|(k, _)| k == name)
-        .map(|(_, v)| v)
-        .filter(|v| !v.is_empty())
-        .map(std::path::PathBuf::from)
+    crate::git::state_override(name)
 }
 
 /// Test helper: an invented folder that is absolute on this platform, the path itself on Unix and on drive `C:` on Windows (`/srv`

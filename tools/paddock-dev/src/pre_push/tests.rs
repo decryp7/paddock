@@ -1413,7 +1413,7 @@ fn the_override_names_full_row_ids_and_is_announced() {
 /// A pushed commit is checked out on its own and removed after: a dirty main tree cannot change what is checked.
 #[test]
 fn a_pushed_commit_is_checked_out_in_a_throw_away_worktree_that_is_removed() {
-    use crate::plan_repo::git_text;
+    use crate::git::git_text;
     let d = tempfile::tempdir().unwrap();
     let main = d.path().join("main");
     std::fs::create_dir(&main).unwrap();
@@ -1498,7 +1498,7 @@ fn the_pre_push_folder_is_never_in_the_home_folder() {
 /// A crashed run's locked worktree is found and removed by the next run, a live one is left alone.
 #[test]
 fn a_leftover_locked_worktree_of_an_ended_run_is_swept_and_a_live_ones_is_kept() {
-    use crate::plan_repo::git_text;
+    use crate::git::git_text;
     let d = tempfile::tempdir().unwrap();
     let main = d.path().join("main");
     std::fs::create_dir(&main).unwrap();
@@ -1545,7 +1545,7 @@ fn extra_pushed_refs_are_not_measured_rows_and_never_passes() {
 /// drive) keeps its record, and a leftover of ours whose folder is gone is removed.
 #[test]
 fn the_sweep_never_drops_a_foreign_worktree_whose_folder_is_missing() {
-    use crate::plan_repo::git_text;
+    use crate::git::git_text;
     let d = tempfile::tempdir().unwrap();
     let main = d.path().join("main");
     std::fs::create_dir(&main).unwrap();
@@ -1602,7 +1602,7 @@ fn a_symlink_into_home_a_relative_path_and_a_tilde_are_refused() {
 mod known_commit {
     use super::super::known::{self, Evidence, Lookups};
     use super::super::{PrePushArgs, command_in, node_env_problem};
-    use crate::plan_repo::git_text;
+    use crate::git::git_text;
     use paddock_cli::Exit;
     use std::path::{Path, PathBuf};
 
@@ -1675,7 +1675,7 @@ mod known_commit {
 
     /// A pass of the push gate for `sha`, made the only way a pass is made: through `measure`.
     fn pass_for(r: &Path, sha: &str) -> paddock_cli::Outcome {
-        let subject = crate::pre_push::outcome::subject_of(r, Some(sha));
+        let subject = crate::subject::subject_of(r, Some(sha));
         paddock_cli::measure(
             paddock_cli::CheckId::new("pre-push"),
             subject,
@@ -2081,7 +2081,7 @@ fn a_missing_conformance_install_is_environment_not_ready_never_a_failure_or_pas
 mod base_choice {
     use super::super::known::Lookups;
     use super::super::{PrePushArgs, Pushed, command_in};
-    use crate::plan_repo::git_text;
+    use crate::git::git_text;
     use std::path::{Path, PathBuf};
 
     /// A new ref `w` at `tip` pushed to `remote`: the shape most tests here need.
@@ -2327,7 +2327,7 @@ impl Repo {
     }
 
     fn git(&self, args: &[&str]) -> String {
-        crate::plan_repo::git_text(&self.root, args).unwrap_or_else(|| panic!("git {args:?}"))
+        crate::git::git_text(&self.root, args).unwrap_or_else(|| panic!("git {args:?}"))
     }
 
     /// A commit that changes `file`, on the current branch; its sha.

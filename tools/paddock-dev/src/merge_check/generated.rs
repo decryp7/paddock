@@ -1,7 +1,7 @@
 //! Files that are regenerated, not merged: every detector skips them (one list, so the three cannot disagree). A file is
 //! generated when its name is on the list below or the repository marks it `linguist-generated` in `.gitattributes`.
 
-use super::git::Git;
+use crate::git::Git;
 use std::collections::HashSet;
 
 /// Whether the name alone says "regenerated": lock files (`Cargo.lock` among them, by the `.lock` suffix), the notices file, drawio sources and generated Rust.

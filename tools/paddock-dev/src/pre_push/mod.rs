@@ -47,8 +47,8 @@ pub mod reuse;
 pub mod row_timings;
 pub mod train_split;
 
+use crate::git::{git_text, state_dir};
 use crate::plan::{Request, plan_with_graph};
-use crate::plan_repo::git_text;
 use crate::throttle::{QUEUE_STALL, ROW_CAP};
 use clap::Args;
 use exec::{Kind, RealExec, Row, RunOpts, heavy_limit, run_all_limited, workers};
@@ -591,7 +591,7 @@ fn command_in(
     );
     // What the run is about (the commit and its tree) is the evidence of every pass, so it is known before the first gate runs.
     let checked = pushed.first().cloned().or_else(|| if clean { head_sha.clone() } else { None });
-    let subject = outcome::subject_of(&root, checked.as_deref());
+    let subject = crate::subject::subject_of(&root, checked.as_deref());
     // A test's executor runs no real gate, so it never reads or writes the machine's records.
     let reuse = if given.is_none() {
         reuse_for(&work, &state, &env, &graph.cargo, args.no_reuse)
@@ -760,20 +760,6 @@ fn accepted_ids(option: &[String], env: &HashMap<String, String>) -> Vec<String>
         .map(|v| v.split(',').map(|w| w.trim().to_string()).collect::<Vec<_>>())
         .unwrap_or_default();
     option.iter().cloned().chain(from_env).filter(|w| !w.is_empty()).collect()
-}
-
-/// The folder for this checkout's gate logs and override log: `<git common dir>/paddock-pre-push`.
-///
-/// `PADDOCK_PREPUSH_STATE` replaces it (a test's own folder, so it never waits for a build-folder lock a real gate of this checkout holds,
-/// ER-14, ER-51); the run, the test cache and the slow-row records all read it through here.
-pub(crate) fn state_dir(root: &Path) -> PathBuf {
-    if let Some(own) = crate::places::state_override("PADDOCK_PREPUSH_STATE") {
-        return own;
-    }
-    git_text(root, &["rev-parse", "--path-format=absolute", "--git-common-dir"])
-        .map(|t| PathBuf::from(t.trim()))
-        .unwrap_or_else(|| root.join(".git"))
-        .join("paddock-pre-push")
 }
 
 /// The most of git's pre-push input that is read (a push of thousands of refs is not a pre-push gate's case).
@@ -1465,9 +1451,9 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
             .and_then(|t| t.trim().parse::<u32>().ok())
             .unwrap_or(0)
     };
-    // File names through the shared reader (`merge_check::git::Git`): NUL-separated, never quoted, both names of a move
+    // File names through the shared reader (`git::Git`): NUL-separated, never quoted, both names of a move
     // (`--no-renames`), so a file moved out of a workspace still plans that workspace and a non-ASCII path is the real one.
-    let reader = crate::merge_check::git::Git::new(root);
+    let reader = crate::git::Git::new(root);
     let names = |args: &[&str]| {
         reader
             .paths(args)

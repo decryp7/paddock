@@ -46,11 +46,11 @@ pub struct Register {
 /// The registers tools write, declared once. A path is the writer's own constant where there is one.
 pub const TOOL_WRITTEN: [Register; 7] = [
     Register {
-        path: crate::test_cache::config::FILE,
+        path: crate::registers::TEST_CACHE,
         writer: "`./dev ci test-cache shadow-run --write` (adds to [switch] green_runs)",
     },
     Register {
-        path: crate::ci_runs::dispatch_guards::REGISTER,
+        path: crate::registers::DISPATCH_GUARDS,
         writer: "`./dev ci guard-record` (a guard's first green run)",
     },
     Register {
@@ -62,7 +62,7 @@ pub const TOOL_WRITTEN: [Register; 7] = [
         writer: "`./dev escape` (appends a nightly row)",
     },
     Register {
-        path: crate::ci_runs::fix_items::LESSONS,
+        path: crate::registers::LESSONS,
         writer: "`./dev ci fix-items` (appends a run's fix items)",
     },
     Register {

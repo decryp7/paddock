@@ -14,9 +14,9 @@
 //!
 //! It refuses a dirty tree, a merge already in progress and a detached HEAD before it changes anything.
 
-use super::git::{Git, short};
 use super::reverted_base::resolve;
 use super::{Request, trailers};
+use crate::git::{Git, short};
 use paddock_cli::{CliError, Report};
 use paddock_proc::{Limits, run_bounded};
 use serde_json::json;
@@ -41,7 +41,7 @@ pub fn command(root: Option<&Path>, member: &str, opts: &Options) -> Result<Repo
         return Err(CliError::usage("--old-base-anyway needs a reason.")
             .with_hint("Say why, for example --old-base-anyway \"hotfix, the newer main work is unrelated\"."));
     }
-    let root = crate::gates::command::repo_root(root)?;
+    let root = crate::repo_root::repo_root(root)?;
     let git = Git::new(&root);
     let step = |why: String, next: &str| CliError::failure(format!("::error::merge member: {why}. Next step: {next}"));
     let train = git

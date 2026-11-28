@@ -19,10 +19,10 @@
 //! member's own CI trial ([`trial_dispatch`]: the member's affected jobs on the train, the run id printed; `--no-trial "<reason>"`
 //! skips it). The command changes no file of the checkout; the trial pushes only the scratch ref `trial/<member>`.
 
-use super::git::{Git, short};
 use super::reverted_base::live_for_member;
 use super::static_rows::{self, StaticGates};
 use super::trial_dispatch::{self, Dispatcher, Pusher};
+use crate::git::{Git, short};
 use paddock_cli::{CliError, Report};
 use serde_json::json;
 use std::path::Path;
@@ -106,7 +106,7 @@ fn command_with(
         return Err(CliError::usage("--no-static needs a reason.")
             .with_hint("Say why, for example --no-static \"docs-only sync, the rows ran on the last tip\"."));
     }
-    let root = crate::gates::command::repo_root(root)?;
+    let root = crate::repo_root::repo_root(root)?;
     let git = Git::new(&root);
     let step = |why: String, next: &str| CliError::failure(format!("::error::merge sync-member: {why}. Next step: {next}"));
     let name = member_name(&git, member).map_err(|e| step(e, "check out the member's branch, or pass --member <branch>"))?;

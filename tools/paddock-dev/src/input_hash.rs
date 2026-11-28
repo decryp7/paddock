@@ -10,6 +10,7 @@
 use paddock_cli::{CliError, Report};
 use paddock_proc::{Limits, command as proc_command, run_bounded};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -380,6 +381,22 @@ pub fn command() -> Result<Report, CliError> {
     ))
 }
 
+/// SHA-256 over length-prefixed fields, as lower-case hex: two field lists differ in the key whenever they differ in any field or in
+/// where the fields split.
+pub fn digest(fields: &[String]) -> String {
+    let mut h = Sha256::new();
+    for f in fields {
+        h.update((f.len() as u64).to_le_bytes());
+        h.update(f.as_bytes());
+    }
+    hex(&h.finalize())
+}
+
+/// Lower-case hex of `bytes`.
+pub fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -387,6 +404,12 @@ mod tests {
 
     /// The child echoes more than a pipe holds: its output must be read while it runs, or it blocks until the limit.
     #[cfg(unix)]
+    #[test]
+    fn the_digest_depends_on_where_fields_split() {
+        assert_ne!(digest(&["ab".into(), "c".into()]), digest(&["a".into(), "bc".into()]));
+        assert_eq!(digest(&["a".into()]), digest(&["a".into()]));
+    }
+
     #[test]
     fn a_run_with_input_reads_a_large_reply_while_the_child_runs() {
         let bytes = vec![b'x'; 1 << 20];
