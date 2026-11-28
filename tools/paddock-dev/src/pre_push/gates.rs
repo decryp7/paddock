@@ -444,7 +444,7 @@ fn plan_rows(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
     out.push(conformance(facts));
     out.push(conformance_tests(plan, facts));
     out.extend(commit_lint(change));
-    out.push(member_audits(facts));
+    out.push(member_audits(change, facts));
     out.push(job_model(facts));
     out.extend(member_tests(plan, change, facts));
     let reaches_pitwall = plan["apps"].as_array().is_some_and(|a| a.iter().any(|x| x == "pitwall"));
@@ -689,20 +689,49 @@ pub fn split_audit_filter(filter: &str) -> Option<(String, String)> {
     None
 }
 
+/// The only paths no audit reads, declared once: prose and images of the design record. Every audit that scans the tree
+/// (`safe_remove_lint`, `cargo_target_lint`, the live checks, the plan against the real graph, the registers) reads code, config,
+/// registers or workflows, so a change outside this list can reach one. A path is added here only with the audit's test showing it.
+pub const AUDIT_BLIND: &[&str] = &[
+    "docs/adr/",
+    "docs/research/",
+    "docs/plans/",
+    "docs/planned/",
+    "docs/wiki/",
+    "docs/images/",
+];
+
+/// The nextest filter of a developer's push: the profile's audits minus the whole-repository cost classes (`graph_`, `tree_`), by the
+/// one definition of the classes ([`crate::test_cost::Class`], ER-22). The profile's `default-filter` still applies (nextest ANDs them).
+pub fn audit_dev_filter() -> String {
+    let classes: Vec<String> = crate::test_cost::Class::ALL.iter().map(|c| c.filter()).collect();
+    format!("not ({})", classes.join(" | "))
+}
+
+/// True when the change is known (a base is set), has files, and every file is under [`AUDIT_BLIND`]: then no audit can see it.
+/// An unknown base or an empty list is never blind (fail closed, ER-33).
+fn audit_blind(change: &Change) -> bool {
+    change.base.is_some() && !change.files.is_empty() && change.files.iter().all(|f| AUDIT_BLIND.iter().any(|p| f.starts_with(p)))
+}
+
 /// The audits of `tools/paddock-dev/tests/it`: tests that read the whole tree (the allow-list parity, the cargo-target lint, the
 /// parity corpus, the plan against the tree, the golden checks). A member's own touched-file tests never see a clash between two
 /// members' changes in them; on the merged tree they do (train 13: local-sccache's audits against golden-checked-when-made's code, the
 /// allow-list parity against C135, the parity corpus against test-env-builder; each first showed in the train-wide nextest run, ER-8).
 ///
-/// Runs only when the push gate is the member gate (`./dev merge check --gates` passes `--member-gate`), whatever changed (ER-41); a
-/// developer's push skips it with a reason, as the user wants no extra minutes there (2026-11-17). Blocking from the start: the audits are established tests, not a new check (user, 2026-11-17). `--no-tests=fail`
-/// makes a filter that selects nothing a failure, never a pass (ER-33); `RUSTUP_AUTO_INSTALL=0` stops a probe from installing a
-/// toolchain (ER-45). Measured in docs/benchmarks.md, "Member audits in the member gate".
-fn member_audits(facts: &Facts) -> Planned {
-    if !facts.member_gate {
+/// Runs in the member gate whatever changed (ER-41), and in a developer's push unless every changed file is prose no audit reads
+/// ([`AUDIT_BLIND`]): the audits scan the whole tree (the tool's sources, the shared crates, conformance, the registers, the
+/// workflows), so a push that skipped them let `safe_remove_lint` fail only in the train, twice on 2026-11-28 (ER-9, ER-53).
+/// A developer's push runs the source audits only ([`audit_dev_filter`]: not the `graph_` and `tree_` cost classes, which are
+/// about 90% of the 105 s the profile takes warm and are the planner's own reading of the real graph); the member gate runs all of
+/// them (docs/benchmarks.md, "Member audits in a developer's push"). Blocking: the audits are established tests, not a new check
+/// (user, 2026-11-17). `--no-tests=fail` makes a filter that selects nothing a
+/// failure, never a pass (ER-33); `RUSTUP_AUTO_INSTALL=0` stops a probe from installing a toolchain (ER-45).
+fn member_audits(change: &Change, facts: &Facts) -> Planned {
+    if !facts.member_gate && audit_blind(change) {
         return Planned::Skip {
             id: "member-audits".into(),
-            reason: "they run in the member gate of `./dev merge check --gates` (`--member-gate`), not in a developer's push".into(),
+            reason: "every changed file is prose no audit reads (docs/adr, research, plans, planned, wiki, images); the member gate runs them whatever changed".into(),
         };
     }
     let mut g = Gate {
@@ -729,6 +758,9 @@ fn member_audits(facts: &Facts) -> Planned {
     };
     if let Some(dir) = dir {
         g.args.splice(2..2, ["--config".to_string(), cargo_target::config_value(&dir)]);
+    }
+    if !facts.member_gate {
+        g.args.extend(["-E".to_string(), audit_dev_filter()]);
     }
     Planned::Run(g)
 }
