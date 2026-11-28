@@ -13,8 +13,7 @@
 //!   first): that work is not this member's to re-apply.
 //!
 //! Run it AFTER the merge too: with the train in HEAD (the sync tip), it also runs the fast static rows on that tip
-//! ([`static_rows`]: conformance, the gate register, Clippy and the Windows Clippy of the workspaces the member touches, the goldens its change reaches and the
-//! `overlap-tests` row (the tests of the packages the member and main both changed, ER-21), through
+//! ([`static_rows`]: conformance, the gate register, Clippy and the Windows Clippy of the workspaces the member touches, through
 //! `check --pre-push --only ... --base <train>`), prints each row, and a failing or unmeasured row is exit 5 or 6 with one `::error::`
 //! ("fix on the member, then re-sync"). `--no-static "<reason>"` skips them and logs the reason. Once they pass it dispatches the
 //! member's own CI trial ([`trial_dispatch`]: the member's affected jobs on the train, the run id printed; `--no-trial "<reason>"`
@@ -217,21 +216,7 @@ fn command_with(
     let step = match (no_static, after) {
         (Some(reason), _) => static_rows::skipped(reason.trim()),
         (None, false) => static_rows::not_yet(train),
-        (None, true) => {
-            // The member's fork point from main: the merge base of its pre-merge tip and the train. Main's side of the overlap is
-            // `fork..train`, the member's is the sync tip's change against the train (`check --pre-push --base`).
-            let fork = git
-                .text(&["merge-base", &basis, &train_tip])
-                .map(|t| t.trim().to_string())
-                .and_then(|t| {
-                    if t.is_empty() {
-                        Err("git printed no merge base".to_string())
-                    } else {
-                        Ok(t)
-                    }
-                });
-            static_rows::interpret(rows.run(&root, &train_tip, &fork), short(&train_tip))
-        }
+        (None, true) => static_rows::interpret(rows.run(&root, &train_tip), short(&train_tip)),
     };
     text.extend(step.text.iter().cloned());
     // The trial follows the static rows: only a sync tip they passed (or that `--no-static` let through, logged) is worth a CI run.

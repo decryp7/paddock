@@ -148,8 +148,6 @@ pub struct Facts {
     /// The ids of the golden entries of `docs/generators.toml` the change reaches ([`crate::generators::golden_due_in`]), or why they
     /// cannot be told (the `goldens` row is then not measured, never a pass).
     pub goldens: Result<Vec<String>, String>,
-    /// The packages both the member and main changed, when `merge sync-member` asked (`--overlap-since`; [`super::overlap`]).
-    pub overlap: super::overlap::Overlap,
 }
 
 /// The reason of every row an inactive app's set leaves out: a skip with this reason is never a pass ([`super::render_timed`]
@@ -213,7 +211,7 @@ pub const ROW_SET: &[&str] = &[
 
 /// The id prefixes of the rows planned per workspace : they
 /// are not in [`ROW_SET`], and the planner's test tells the fixed rows from these.
-pub const PER_WORKSPACE_PREFIXES: &[&str] = &["fmt ", "lockfile ", "clippy ", "clippy-windows ", "tests ", "overlap-tests "];
+pub const PER_WORKSPACE_PREFIXES: &[&str] = &["fmt ", "lockfile ", "clippy ", "clippy-windows ", "tests "];
 
 /// Workspaces whose lints are not a push gate: they have a CI job of their own that is not part of a branch run.
 const OWN_JOB: &[&str] = &["/fuzz", "/templates/"];
@@ -453,7 +451,6 @@ fn plan_rows(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
     out.push(member_audits(change, facts));
     out.push(job_model(facts));
     out.push(goldens(facts));
-    out.extend(overlap_tests(facts));
     out.extend(member_tests(plan, change, facts));
     let reaches_pitwall = plan["apps"].as_array().is_some_and(|a| a.iter().any(|x| x == "pitwall"));
     if reaches_pitwall && app_inactive(facts, "pitwall") {
@@ -790,69 +787,6 @@ fn reached_filter<'a>(ws: &str, facts: &'a Facts) -> &'a str {
     facts.test_filters.get(ws).map(String::as_str).unwrap_or("")
 }
 
-/// One workspace's host tests through the test cache (`ci test-cache run`), narrowed by `filter` (empty: the whole workspace): the one
-/// builder of the `tests <ws>` and `overlap-tests <ws>` rows (ER-22).
-fn tests_gate(id: String, ws: &str, facts: &Facts, filter: &str, next: String) -> Gate {
-    let mut g = Gate {
-        heavy: true,
-        need: Need::Tool("cargo-nextest".into()),
-        env: vec![("RUSTUP_AUTO_INSTALL".into(), "0".into())],
-        ci_env: true,
-        ..gate(id, "", "", &[], 5, next)
-    };
-    g.args = test_cache_args(ws, facts, filter);
-    g.build_dir = Some(build_dir(facts, ws, None));
-    g
-}
-
-/// The `overlap-tests` rows (ER-21: three times a member green alone broke on the combined tree): `merge sync-member` names the
-/// packages the member and main both changed ([`Facts::overlap`]), and the sync tip runs exactly those packages' tests, one row per
-/// workspace, on this host. No package in common skips the row with the reason; an overlap that could not be told is not measured
-/// (ER-33), never a pass. A developer's push does not ask, so it skips. Report-only until its first green run on a real sync is
-/// recorded in docs/benchmarks.md, "Overlap tests row in sync-member" (ER-41): a failing row is a finding from the first run, as the
-/// tests are CI's own; the time is what is measured.
-fn overlap_tests(facts: &Facts) -> Vec<Planned> {
-    use super::overlap::Overlap;
-    let id = || "overlap-tests".to_string();
-    match &facts.overlap {
-        Overlap::NotAsked => vec![Planned::Skip {
-            id: id(),
-            reason: "only `./dev merge sync-member` asks for it (`--overlap-since`): the tests of the packages the member and main both changed".into(),
-        }],
-        Overlap::Unknown(why) => vec![Planned::NotMeasured {
-            id: id(),
-            reason: format!("the packages both the member and main changed could not be told: {why}"),
-            next: "run the tests of the packages both sides changed yourself (`./dev plan <fork point> --explain` and the member's plan name them); this is not a finding in your change".into(),
-        }],
-        Overlap::Packages(by_ws) if by_ws.is_empty() => vec![Planned::Skip {
-            id: id(),
-            reason: "the member and main changed disjoint packages: nothing both of them touched".into(),
-        }],
-        Overlap::Packages(by_ws) => by_ws
-            .iter()
-            .map(|(ws, names)| {
-                if let Some(reason) = inactive_app(facts, ws).map(|_| inactive_reason(app_of_workspace(ws).unwrap_or(ws))) {
-                    return Planned::Skip { id: format!("overlap-tests {ws}"), reason };
-                }
-                let list = names.iter().cloned().collect::<Vec<_>>();
-                dev_run(
-                    facts,
-                    tests_gate(
-                        format!("overlap-tests {ws}"),
-                        ws,
-                        facts,
-                        &crate::plan_ci::package_filterset(&list),
-                        format!(
-                            "a test of {} fails on the sync tip (the member merged with main): fix it on the member, then re-sync",
-                            list.join(", ")
-                        ),
-                    ),
-                )
-            })
-            .collect(),
-    }
-}
-
 /// The member gate's tests (user, 2026-11-25): the full nextest `ci` profile of every Cargo workspace the member touches (a workspace
 /// with a changed file of its own, documentation aside), on this host (`tests <ws>`). The Linux tests, with the orphan guardian's
 /// acting tests as uid 65534, are CI's Linux jobs on the Linux runner: no VM or container starts on this Mac (user, 2026-11-26;
@@ -887,16 +821,23 @@ fn member_tests(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
         return out;
     }
     for ws in &candidates {
-        out.push(dev_run(
-            facts,
-            tests_gate(
+        let mut g = Gate {
+            heavy: true,
+            need: Need::Tool("cargo-nextest".into()),
+            env: vec![("RUSTUP_AUTO_INSTALL".into(), "0".into())],
+            ci_env: true,
+            ..gate(
                 format!("tests {ws}"),
-                ws,
-                facts,
-                reached_filter(ws, facts),
+                "",
+                "",
+                &[],
+                5,
                 "fix the test it names (its failed tests and first panic are above), then re-run the member gate".into(),
-            ),
-        ));
+            )
+        };
+        g.args = test_cache_args(ws, facts, reached_filter(ws, facts));
+        g.build_dir = Some(build_dir(facts, ws, None));
+        out.push(dev_run(facts, g));
     }
     out
 }
