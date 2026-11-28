@@ -17,6 +17,8 @@ import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+/** The spawn limit of the one `cargo fetch` (a hang detector, ER-12). */
+const FETCH_LIMIT_MS = 120_000;
 /** The Apple triples the probe resolves (both resolve the same cfgs today; a cfg on the architecture would differ). */
 export const MACOS_TARGETS = ['aarch64-apple-darwin', 'x86_64-apple-darwin'];
 
@@ -223,13 +225,21 @@ function reviewedEmptyFixture(p, rel) {
  * `allFeatures` is off for crates/. Needs a Cargo.lock (--locked: a lock that would change is a broken check).
  */
 export function probeWorkspace(dir, { spawn = spawnSync, extra = [], targets = MACOS_TARGETS, allFeatures = true, env = process.env } = {}) {
-  const run = (args) => spawn('cargo', [...args, ...extra], { cwd: dir, encoding: 'utf8', maxBuffer: 256 << 20, timeout: 900_000, env });
+  const run = (args, opts = {}) => spawn('cargo', [...args, ...extra], { cwd: dir, encoding: 'utf8', maxBuffer: 256 << 20, timeout: 900_000, env, ...opts });
   const fail = (what, r) => ({ broken: `${what}: ${r.error ? r.error.message : `exit ${r.status}: ${String(r.stderr ?? '').trim().split('\n').slice(-3).join(' | ')}`}` });
   const feat = allFeatures ? ['--all-features'] : [];
-  for (const t of targets) {
-    const f = run(['fetch', '--locked', '--target', t]);
-    if (f.error || f.status !== 0) return fail(`cargo fetch --target ${t} failed`, f);
+  // One fetch for every target (cargo takes --target more than once), with cargo's own network limits: a retry count and the
+  // low-speed window of one HTTP request (CARGO_NET_RETRY, CARGO_HTTP_TIMEOUT: https://doc.rust-lang.org/cargo/reference/config.html#nethttp).
+  // A caller's own value wins. Measured on apps/debrief (docs/benchmarks.md): a cold fetch takes 13 to 18 s, so the 120 s
+  // spawn limit is a hang detector with about 7 times margin (ER-12); the old 900 s limit held a dead network for 15 minutes.
+  const fetched = run(['fetch', '--locked', ...targets.flatMap((t) => ['--target', t])], {
+    env: { CARGO_NET_RETRY: '1', CARGO_HTTP_TIMEOUT: '20', ...env },
+    timeout: FETCH_LIMIT_MS,
+  });
+  if (fetched.error?.code === 'ETIMEDOUT' || (fetched.status !== 0 && /spurious network error|transfer too slow|Couldn't resolve host|timed out/i.test(String(fetched.stderr ?? '')))) {
+    return { broken: 'cargo fetch: network timeout talking to the registry (crates.io, dev.decryptology.net); retry the job' };
   }
+  if (fetched.error || fetched.status !== 0) return fail(`cargo fetch --target ${targets.join(' --target ')} failed`, fetched);
   const r = run(['metadata', '--locked', '--format-version', '1', ...feat]);
   if (r.error || r.status !== 0) return fail('cargo metadata failed', r);
   let meta;
