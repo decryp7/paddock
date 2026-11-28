@@ -84,6 +84,22 @@ uses it, results in
 
 ## Results of shared tooling
 
+### 2026-11-28, the golden row in the push gate (fix/prepush-golden-rows)
+
+- **Commit:** base a3d3d98ee, this branch (before the commit: the working tree of the branch).
+- **Machine:** Mac mini, 14 cores, macOS 27.2, debug test build through sccache, 1-minute load 15 to 17 (other agents).
+- **Command:** `./dev gen check --only ci-run-golden,planner-golden,ci-host-golden` (what the `goldens` row runs for a change that reaches all three), one cold and one warm run; the per-entry times are gen check's own "built in" and "current in" lines.
+- **Numbers:**
+
+  | Entry (tests) | Build, cold | Run, cold | Build, warm | Run, warm |
+  |---|---|---|---|---|
+  | `ci-run-golden` (1 test, `--lib`) | 52.9 s | 49.5 s | 0.7 s | 1.1 s |
+  | `planner-golden` (`golden::`, `plan_graph_ci::`, `repo_graph_net::graph_recorded_rule_goldens`, `--test it`) | 18.1 s | 38.0 s | 0.3 s | 18.6 s |
+  | `ci-host-golden` (`build_jobs_golden::`, `host_steps_golden::`) | 0.2 s | 1.0 s | 0.2 s | 1.0 s |
+  | Whole command | 2 min 40 s | | 23 s | |
+
+- **Notes:** the golden tests are cheap to run (about 21 s warm for all three, 1.1 s for the one a `.gitea/actions` change reaches); what costs is compiling the test profile of paddock-dev after a source change (cold 71 s, the first run in a fresh build folder). The row runs only the entries a change reaches (`ci-run-golden` alone for an action or workflow edit) and is skipped with a reason for any other change. The cold run of `ci-run-golden` took 49.5 s for a test that takes 1 s in nextest: it is the first link and start of the lib test binary, not the test. Plan time: the repository model is built for the `reads` of `ci-run-golden` only when no path already marks it (an action or workflow edit is marked by a path, so no model is built); for any other change it costs 1.6 s on top of a 2.1 s `./dev check --pre-push --dry-run` (3.6 s and 4.0 s with it, 2.07 s and 2.09 s with `reads` emptied, same tree, two runs each).
+
 ### 2026-11-28, the queue model in memory (fix/throttle-queue-model-windows)
 
 - **Commit:** base e7e278361 (the model on the real lock folder) against this branch (the model in memory, 12 seeds on the real folder).

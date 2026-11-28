@@ -42,6 +42,7 @@ fn facts() -> Facts {
         test_filters: Default::default(),
         nextest_config: Default::default(),
         reached: Default::default(),
+        goldens: Ok(Vec::new()),
     }
 }
 
@@ -293,7 +294,9 @@ fn the_row_set_of_a_pass_record_is_every_fixed_row_the_planner_can_plan() {
         ranges: vec!["abc..HEAD".into()],
         ..Change::default()
     };
-    let planned = plan_gates(&plan(), &c, &facts());
+    let mut f = facts();
+    f.goldens = Ok(vec!["ci-run-golden".into()]);
+    let planned = plan_gates(&plan(), &c, &f);
     let mut fixed: Vec<String> = ids(&planned)
         .into_iter()
         .filter(|id| !super::gates::PER_WORKSPACE_PREFIXES.iter().any(|p| id.starts_with(p)))
@@ -302,6 +305,61 @@ fn the_row_set_of_a_pass_record_is_every_fixed_row_the_planner_can_plan() {
     let mut want: Vec<String> = super::gates::ROW_SET.iter().map(|s| s.to_string()).collect();
     want.sort();
     assert_eq!(fixed, want, "add the new row to gates::ROW_SET");
+}
+
+/// The registry of the real tree (`docs/generators.toml`): the golden row's inputs are declared there once, so a test of the row reads
+/// them from it and not from a hand list (ER-42).
+fn real_registry() -> crate::generators::registry::Registry {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    crate::generators::load(&root).unwrap_or_else(|e| panic!("{e:?}"))
+}
+
+/// The golden row (recurring class, ER-21: a change altered what a golden records, the push passed because it ran no golden test, and a
+/// CI trial went red three times in two days): a change to a file a golden reads plans `./dev gen check --only <the goldens it reaches>`,
+/// and a change nothing reaches skips the row with the reason. The inputs are read from the registry, not typed here.
+#[test]
+fn a_change_to_a_file_a_golden_reads_plans_the_golden_row_and_any_other_change_skips_it() {
+    let reg = real_registry();
+    for (file, golden) in [
+        (".gitea/actions/setup-rust/action.yml", "ci-run-golden"),
+        ("tools/paddock-dev/src/ci_run/mod.rs", "ci-run-golden"),
+        ("tools/paddock-dev/src/plan.rs", "planner-golden"),
+        ("docs/repo-graph.toml", "planner-golden"),
+        ("tools/paddock-dev/src/ci_host/mod.rs", "ci-host-golden"),
+    ] {
+        let mut f = facts();
+        f.goldens = Ok(reg.golden_due(&[file.to_string()], &BTreeSet::new()));
+        let planned = plan_gates(&plan(), &change(&[file]), &f);
+        let row = run_gates(&planned)
+            .into_iter()
+            .find(|g| g.id == "goldens")
+            .unwrap_or_else(|| panic!("{file} plans no goldens row: {:?}", ids(&planned)));
+        assert_eq!(&row.args[..2], ["gen", "check"], "{file}: {:?}", row.args);
+        assert!(
+            row.args.iter().any(|a| a.split(',').any(|id| id == golden)),
+            "{file} must run {golden}: {:?}",
+            row.args
+        );
+    }
+    let mut f = facts();
+    f.goldens = Ok(reg.golden_due(&["docs/x.md".to_string()], &BTreeSet::new()));
+    let planned = plan_gates(&plan(), &change(&["docs/x.md"]), &f);
+    assert!(
+        planned
+            .iter()
+            .any(|p| matches!(p, Planned::Skip { id, reason } if id == "goldens" && reason.contains("golden"))),
+        "{:?}",
+        ids(&planned)
+    );
+    // A model that could not be asked is not a pass: the row says so (ER-33).
+    f.goldens = Err("the model could not be built".into());
+    let planned = plan_gates(&plan(), &change(&["docs/x.md"]), &f);
+    assert!(
+        planned
+            .iter()
+            .any(|p| matches!(p, Planned::NotMeasured { id, .. } if id == "goldens")),
+        "{planned:?}"
+    );
 }
 
 /// The shared-crate dependency guard runs when a manifest, a lockfile, the hack config or the pins file changed, with `./dev locks guard`
