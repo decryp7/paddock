@@ -26,6 +26,11 @@
  "cargoOnly": [
   "app:x"
  ],
+ "gradePackages": {
+  "apps/x/app/src-tauri": [
+   "x"
+  ]
+ },
  "why": {
   "app:x": [
    "apps/x/app/src-tauri/src/main.rs"

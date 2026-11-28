@@ -30,6 +30,32 @@ pub struct History {
     old: Option<PathBuf>,
 }
 
+/// One line of the file: epoch seconds, milliseconds, the row key.
+pub type Line = (u64, u64, String);
+
+/// The lines that stay (the pure core of [`History::record`], oldest first): per row the newest [`KEEP_PER_ROW`], then overall the newest
+/// [`MAX_LINES`]. `lines` is in file order, oldest first.
+pub fn trimmed(lines: Vec<Line>) -> Vec<Line> {
+    let mut seen: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    let mut keep = vec![true; lines.len()];
+    for (i, l) in lines.iter().enumerate().rev() {
+        let n = seen.entry(l.2.as_str()).or_insert(0);
+        *n += 1;
+        if *n > KEEP_PER_ROW {
+            keep[i] = false;
+        }
+    }
+    let mut kept: Vec<Line> = lines
+        .into_iter()
+        .zip(keep)
+        .filter_map(|(l, k)| k.then_some(l))
+        .collect();
+    if kept.len() > MAX_LINES {
+        kept.drain(..kept.len() - MAX_LINES);
+    }
+    kept
+}
+
 /// A key made safe for one line of the file: no tab or line break, bounded.
 pub fn clean_key(key: &str) -> String {
     let mut out: String = key
@@ -76,7 +102,7 @@ impl History {
         &self.path
     }
 
-    fn read(&self) -> Vec<(u64, u64, String)> {
+    fn read(&self) -> Vec<Line> {
         let path = match &self.old {
             Some(old) if !self.path.exists() => old,
             _ => &self.path,
@@ -125,24 +151,7 @@ impl History {
         }
         let mut lines = self.read();
         lines.push((epoch, (secs * 1000.0).round() as u64, key));
-        // Per row first (newest KEEP_PER_ROW), then overall (newest MAX_LINES), both oldest-first.
-        let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-        let mut keep = vec![true; lines.len()];
-        for (i, l) in lines.iter().enumerate().rev() {
-            let n = seen.entry(l.2.clone()).or_insert(0);
-            *n += 1;
-            if *n > KEEP_PER_ROW {
-                keep[i] = false;
-            }
-        }
-        let mut kept: Vec<_> = lines
-            .into_iter()
-            .zip(keep)
-            .filter_map(|(l, k)| k.then_some(l))
-            .collect();
-        if kept.len() > MAX_LINES {
-            kept.drain(..kept.len() - MAX_LINES);
-        }
+        let kept = trimmed(lines);
         let body: String = kept
             .iter()
             .map(|(e, ms, k)| format!("{e}\t{ms}\t{k}\n"))
