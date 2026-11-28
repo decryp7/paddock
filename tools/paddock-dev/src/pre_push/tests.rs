@@ -43,6 +43,7 @@ fn facts() -> Facts {
         nextest_config: Default::default(),
         reached: Default::default(),
         goldens: Ok(Vec::new()),
+        overlap: Default::default(),
     }
 }
 
@@ -1642,6 +1643,7 @@ mod known_commit {
             all_apps: false,
             accept_not_measured: vec![],
             no_reuse: false,
+            overlap_since: None,
             set: Default::default(),
             cancel_ci_run: None,
             priority: Default::default(),
@@ -2291,6 +2293,7 @@ mod base_choice {
             all_apps: false,
             accept_not_measured: vec![],
             no_reuse: false,
+            overlap_since: None,
             set: Default::default(),
             cancel_ci_run: None,
             priority: Default::default(),
@@ -3569,6 +3572,32 @@ mod only_selection {
         assert_eq!(select_rows(rows(), &[]).unwrap().len(), 3, "no selector keeps every row");
     }
 
+    /// A docs-only sync tip plans no `clippy` row (nothing reaches a Cargo workspace): the bare kind `clippy` is a known per-workspace row, so
+    /// it becomes a skip with the reason and the other selected rows still run (train ac: it was "not measured" and the integrator
+    /// had to pass `--no-static`). A typo, a whole name of an unplanned workspace and an empty plan stay errors.
+    #[test]
+    fn a_known_row_kind_that_nothing_reaches_is_a_skip_with_a_reason_and_the_others_still_run() {
+        let got = select_rows(rows(), &["fmt".into(), "tests".into(), "overlap-tests".into()]).unwrap();
+        let ids: Vec<String> = got
+            .iter()
+            .map(|r| match r {
+                Planned::Skip { id, .. } => id.clone(),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(ids, ["fmt", "tests", "overlap-tests"]);
+        let reason = match &got[1] {
+            Planned::Skip { reason, .. } => reason.clone(),
+            _ => unreachable!(),
+        };
+        assert!(reason.contains("no `tests` row") && reason.contains("nothing"), "{reason}");
+        assert!(select_rows(rows(), &["clipy".into()]).is_err(), "a typo is still an error");
+        assert!(
+            select_rows(rows(), &["clippy nosuch".into()]).is_err(),
+            "a whole name that matches nothing is still an error"
+        );
+    }
+
     #[test]
     fn a_selection_that_matches_no_row_is_an_error_naming_it_and_the_valid_rows_never_an_empty_pass() {
         let e = select_rows(rows(), &["no such gate".into()]).unwrap_err();
@@ -4035,4 +4064,97 @@ fn the_rows_that_judge_approvals_carry_the_stage_of_the_run() {
         assert_eq!(stage_of(false, id).as_deref(), Some("branch-push"), "{id}: a push");
         assert_eq!(stage_of(true, id).as_deref(), Some("member-gate"), "{id}: the member gate");
     }
+}
+
+// ---- the overlap-tests row of `merge sync-member` (ER-21: green alone, broken with main) ----
+
+fn with_overlap(o: super::overlap::Overlap) -> Facts {
+    Facts { overlap: o, ..facts() }
+}
+
+fn overlap_of(ws: &str, names: &[&str]) -> super::overlap::Overlap {
+    super::overlap::Overlap::Packages(std::collections::BTreeMap::from([(
+        ws.to_string(),
+        names.iter().map(|n| n.to_string()).collect(),
+    )]))
+}
+
+fn overlap_rows(planned: &[Planned]) -> Vec<&Planned> {
+    planned.iter().filter(|p| id_of(p).starts_with("overlap-tests")).collect()
+}
+
+fn id_of(p: &Planned) -> &str {
+    match p {
+        Planned::Run(g) => &g.id,
+        Planned::Skip { id, .. } | Planned::NotMeasured { id, .. } | Planned::Broken { id, .. } => id,
+    }
+}
+
+/// Member and main both changed package X: the sync tip plans the host tests of X, narrowed to it, through the test cache.
+#[test]
+fn a_package_both_sides_changed_plans_its_overlap_tests_narrowed_to_it() {
+    let planned = plan_gates(
+        &plan(),
+        &change(&["crates/paddock-proc/src/lib.rs"]),
+        &with_overlap(overlap_of("crates", &["paddock-proc"])),
+    );
+    let rows = overlap_rows(&planned);
+    assert_eq!(rows.len(), 1, "{:?}", ids(&planned));
+    let Planned::Run(g) = rows[0] else {
+        panic!("not a run: {:?}", ids(&planned))
+    };
+    assert_eq!(g.id, "overlap-tests crates");
+    assert!(
+        g.args.windows(2).any(|w| w == ["--filter", "package(=paddock-proc)"]),
+        "{:?}",
+        g.args
+    );
+    assert!(g.args.contains(&"test-cache".to_string()) && g.heavy, "{:?}", g.args);
+}
+
+/// The sides touched disjoint packages: the row is skipped with that reason, never planned to run and never silent.
+#[test]
+fn disjoint_packages_skip_the_overlap_tests_with_the_reason() {
+    let planned = plan_gates(
+        &plan(),
+        &change(&["crates/paddock-proc/src/lib.rs"]),
+        &with_overlap(super::overlap::Overlap::Packages(Default::default())),
+    );
+    assert!(
+        matches!(overlap_rows(&planned).as_slice(), [Planned::Skip { id, reason }] if id == "overlap-tests" && reason.contains("disjoint")),
+        "{:?}",
+        ids(&planned)
+    );
+}
+
+/// Positive control (ER-33): an overlap that could not be computed is `not measured`, never a skip that reads as a pass.
+#[test]
+fn an_overlap_that_cannot_be_told_is_not_measured_never_a_skip() {
+    let planned = plan_gates(
+        &plan(),
+        &change(&["crates/paddock-proc/src/lib.rs"]),
+        &with_overlap(super::overlap::Overlap::Unknown("x".into())),
+    );
+    assert!(
+        matches!(overlap_rows(&planned).as_slice(), [Planned::NotMeasured { id, .. }] if id == "overlap-tests"),
+        "{:?}",
+        ids(&planned)
+    );
+}
+
+/// A developer's push does not ask for it: a skip naming `merge sync-member`, and it runs without `--member-gate`.
+#[test]
+fn a_push_skips_the_overlap_tests_and_the_row_needs_no_member_gate() {
+    let planned = plan_gates(&plan(), &change(&["crates/paddock-proc/src/lib.rs"]), &facts());
+    assert!(matches!(overlap_rows(&planned).as_slice(), [Planned::Skip { reason, .. }] if reason.contains("sync-member")));
+    let f = Facts {
+        member_gate: false,
+        ..with_overlap(overlap_of("crates", &["paddock-proc"]))
+    };
+    let planned = plan_gates(&plan(), &change(&["crates/paddock-proc/src/lib.rs"]), &f);
+    assert!(
+        matches!(overlap_rows(&planned).as_slice(), [Planned::Run(_)]),
+        "{:?}",
+        ids(&planned)
+    );
 }

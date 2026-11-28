@@ -17,21 +17,38 @@ use std::path::{Path, PathBuf};
 /// The `--only` selectors: whole row names or a row's first word. `fmt`, `clippy` and `clippy-windows` are per workspace, and the plan
 /// keeps only the workspaces the change reaches. `fmt` is in because a formatting failure is the cheapest to find here and was the
 /// one static row train z's members lacked.
-pub const SELECTORS: &[&str] = &["fmt", "conformance", "gates-register", "clippy", "clippy-windows"];
+pub const SELECTORS: &[&str] = &[
+    "fmt",
+    "conformance",
+    "gates-register",
+    "clippy",
+    "clippy-windows",
+    "goldens",
+    "overlap-tests",
+];
 
 /// The arguments after `check --pre-push` for the rows: the train's lane of `throttle` (`--priority train`, so the rows go before
-/// normal waiters instead of waiting 50 minutes in the queue, train z) and the selected rows.
-fn extra_args() -> Vec<String> {
-    ["--priority", "train", "--only", &SELECTORS.join(",")].map(String::from).to_vec()
+/// normal waiters instead of waiting 50 minutes in the queue, train z), the selected rows and the member's fork point from main
+/// (`--overlap-since`, what the `overlap-tests` row measures main's side from).
+fn extra_args(since: &str) -> Vec<String> {
+    ["--priority", "train", "--only", &SELECTORS.join(","), "--overlap-since", since]
+        .map(String::from)
+        .to_vec()
 }
 
 /// Rows that are always in the plan: a pass without both of them is not measured.
 const REQUIRED: &[&str] = &["conformance", "gates-register"];
 
+/// Rows that are always in the answer, passed or skipped with a reason (the `goldens` row skips when no golden's inputs changed, the
+/// `overlap-tests` row when the member and main share no package): an answer without one is not measured (ER-33), as a tool that
+/// dropped the row would otherwise read as a pass.
+const PRESENT: &[&str] = &["goldens", "overlap-tests"];
+
 /// Starts the static rows of a checkout against a base.
 pub trait StaticGates {
-    /// Runs `check --pre-push --only <SELECTORS> --base <base>` in `root`; an error is a failure to start.
-    fn run(&self, root: &Path, base: &str) -> Result<GateRun, String>;
+    /// Runs `check --pre-push --only <SELECTORS> --base <base>` in `root`; `since` is the member's fork point from main, or why it could
+    /// not be found (not measured). An error is a failure to start.
+    fn run(&self, root: &Path, base: &str, since: &Result<String, String>) -> Result<GateRun, String>;
 }
 
 /// The program that runs the rows: the sync tip's own `./dev` (its wrapper builds or fetches the tool that tip's inputs name), so a
@@ -44,9 +61,12 @@ fn program_for_tip(root: &Path, stand_in: Option<std::ffi::OsString>) -> PathBuf
 pub struct Real;
 
 impl StaticGates for Real {
-    fn run(&self, root: &Path, base: &str) -> Result<GateRun, String> {
+    fn run(&self, root: &Path, base: &str, since: &Result<String, String>) -> Result<GateRun, String> {
+        let since = since
+            .as_ref()
+            .map_err(|why| format!("the member's fork point from main is unknown ({why}), so the overlap with main cannot be told"))?;
         let program = program_for_tip(root, std::env::var_os("PADDOCK_MERGE_CHECK_GATES"));
-        let extra = extra_args();
+        let extra = extra_args(since);
         run_pre_push_with(&program, root, base, &extra.iter().map(String::as_str).collect::<Vec<_>>())
     }
 }
@@ -133,6 +153,12 @@ pub fn interpret(answer: Result<GateRun, String>, base: &str) -> Step {
         .iter()
         .copied()
         .filter(|r| !rows.iter().any(|(id, v)| id == r && v == "passed"))
+        .chain(
+            PRESENT
+                .iter()
+                .copied()
+                .filter(|r| !rows.iter().any(|(id, _)| id.split(' ').next() == Some(*r))),
+        )
         .collect();
     let data = |outcome: &str| json!({"outcome": outcome, "base": base, "rows": rows.iter().map(|(id, v)| json!({"id": id, "verdict": v})).collect::<Vec<_>>()});
     let fail = |ids: Vec<&str>, exit: Exit, outcome: &str, text: &mut Vec<String>| {
@@ -200,6 +226,8 @@ mod tests {
         ("gates-register", "passed"),
         ("clippy crates", "passed"),
         ("clippy-windows crates", "passed"),
+        ("goldens", "skipped"),
+        ("overlap-tests", "skipped"),
     ];
 
     /// The rows run the SYNC TIP's own `./dev`, not the train's: a member that adds a `./dev` command would otherwise fail its own
@@ -214,17 +242,57 @@ mod tests {
 
     #[test]
     fn the_rows_asked_are_rustfmt_conformance_the_gate_register_and_both_clippy_kinds() {
-        assert_eq!(SELECTORS, ["fmt", "conformance", "gates-register", "clippy", "clippy-windows"]);
+        assert_eq!(
+            SELECTORS,
+            [
+                "fmt",
+                "conformance",
+                "gates-register",
+                "clippy",
+                "clippy-windows",
+                "goldens",
+                "overlap-tests"
+            ]
+        );
     }
 
     /// The rows go through the train's lane of `throttle`: run outside it, they waited 50 minutes in a 20-entry queue on train z.
     #[test]
     fn the_rows_run_in_the_trains_lane_of_the_queue() {
-        let args = extra_args();
+        let args = extra_args("abc123");
         let at = args.iter().position(|a| a == "--priority").expect("--priority");
         assert_eq!(args[at + 1], "train", "{args:?}");
         let only = args.iter().position(|a| a == "--only").expect("--only");
         assert_eq!(args[only + 1], SELECTORS.join(","), "{args:?}");
+        let since = args.iter().position(|a| a == "--overlap-since").expect("--overlap-since");
+        assert_eq!(args[since + 1], "abc123", "{args:?}");
+    }
+
+    /// Without the member's fork point there is no overlap to measure: not measured, never a pass (ER-33).
+    #[test]
+    fn an_unknown_fork_point_is_not_measured() {
+        let why = Real.run(Path::new("."), "abc", &Err("no merge base".into())).unwrap_err();
+        assert!(why.contains("no merge base") && why.contains("overlap"), "{why}");
+        assert_eq!(interpret(Err(why), "abc").exit, Exit::NotMeasured);
+    }
+
+    /// Positive control (ER-33): an answer that dropped the `goldens` or the `overlap-tests` row is not a pass, a skipped one is.
+    #[test]
+    fn a_dropped_overlap_or_golden_row_is_not_a_pass_and_a_skipped_one_is() {
+        let mut rows = GREEN[..4].to_vec();
+        assert_eq!(
+            interpret(run(Some(0), &rows), "b").exit,
+            Exit::NotMeasured,
+            "no goldens, no overlap-tests row"
+        );
+        rows.extend([("goldens", "skipped"), ("overlap-tests", "skipped")]);
+        assert_eq!(interpret(run(Some(0), &rows), "b").exit, Exit::Ok);
+        rows.pop();
+        rows.push(("overlap-tests crates", "passed"));
+        assert_eq!(interpret(run(Some(0), &rows), "b").exit, Exit::Ok, "a per-workspace row counts");
+        rows.pop();
+        rows.push(("overlap-tests crates", "failed"));
+        assert_eq!(interpret(run(Some(5), &rows), "b").exit, Exit::Findings);
     }
 
     /// A failed row prints its one-line cause and its step's log, not its name alone (ER-27, train z: a failed gates-register with no
