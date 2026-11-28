@@ -689,17 +689,10 @@ pub fn split_audit_filter(filter: &str) -> Option<(String, String)> {
     None
 }
 
-/// The only paths no audit reads, declared once: prose and images of the design record. Every audit that scans the tree
+/// The only paths no audit reads, declared once: prose of the design record. Every audit that scans the tree
 /// (`safe_remove_lint`, `cargo_target_lint`, the live checks, the plan against the real graph, the registers) reads code, config,
 /// registers or workflows, so a change outside this list can reach one. A path is added here only with the audit's test showing it.
-pub const AUDIT_BLIND: &[&str] = &[
-    "docs/adr/",
-    "docs/research/",
-    "docs/plans/",
-    "docs/planned/",
-    "docs/wiki/",
-    "docs/images/",
-];
+pub const AUDIT_BLIND: &[&str] = &["docs/adr/", "docs/research/", "docs/plans/", "docs/planned/", "docs/wiki/"];
 
 /// The nextest filter of a developer's push: the profile's audits minus the whole-repository cost classes (`graph_`, `tree_`), by the
 /// one definition of the classes ([`crate::test_cost::Class`], ER-22). The profile's `default-filter` still applies (nextest ANDs them).
@@ -731,7 +724,7 @@ fn member_audits(change: &Change, facts: &Facts) -> Planned {
     if !facts.member_gate && audit_blind(change) {
         return Planned::Skip {
             id: "member-audits".into(),
-            reason: "every changed file is prose no audit reads (docs/adr, research, plans, planned, wiki, images); the member gate runs them whatever changed".into(),
+            reason: "every changed file is prose no audit reads (docs/adr, research, plans, planned, wiki); the member gate runs them whatever changed".into(),
         };
     }
     let mut g = Gate {

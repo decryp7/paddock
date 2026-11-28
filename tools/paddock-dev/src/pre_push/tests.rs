@@ -684,7 +684,7 @@ fn a_developers_push_runs_the_member_audits_when_a_change_reaches_what_they_read
         let planned = plan_gates(&plan(), &change(files), &off);
         assert!(ids(&planned).contains(&"member-audits".to_string()), "{files:?}: {planned:?}");
     }
-    for files in [&["docs/adr/0999-x.md"][..], &["docs/research/a.md", "docs/images/b.png"]] {
+    for files in [&["docs/adr/0999-x.md"][..], &["docs/research/a.md", "docs/plans/b.md"]] {
         let planned = plan_gates(&plan(), &change(files), &off);
         assert!(
             !ids(&planned).contains(&"member-audits".to_string()),

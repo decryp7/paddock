@@ -3346,7 +3346,7 @@ passed the push and failed the member gate)? Proposed: coordinator (the split an
   and whole-tree reads, two at a time by the nextest groups) and are most of the time. The source audits (`safe_remove_lint`,
   `cargo_target_lint`, `dev_bin`, `check_allow_list`, `parity_corpus`, the `no_source_file_*` tests, the live checks) take about 17 s. So a
   developer's push runs the source audits (`gates::audit_dev_filter`) and the member gate runs all 91. A change of only prose under
-  `docs/adr`, `docs/research`, `docs/plans`, `docs/planned`, `docs/wiki` or `docs/images` (`gates::AUDIT_BLIND`) skips the row with its reason.
+  `docs/adr`, `docs/research`, `docs/plans`, `docs/planned`, or `docs/wiki` (`gates::AUDIT_BLIND`) skips the row with its reason.
 - **Positive control:** a file `src/zz_control.rs` with `std::fs::remove_dir_all` fails `safe_remove_lint` in the developer subset (and
   C178 on the unlisted module); the file was removed after the run.
 - **Not measured:** a cold build folder for the whole branch, a quiet machine, and the full `./dev check --pre-push` of this branch
