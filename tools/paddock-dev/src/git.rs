@@ -3,13 +3,49 @@
 //! [`git_text`] is the planner's lighter one (no answer on any failure) and [`state_dir`] finds the folder of a checkout's gate logs.
 
 use paddock_proc::{Limits, run_bounded};
+use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-const TIMEOUT: Duration = Duration::from_secs(120);
+/// The longest one git call may run, in seconds.
+pub const TIMEOUT_SECS: u64 = 120;
+const TIMEOUT: Duration = Duration::from_secs(TIMEOUT_SECS);
+/// The most any read may print (256 MiB): the larger of the two caps the readers had (the merge check's 256 MiB and the worktree
+/// reader's 64 MiB), so a read that fitted one of them still fits. A longer read is an error, never a cut answer.
 const MAX_OUTPUT: usize = 1 << 28;
+
+/// A git command that failed, with the words that explain it.
+#[derive(Debug)]
+pub struct GitError {
+    /// The git arguments (never secrets: only paths, refs and flags).
+    pub args: String,
+    /// What git printed on standard error (or why it could not run).
+    pub stderr: String,
+}
+
+impl std::fmt::Display for GitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "`git {}` failed: {}", self.args, self.stderr.trim())
+    }
+}
+
+impl From<GitError> for String {
+    fn from(e: GitError) -> String {
+        e.to_string()
+    }
+}
+
+/// What a git run produced, whatever its status.
+pub struct Out {
+    /// Exit status 0.
+    pub ok: bool,
+    /// Standard output.
+    pub stdout: String,
+    /// Standard error.
+    pub stderr: String,
+}
 
 /// What git's own merge of two parents gives.
 #[derive(Debug, Default)]
@@ -22,8 +58,13 @@ pub struct AutoMerge {
 
 /// A repository folder to run git in.
 pub struct Git<'a> {
-    root: &'a Path,
+    root: Cow<'a, Path>,
     max_output: usize,
+    /// Whether git may take its optional locks (`status` refreshing the index); a reader of a checkout other work uses turns it off.
+    optional_locks: bool,
+    /// Whether the child keeps the caller's environment and git configuration (a lookup that leaves the machine needs the user's
+    /// own credentials); the default removes both ([`crate::child_env::scrub`]).
+    own_environment: bool,
     /// Texts already read, by full object id and path: the detectors read the same file at the same revision more than once.
     texts: RefCell<HashMap<(String, String), Option<String>>>,
     /// Answers of the reads [`cacheable`] allows, by arguments: they depend only on immutable objects.
@@ -110,15 +151,39 @@ pub(crate) fn cacheable(args: &[&str]) -> bool {
 impl<'a> Git<'a> {
     /// Reads the repository at `root`.
     pub fn new(root: &'a Path) -> Git<'a> {
+        Git::at(Cow::Borrowed(root))
+    }
+
+    /// Reads the repository at `root`, which the reader owns (one that outlives the caller's path).
+    pub fn owned(root: &Path) -> Git<'static> {
+        Git::at(Cow::Owned(root.to_path_buf()))
+    }
+
+    fn at(root: Cow<'a, Path>) -> Git<'a> {
         Git {
             root,
             max_output: MAX_OUTPUT,
+            optional_locks: true,
+            own_environment: false,
             texts: RefCell::new(HashMap::new()),
             memo: RefCell::new(HashMap::new()),
             starts: Cell::new(0),
             objects: RefCell::new(None),
             walks: RefCell::new(HashMap::new()),
         }
+    }
+
+    /// The same reader, but git never takes its optional locks: a reader must not collide with the work it reads.
+    pub fn without_optional_locks(mut self) -> Git<'a> {
+        self.optional_locks = false;
+        self
+    }
+
+    /// The same reader, but the child keeps the caller's environment and git configuration: only for a command that leaves the
+    /// machine (`ls-remote`) with the user's own credentials.
+    pub fn with_own_environment(mut self) -> Git<'a> {
+        self.own_environment = true;
+        self
     }
 
     /// How many git processes this reader has started (its object reader's included).
@@ -132,8 +197,9 @@ impl<'a> Git<'a> {
         let mut slot = self.objects.borrow_mut();
         let reader = slot.get_or_insert_with(|| {
             let root = self.root.to_path_buf();
+            let (locks, own) = (self.optional_locks, self.own_environment);
             let parent: Vec<String> = std::env::vars_os().filter_map(|(k, _)| k.into_string().ok()).collect();
-            paddock_git::Reader::open(self.root, move || git_command(&root, &[], &parent))
+            paddock_git::Reader::open(&self.root, move || git_command(&root, &[], &parent, locks, own))
         });
         f(reader)
     }
@@ -145,12 +211,12 @@ impl<'a> Git<'a> {
     }
 
     /// Standard output of `git -C root <args>` as bytes; an error names the command and git's last words.
-    pub fn bytes(&self, args: &[&str]) -> Result<Vec<u8>, String> {
+    pub fn bytes(&self, args: &[&str]) -> Result<Vec<u8>, GitError> {
         self.run(args, false)
     }
 
     /// Like [`Git::bytes`], but exit status 1 is an answer too (`git grep` with no match prints nothing and exits 1).
-    pub fn bytes_or_none(&self, args: &[&str]) -> Result<Vec<u8>, String> {
+    pub fn bytes_or_none(&self, args: &[&str]) -> Result<Vec<u8>, GitError> {
         self.run(args, true)
     }
 
@@ -181,10 +247,10 @@ impl<'a> Git<'a> {
     /// The git child of one call: stable output, hooks off, and none of the queue's credentials (`parent`: the names of this
     /// process's environment) - the merge check reads a merged tree that holds pull request code.
     pub(crate) fn command_for(&self, args: &[&str], parent: &[String]) -> std::process::Command {
-        git_command(self.root, args, parent)
+        git_command(&self.root, args, parent, self.optional_locks, self.own_environment)
     }
 
-    fn run(&self, args: &[&str], status_1_is_empty: bool) -> Result<Vec<u8>, String> {
+    fn run(&self, args: &[&str], status_1_is_empty: bool) -> Result<Vec<u8>, GitError> {
         let key = cacheable(args).then(|| (args.iter().map(|a| a.to_string()).collect::<Vec<_>>(), status_1_is_empty));
         if let Some(hit) = key.as_ref().and_then(|k| self.memo.borrow().get(k).cloned()) {
             return Ok(hit);
@@ -196,44 +262,70 @@ impl<'a> Git<'a> {
         Ok(out)
     }
 
-    fn run_git(&self, args: &[&str], status_1_is_empty: bool) -> Result<Vec<u8>, String> {
+    /// Runs git once: what it printed whatever its exit status, or why it could not run, did not finish or wrote too much.
+    fn exec(&self, args: &[&str]) -> Result<paddock_proc::Output, GitError> {
         self.starts.set(self.starts.get() + 1);
         let parent: Vec<String> = std::env::vars_os().filter_map(|(k, _)| k.into_string().ok()).collect();
         let cmd = self.command_for(args, &parent);
-        let shown = args.join(" ");
-        let out =
-            run_bounded(cmd, Limits::new(TIMEOUT).max_output(self.max_output)).map_err(|e| format!("git {shown} could not run: {e}"))?;
+        let fail = |why: String| GitError {
+            args: args.join(" "),
+            stderr: why,
+        };
+        let out = run_bounded(cmd, Limits::new(TIMEOUT).max_output(self.max_output)).map_err(|e| fail(format!("could not run: {e}")))?;
         if out.truncated {
-            return Err(format!("git {shown} wrote more than {} bytes", self.max_output));
+            return Err(fail(format!("wrote more than {} bytes", self.max_output)));
         }
+        if !matches!(out.outcome, paddock_proc::Outcome::Exited(_)) {
+            return Err(fail(format!("did not finish ({:?})", out.outcome)));
+        }
+        Ok(out)
+    }
+
+    fn run_git(&self, args: &[&str], status_1_is_empty: bool) -> Result<Vec<u8>, GitError> {
+        let out = self.exec(args)?;
         if status_1_is_empty && matches!(out.outcome, paddock_proc::Outcome::Exited(st) if st.code() == Some(1)) {
             return Ok(out.stdout);
         }
         if !out.success() {
             let err = out.stderr_text();
             let tail: String = err.trim().chars().rev().take(300).collect::<Vec<_>>().into_iter().rev().collect();
-            return Err(format!("git {shown} failed ({:?}): {tail}", out.outcome));
+            return Err(GitError {
+                args: args.join(" "),
+                stderr: tail,
+            });
         }
         Ok(out.stdout)
     }
 
+    /// Runs git and returns what it printed whatever its exit status (an error only when it did not run or finish).
+    pub fn output(&self, args: &[&str]) -> Result<Out, GitError> {
+        let out = self.exec(args)?;
+        Ok(Out {
+            ok: out.success(),
+            stdout: out.stdout_text(),
+            stderr: out.stderr_text(),
+        })
+    }
+
+    /// Runs git for a yes/no question (`rev-parse --verify --quiet`): exit 0 is true, any other status false.
+    pub fn succeeds(&self, args: &[&str]) -> Result<bool, GitError> {
+        Ok(self.exec(args)?.success())
+    }
+
     /// Standard output as text (lossy UTF-8).
-    pub fn text(&self, args: &[&str]) -> Result<String, String> {
+    pub fn text(&self, args: &[&str]) -> Result<String, GitError> {
         self.bytes(args).map(|b| String::from_utf8_lossy(&b).into_owned())
     }
 
     /// The NUL-separated paths `args` print. A path that is not UTF-8 is an error: decoded lossily, two such paths would become one.
-    pub fn paths(&self, args: &[&str]) -> Result<Vec<String>, String> {
+    pub fn paths(&self, args: &[&str]) -> Result<Vec<String>, GitError> {
         self.bytes(args)?
             .split(|b| *b == 0)
             .filter(|p| !p.is_empty())
             .map(|p| {
-                String::from_utf8(p.to_vec()).map_err(|_| {
-                    format!(
-                        "git {} printed the path {:?}, which is not UTF-8",
-                        args.join(" "),
-                        String::from_utf8_lossy(p)
-                    )
+                String::from_utf8(p.to_vec()).map_err(|_| GitError {
+                    args: args.join(" "),
+                    stderr: format!("printed the path {:?}, which is not UTF-8", String::from_utf8_lossy(p)),
                 })
             })
             .collect()
@@ -254,6 +346,7 @@ impl<'a> Git<'a> {
             return Ok(out);
         }
         self.paths(&["diff", "--name-only", "-z", "--no-renames", from, to])
+            .map_err(String::from)
     }
 
     /// Every file of the tree `rev` names, by path, with its canonical mode and object id; `None` when the reader cannot list it
@@ -342,7 +435,7 @@ impl<'a> Git<'a> {
 }
 
 /// The git child of one merge-check call (see [`Git::command_for`]).
-fn git_command(root: &Path, args: &[&str], parent: &[String]) -> std::process::Command {
+fn git_command(root: &Path, args: &[&str], parent: &[String], optional_locks: bool, own_environment: bool) -> std::process::Command {
     let mut cmd = crate::git_env::git();
     // Stable, parseable output whatever the user's git config says.
     cmd.arg("-C")
@@ -357,16 +450,19 @@ fn git_command(root: &Path, args: &[&str], parent: &[String]) -> std::process::C
         ])
         .args(["-c", "core.hooksPath=/dev/null"])
         .args(args);
-    crate::child_env::scrub(&mut cmd, parent);
+    if !own_environment {
+        crate::child_env::scrub(&mut cmd, parent);
+    }
+    if !optional_locks {
+        cmd.env("GIT_OPTIONAL_LOCKS", "0");
+    }
     cmd
 }
 
-/// Runs `git -C root args`, returning standard output when git succeeded.
+/// Runs `git -C root args` through [`Git`] and returns standard output when git succeeded, `None` on any failure (for a caller whose
+/// answer to "git could not tell" is the same as to "no").
 pub fn git_text(root: &Path, args: &[&str]) -> Option<String> {
-    let mut cmd = crate::git_env::git();
-    cmd.arg("-C").arg(root).args(args);
-    let out = run_bounded(cmd, Limits::new(TIMEOUT).max_output(MAX_OUTPUT)).ok()?;
-    out.success().then(|| out.stdout_text())
+    Git::new(root).text(args).ok()
 }
 
 /// The folder for this checkout's gate logs and override log: `<git common dir>/paddock-pre-push`.
@@ -403,6 +499,33 @@ pub fn short(rev: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A folder that is a git repository (no commit needed).
+    fn empty_repo() -> tempfile::TempDir {
+        let d = tempfile::tempdir().unwrap();
+        let out = crate::git_env::git()
+            .arg("-C")
+            .arg(d.path())
+            .arg("init")
+            .arg("-q")
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        d
+    }
+
+    #[test]
+    fn git_text_runs_with_hooks_off_and_unquoted_paths_like_every_other_reader() {
+        let d = empty_repo();
+        assert_eq!(
+            git_text(d.path(), &["config", "--get", "core.hooksPath"]).as_deref(),
+            Some("/dev/null\n")
+        );
+        assert_eq!(
+            git_text(d.path(), &["config", "--get", "core.quotePath"]).as_deref(),
+            Some("false\n")
+        );
+    }
 
     /// A repository with one commit; its full id.
     fn one_commit() -> (tempfile::TempDir, String) {
@@ -702,7 +825,7 @@ mod tests {
     fn a_read_longer_than_the_cap_is_an_error_never_a_cut_answer() {
         let here = Path::new(".");
         let err = Git::new(here).with_max_output(4).text(&["--version"]).unwrap_err();
-        assert!(err.contains("wrote more than 4 bytes"), "{err}");
+        assert!(err.stderr.contains("wrote more than 4 bytes"), "{err}");
         assert!(Git::new(here).text(&["--version"]).unwrap().starts_with("git version"));
     }
 }

@@ -384,7 +384,7 @@ pub fn plock_log_path(throttle_dir: Option<PathBuf>) -> PathBuf {
 pub fn throttle_dir_from_tool() -> Option<PathBuf> {
     let env: std::collections::HashMap<String, String> = crate::process_env::vars().collect();
     let here = std::env::current_dir().ok()?;
-    let root = crate::worktree::git::Git::at(&here)
+    let root = crate::worktree::git::git_at(&here)
         .text(&["rev-parse", "--show-toplevel"])
         .map(|t| PathBuf::from(t.trim()))
         .unwrap_or(here);
@@ -397,7 +397,7 @@ fn throttle_dir_of(root: &Path, env: &std::collections::HashMap<String, String>)
     let prefix = crate::heavy_tool::throttle_command_for(
         root,
         env,
-        &|p| crate::throttle::on_path(env, p),
+        &|p| crate::pathfind::on_path(env, p),
         &built,
         crate::heavy_tool::BUILD_LIMIT,
     )

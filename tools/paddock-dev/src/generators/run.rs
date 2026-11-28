@@ -273,7 +273,7 @@ impl Runner for Real {
             match crate::heavy_tool::throttle_command_for(
                 &self.root,
                 &env,
-                &|p| crate::throttle::on_path(&self.env, p),
+                &|p| crate::pathfind::on_path(&self.env, p),
                 &self.built_throttle,
                 limit,
             ) {

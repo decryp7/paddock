@@ -94,6 +94,13 @@ pub fn find_program(path: &str, name: &str, windows: bool, extensions: &[String]
     None
 }
 
+/// Whether `program` is on the `PATH` of `env`, by the rule of [`find_program`] (Windows: `PATHEXT`; Unix: the executable bit; absolute
+/// folders only). `command -v` for a job's own environment, one definition for every caller.
+pub fn on_path(env: &std::collections::HashMap<String, String>, program: &str) -> bool {
+    let Some(path) = env.get("PATH") else { return false };
+    find_program(path, program, cfg!(windows), &extensions(env.get("PATHEXT").map(String::as_str))).is_some()
+}
+
 #[cfg(unix)]
 fn is_executable(p: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
@@ -134,6 +141,18 @@ mod tests {
             std::fs::set_permissions(&p, std::fs::Permissions::from_mode(mode)).unwrap();
         }
         let _ = mode;
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_without_the_execute_bit_is_not_on_the_path() {
+        let d = tempfile::tempdir().unwrap();
+        touch(d.path(), "throttle", 0o644);
+        let env = std::collections::HashMap::from([("PATH".to_string(), d.path().to_string_lossy().into_owned())]);
+        assert!(!on_path(&env, "throttle"));
+        touch(d.path(), "throttle", 0o755);
+        assert!(on_path(&env, "throttle"));
+        assert!(!on_path(&std::collections::HashMap::new(), "throttle"), "no PATH, nothing is on it");
     }
 
     fn joined(dirs: &[&Path]) -> String {

@@ -295,7 +295,10 @@ struct RealLookups {
 
 impl known::Lookups for RealLookups {
     fn ls_remote(&self, remote: &str) -> Option<String> {
-        git_text(&self.root, &["ls-remote", "--", remote])
+        crate::git::Git::new(&self.root)
+            .with_own_environment()
+            .text(&["ls-remote", "--", remote])
+            .ok()
     }
     fn ci_green(&self, sha: &str) -> Result<u64, String> {
         match crate::ci_runs::ci_verdict(known::CI_WORKFLOW, sha) {
@@ -306,22 +309,9 @@ impl known::Lookups for RealLookups {
     }
 }
 
-/// The repository root: the given folder, else the top of the git checkout the current folder is in.
-pub(crate) fn repo_root(given: &Option<PathBuf>) -> Result<PathBuf, CliError> {
-    match given {
-        Some(r) => Ok(r.clone()),
-        None => {
-            let cwd = std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder cannot be read: {e}.")))?;
-            git_text(&cwd, &["rev-parse", "--show-toplevel"])
-                .map(|t| PathBuf::from(t.trim()))
-                .ok_or_else(|| CliError::failure("This is not a git checkout.").with_hint("Run it inside the repository."))
-        }
-    }
-}
-
 /// The command.
 pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
-    let root = repo_root(&args.root)?;
+    let root = crate::repo_root::repo_root(args.root.as_deref())?;
     let stdin = if args.refs_from_stdin { read_stdin()? } else { String::new() };
     // Prepared on first use by a cargo gate, never here and never in `command_in`: a push that runs no cargo gate, and the tests of
     // the push gate, must not start a server on the machine they run on (ER-45).

@@ -64,7 +64,7 @@ pub fn command(root: Option<&Path>, member: &str, opts: &Options) -> Result<Repo
     }
     let dirty = git
         .text(&["status", "--porcelain", "--untracked-files=no"])
-        .map_err(|e| step(e, "run `git status`"))?;
+        .map_err(|e| step(e.to_string(), "run `git status`"))?;
     if !dirty.trim().is_empty() {
         return Err(step(
             format!("the worktree has uncommitted changes ({} path(s))", dirty.lines().count()),
@@ -117,7 +117,7 @@ pub fn command(root: Option<&Path>, member: &str, opts: &Options) -> Result<Repo
                 "--root",
                 &full,
             ])
-            .map_err(|e| step(e, "run `git show` on the revert"))?;
+            .map_err(|e| step(e.to_string(), "run `git show` on the revert"))?;
         reland_lines.extend(trailers::reland_lines(&full, &files));
         relands.push(full);
     }

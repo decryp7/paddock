@@ -520,7 +520,7 @@ pub fn command(c: DepsCommand) -> Result<Report, CliError> {
 }
 
 fn top_level(from: &Path) -> Result<PathBuf, CliError> {
-    crate::worktree::git::Git::at(from)
+    crate::worktree::git::git_at(from)
         .text(&["rev-parse", "--show-toplevel"])
         .map(|s| PathBuf::from(s.trim()))
         .map_err(|e| {

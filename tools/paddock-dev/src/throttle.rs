@@ -5,7 +5,6 @@
 //! builds the `throttle` binary when none is on PATH is [`crate::heavy_tool`].
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::time::Duration;
 
 /// The whole capture's bound of the stack samples the push gate writes before it ends a hung step (`pre_push::stacks`): the kill is
@@ -73,16 +72,6 @@ pub fn throttle_prefix(env: &HashMap<String, String>, has: &dyn Fn(&str) -> bool
         return ["throttle", "run", "pre-push", "--"].map(String::from).to_vec();
     }
     Vec::new()
-}
-
-/// Whether `program` is a file in a folder of `env`'s `PATH`.
-pub fn on_path(env: &HashMap<String, String>, program: &str) -> bool {
-    let path = env.get("PATH").cloned().unwrap_or_default();
-    std::env::split_paths(&path).any(|d| exists(&d, program))
-}
-
-fn exists(dir: &Path, program: &str) -> bool {
-    dir.join(program).is_file() || (cfg!(windows) && dir.join(format!("{program}.exe")).is_file())
 }
 
 /// Whether `prefix` is our own `throttle run <agent> --` (and not someone else's wrapper, which takes none of our flags).
