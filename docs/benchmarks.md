@@ -3327,7 +3327,7 @@ each option would have run; whole-repository classes keyed on the whole tree): t
 
 Question: can a developer's `./dev check --pre-push` run the `member-audits` profile, so a builder meets `safe_remove_lint` and its
 neighbours before the train does (twice on 2026-11-28: `std::fs::remove_dir_all` in the mutants branch and in `test_cache/probe.rs`
-passed the push and failed the member gate)? Proposed: coordinator (the split and the prose-only skip are this branch's decision).
+passed the push and failed the member gate)? user, 2026-11-28, in chat (the narrowed source-audit set and the prose-only skip).
 
 - **Machine:** the shared Mac mini (arm64), other agents and trains running; `./dev throttle`, `RUSTUP_AUTO_INSTALL=0`, sccache, a warm
   build folder for the lib and `it` test binaries. One run per row.
