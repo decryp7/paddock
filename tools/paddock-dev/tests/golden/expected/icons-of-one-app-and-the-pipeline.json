@@ -28,6 +28,7 @@
  },
  "packages": {},
  "cargoOnly": [],
+ "gradePackages": {},
  "why": {
   "app:x": [
    "icons icons/x/a.svg",

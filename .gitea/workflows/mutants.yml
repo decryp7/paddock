@@ -1,0 +1,203 @@
+# Mutation testing of the landed diff (user decision 143, 2026-11-28; the check itself is decision 127): cargo-mutants `--in-diff`
+# over the Rust functions of tools/paddock-dev and crates/ that a landing changed, to find a test or a guard that never reaches the code
+# it claims to check (`./dev mutants gate`, tools/paddock-dev/src/mutants_gate.rs).
+#
+# It is NOT part of ci.yml: its eight shards took about 55 minutes each in trial 9349, held the Linux runner and made trains queue
+# 43 to 62 minutes. It runs after a landing (a push to main) and by dispatch, report-only (ER-41, review 2026-12-11): a MISSED mutant is a
+# `::warning::` annotation naming the function and the mutation, and the run stays green.
+#
+# What it does:
+#   plan    the base (the push's `before`, else the `base` input, else the commit's first parent), then `./dev mutants plan`: how many
+#           mutants the diff has, and from that how many shards (one more for each SHARD_TARGET mutants, at most MAX_SHARDS), not a fixed eight.
+#   shards  one leg per planned shard, ONE AT A TIME (`max-parallel: 1`), each `./dev mutants gate --shard k/n`.
+#   record  one line that says what was planned and how each part ended (the coordinator reads it, and the annotations).
+#
+# How it yields to trains, and never holds capacity one needs (ER-43): the Linux runner has 3 slots (conformance/ci/runner-slots.json).
+#   1. The plan job and every shard first ask `./dev ci schedule-skip --any-event`: while a train's dispatch run on `train/*` is queued or
+#      running, the part ends at once, measures nothing and says so (`::notice::skipped: train ...`). Nothing WAITS, so no job of this
+#      workflow sits on a slot while a train needs it (a waiting job is a held slot: runner-wait's own note). The skipped diff is named in
+#      the record line: dispatch this workflow again with `base` set to it.
+#   2. At most one shard runs at a time, so this workflow never holds more than one of the three slots, and a train that starts during
+#      a shard finds two free and waits for none longer than that shard (SHARD_TARGET mutants, about 25 minutes, `timeout-minutes` below).
+#   3. A newer landing queues behind a running run (`concurrency`, no cancel: cancelling would lose the older diff).
+# A run that cannot read the Actions runs proceeds (fail open, with a warning), as the scheduled runs do.
+
+name: mutants
+run-name: ${{ github.event.inputs.dispatch_id && format('{0} [dispatch {1}]', github.workflow, github.event.inputs.dispatch_id) || '' }}
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dispatch_id:
+        description: "Set by ./dev ci dispatch: the token it finds this run by (shown in the run's title). Leave empty."
+        required: false
+        default: ""
+      base:
+        description: "Diff from this commit (empty: the commit's first parent). Use it for a diff a run skipped for a train."
+        required: false
+        default: ""
+
+concurrency:
+  group: mutants
+  cancel-in-progress: false
+
+env:
+  # The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
+  PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
+  CARGO_TERM_COLOR: always
+
+jobs:
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+    timeout-minutes: 40
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+      shards: ${{ steps.plan.outputs.shards }}
+      count: ${{ steps.plan.outputs.count }}
+      base: ${{ steps.base.outputs.base }}
+    env:
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+    steps:
+      # The whole history: the base is a commit of main's past.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
+      - name: Yield to a train
+        id: yield
+        env:
+          PLAN_TOKEN: ${{ github.token }}
+        run: |
+          out=$(mktemp)
+          if GITHUB_OUTPUT="$out" ./dev ci schedule-skip --any-event --workflow mutants.yml; then skip=$(sed -n 's/^skip=//p' "$out"); else echo "::warning::mutants: ./dev ci schedule-skip did not run; this run proceeds (fail open)"; skip=false; fi
+          echo "skip=${skip:-false}" >> "$GITHUB_OUTPUT"
+      - name: The base of the diff
+        id: base
+        if: ${{ steps.yield.outputs.skip != 'true' }}
+        env:
+          INPUT_BASE: ${{ github.event.inputs.base }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          base="$INPUT_BASE"
+          if [ -z "$base" ]; then base="$BEFORE"; fi
+          # A push that creates a branch has an all-zero `before`; a dispatch without a base has none: the commit's first parent.
+          if [ -z "$base" ] || [ -z "${base//0/}" ]; then base=$(git rev-parse HEAD^1) || { echo "::error::mutants: no base to diff from (no input, no push before, no parent). Next step: dispatch with a base"; exit 1; }; fi
+          case "$base" in -*) echo "::error::mutants: base '$base' is not a commit"; exit 1 ;; esac
+          git rev-parse --verify --quiet "$base^{commit}" >/dev/null || { echo "::error::mutants: base '$base' is not a commit of this checkout. Next step: dispatch with a commit of main"; exit 1; }
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "mutants: diff $base..$(git rev-parse HEAD)"
+      # The pinned cargo-mutants (ER-26): the version is `mutants_gate::PIN`, read through `./dev mutants pin` (one definition), built
+      # with `cargo install --locked` (compiled through sccache).
+      - name: Install the pinned cargo-mutants
+        if: ${{ steps.yield.outputs.skip != 'true' }}
+        run: |
+          pin=$(./dev mutants pin)
+          if [ "$(cargo mutants --version 2>/dev/null | cut -d' ' -f2)" != "$pin" ]; then
+            cargo install cargo-mutants --version "$pin" --locked
+          fi
+      - name: Plan the shards from the mutant count
+        id: plan
+        if: ${{ steps.yield.outputs.skip != 'true' }}
+        env:
+          BASE: ${{ steps.base.outputs.base }}
+        run: ./dev mutants plan --base "$BASE"
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
+
+  shards:
+    name: mutants (shard ${{ matrix.shard }})
+    needs: [plan]
+    if: ${{ needs.plan.outputs.run == 'true' }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+    # One shard at a time: at most one of the three Linux slots, so a train always finds two. A shard is at most SHARD_TARGET mutants.
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+    env:
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
+      # A train may have been dispatched since the plan: this shard then ends here, before it builds anything.
+      - name: Yield to a train
+        id: yield
+        env:
+          PLAN_TOKEN: ${{ github.token }}
+        run: |
+          out=$(mktemp)
+          if GITHUB_OUTPUT="$out" ./dev ci schedule-skip --any-event --workflow mutants.yml; then skip=$(sed -n 's/^skip=//p' "$out"); else echo "::warning::mutants: ./dev ci schedule-skip did not run; this shard proceeds (fail open)"; skip=false; fi
+          echo "skip=${skip:-false}" >> "$GITHUB_OUTPUT"
+      - name: Install the pinned cargo-mutants
+        if: ${{ steps.yield.outputs.skip != 'true' }}
+        run: |
+          pin=$(./dev mutants pin)
+          if [ "$(cargo mutants --version 2>/dev/null | cut -d' ' -f2)" != "$pin" ]; then
+            cargo install cargo-mutants --version "$pin" --locked
+          fi
+      # The inputs and generator tests read the cargo metadata of tools/throttle offline: its packages must be in the job's cargo home
+      # (as the paddock-dev job fetches them); without them the unmutated tree's tests fail ("no matching package named `utf_types`", trial 9334).
+      - name: Fetch the other tools' dependencies
+        if: ${{ steps.yield.outputs.skip != 'true' }}
+        working-directory: tools
+        run: |
+          for t in throttle; do
+            (cd "$t" && cargo fetch --locked) || { echo "::error::cargo fetch --locked failed in tools/$t, so the offline metadata tests cannot read it. Next step: run it on the runner to see why"; exit 1; }
+          done
+      - name: Mutants in the changed functions (report-only)
+        if: ${{ steps.yield.outputs.skip != 'true' }}
+        env:
+          BASE: ${{ needs.plan.outputs.base }}
+          SHARD: ${{ matrix.shard }}
+        run: ./dev mutants gate --base "$BASE" --shard "$SHARD"
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
+
+  # The one line the coordinator reads: what was planned (or why nothing ran) and how the shards ended. The findings themselves are the
+  # `::warning file=...::mutants: MISSED in ...` annotations and the `mutants gate:` summary of each shard job.
+  record:
+    name: record
+    needs: [plan, shards]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+    timeout-minutes: 5
+    steps:
+      - name: Record
+        env:
+          HEAD_SHA: ${{ github.sha }}
+          BASE: ${{ needs.plan.outputs.base }}
+          COUNT: ${{ needs.plan.outputs.count }}
+          PLAN: ${{ needs.plan.result }}
+          SHARDS: ${{ needs.shards.result }}
+        run: |
+          if [ -z "$BASE" ]; then
+            line="mutants record: $HEAD_SHA NOT MEASURED: the plan did not run its diff (plan $PLAN): yielded to a train or failed. Next step: dispatch mutants.yml with base set to the previous main tip"
+            echo "::warning::$line"
+          else
+            line="mutants record: $BASE..$HEAD_SHA planned ${COUNT:-0} mutants (plan $PLAN, shards $SHARDS)"
+            echo "::notice::$line"
+          fi
+          echo "$line" >> "$GITHUB_STEP_SUMMARY"
