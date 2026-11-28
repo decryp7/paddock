@@ -84,6 +84,24 @@ uses it, results in
 
 ## Results of shared tooling
 
+### 2026-11-28, the in-test fixture build and the parent's configuration (fix/in-test-build-flags)
+
+- **Commit:** base 9d812f1ba (origin/main), this branch. Question from the test build cost class entry below: the in-test `cargo build` does not get the parent's `--config` rustflags.
+- **Machine:** Mac mini, Apple M4 Pro, cargo 1.100.0, cargo-nextest 0.9.152, 1-minute load 12 to 13 (other agents). `RUSTC_WRAPPER` empty, a fresh build folder for each row, one run per row, through `./dev throttle`.
+- **What a test sees:** nextest 0.9.152 gives a test `CARGO`, `CARGO_HOME`, `CARGO_MANIFEST_DIR`, `CARGO_PKG_*`, `NEXTEST_*`, `RUSTUP_*` and its package folder as the working folder; none of the parent's command-line `--config` (no rustflags, no build folder) and no `CARGO_ENCODED_RUSTFLAGS`. So a child cargo reads configuration from files below the package folder (the CI build folder's `crates/.cargo/ci.toml`, included by `crates/.cargo/config.toml`) and nothing else. Cargo: https://doc.rust-lang.org/cargo/reference/config.html#hierarchical-structure.
+- **Command:** `cargo nextest run -p paddock-plugin-host --test it -E 'test(build_a_typed_failure_is_not_a_fault)'` (the test starts `cargo build -p paddock-plugin-test --bin paddock-plugin-fixture` through `fixture::locate`), after `--no-run` of the same package, in `crates`.
+- **Numbers:**
+
+  | Parent's configuration | Fixture build in the test | Test |
+  |---|---|---|
+  | A: build folder and remap rustflags in `ci.toml` (CI's shape), before and after | reuses the parent's compiled graph: the whole test 1.2 s, then 0.4 s warm | passes |
+  | D, before: only `--config build.target-dir=<dir>` (what `./dev` and AGENTS.md pass) | the child builds into `crates/target`, not `<dir>` | fails twice in a row: `<dir>/debug/paddock-plugin-fixture is not there and could not be built` (1.1 s, 0.3 s) |
+  | D, after: the same command line | builds into `<dir>`, reusing the parent's graph: the whole test 1.2 s, then 0.4 s warm | passes |
+  | C: `--config` build folder and `--config` remap rustflags on the command line (the P2 shape) | the child compiles the fixture's graph again: test 35.7 s (the cold build), and it fails as in D | fails |
+
+- **Result:** `paddock_plugin_test::process::build_command` now gives the child the running test's build folder as `--config build.target-dir=...` (never `CARGO_TARGET_DIR`: sccache hashes it), so D passes. The other in-test builds of the build class (Pitcrew's `fake_runner`, Debrief's store worker) already pass the folder through `TestCommand::cargo_target_dir`; `cargo-paddock-plugin`'s `cli` builds a tiny project in a temp folder, so it never shared the parent's folder. Rustflags given only on the command line cannot reach a child by any means cargo or nextest offers (row C), so they are not passed: flags that must reach in-test builds belong in a `.cargo` file below the package folder, as `ci.toml` has them (row A). A nextest setup script would start its cargo with the same blind spot, so it was not added.
+- **Not measured:** the CI runners (run 9371's own log was not read: that the child lacked the flags there remains inferred from P2, row A says a `ci.toml` child does get them), Windows, a release-profile parent (the child still builds the dev profile).
+
 ### 2026-11-28, C99 fetch limits (fix/c99-fetch-fail-fast)
 
 - **Commit:** base c5cd28247, this branch. CI run 9395 (conformance C99, `cargo fetch --target aarch64-apple-darwin` for apps/debrief): `spawnSync cargo ETIMEDOUT` after about 15 minutes (the old 900 s spawn limit of each `cargo fetch`).
