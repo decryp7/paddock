@@ -19,7 +19,7 @@ fn is_zero(sha: &str) -> bool {
 
 /// Whether `ancestor` is an ancestor of `descendant`: `Err` when git cannot say (a commit missing here).
 fn is_ancestor(root: &Path, ancestor: &str, descendant: &str) -> Result<bool, String> {
-    let out = std::process::Command::new("git")
+    let out = crate::git_env::git()
         .arg("-C")
         .arg(root)
         .args(["merge-base", "--is-ancestor", ancestor, descendant])
