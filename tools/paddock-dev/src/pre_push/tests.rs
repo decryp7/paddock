@@ -2,7 +2,7 @@
 
 use super::budget::Timing;
 use super::exec::{Done, Exec, Kind, Limits, Row, RunOpts, run_all_timed, run_all_with, test_subject};
-use super::gates::{AUDIT_PROFILE, Change, Facts, Gate, Need, Planned, plan_gates, windows_skip_reason};
+use super::gates::{AUDIT_PROFILE, Change, Facts, Gate, Need, Planned, audit_dev_filter, plan_gates, windows_skip_reason};
 use super::{accept_not_measured, parse_refs, render, render_timed};
 use crate::throttle::QUEUE_STALL;
 use paddock_cli::Exit;
@@ -42,6 +42,8 @@ fn facts() -> Facts {
         test_filters: Default::default(),
         nextest_config: Default::default(),
         reached: Default::default(),
+        goldens: Ok(Vec::new()),
+        overlap: Default::default(),
     }
 }
 
@@ -293,7 +295,9 @@ fn the_row_set_of_a_pass_record_is_every_fixed_row_the_planner_can_plan() {
         ranges: vec!["abc..HEAD".into()],
         ..Change::default()
     };
-    let planned = plan_gates(&plan(), &c, &facts());
+    let mut f = facts();
+    f.goldens = Ok(vec!["ci-run-golden".into()]);
+    let planned = plan_gates(&plan(), &c, &f);
     let mut fixed: Vec<String> = ids(&planned)
         .into_iter()
         .filter(|id| !super::gates::PER_WORKSPACE_PREFIXES.iter().any(|p| id.starts_with(p)))
@@ -302,6 +306,61 @@ fn the_row_set_of_a_pass_record_is_every_fixed_row_the_planner_can_plan() {
     let mut want: Vec<String> = super::gates::ROW_SET.iter().map(|s| s.to_string()).collect();
     want.sort();
     assert_eq!(fixed, want, "add the new row to gates::ROW_SET");
+}
+
+/// The registry of the real tree (`docs/generators.toml`): the golden row's inputs are declared there once, so a test of the row reads
+/// them from it and not from a hand list (ER-42).
+fn real_registry() -> crate::generators::registry::Registry {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    crate::generators::load(&root).unwrap_or_else(|e| panic!("{e:?}"))
+}
+
+/// The golden row (recurring class, ER-21: a change altered what a golden records, the push passed because it ran no golden test, and a
+/// CI trial went red three times in two days): a change to a file a golden reads plans `./dev gen check --only <the goldens it reaches>`,
+/// and a change nothing reaches skips the row with the reason. The inputs are read from the registry, not typed here.
+#[test]
+fn a_change_to_a_file_a_golden_reads_plans_the_golden_row_and_any_other_change_skips_it() {
+    let reg = real_registry();
+    for (file, golden) in [
+        (".gitea/actions/setup-rust/action.yml", "ci-run-golden"),
+        ("tools/paddock-dev/src/ci_run/mod.rs", "ci-run-golden"),
+        ("tools/paddock-dev/src/plan.rs", "planner-golden"),
+        ("docs/repo-graph.toml", "planner-golden"),
+        ("tools/paddock-dev/src/ci_host/mod.rs", "ci-host-golden"),
+    ] {
+        let mut f = facts();
+        f.goldens = Ok(reg.golden_due(&[file.to_string()], &BTreeSet::new()));
+        let planned = plan_gates(&plan(), &change(&[file]), &f);
+        let row = run_gates(&planned)
+            .into_iter()
+            .find(|g| g.id == "goldens")
+            .unwrap_or_else(|| panic!("{file} plans no goldens row: {:?}", ids(&planned)));
+        assert_eq!(&row.args[..2], ["gen", "check"], "{file}: {:?}", row.args);
+        assert!(
+            row.args.iter().any(|a| a.split(',').any(|id| id == golden)),
+            "{file} must run {golden}: {:?}",
+            row.args
+        );
+    }
+    let mut f = facts();
+    f.goldens = Ok(reg.golden_due(&["docs/x.md".to_string()], &BTreeSet::new()));
+    let planned = plan_gates(&plan(), &change(&["docs/x.md"]), &f);
+    assert!(
+        planned
+            .iter()
+            .any(|p| matches!(p, Planned::Skip { id, reason } if id == "goldens" && reason.contains("golden"))),
+        "{:?}",
+        ids(&planned)
+    );
+    // A model that could not be asked is not a pass: the row says so (ER-33).
+    f.goldens = Err("the model could not be built".into());
+    let planned = plan_gates(&plan(), &change(&["docs/x.md"]), &f);
+    assert!(
+        planned
+            .iter()
+            .any(|p| matches!(p, Planned::NotMeasured { id, .. } if id == "goldens")),
+        "{planned:?}"
+    );
 }
 
 /// The shared-crate dependency guard runs when a manifest, a lockfile, the hack config or the pins file changed, with `./dev locks guard`
@@ -663,26 +722,61 @@ fn every_lib_clause_of_the_member_audits_selects_a_test_of_the_lib() {
     );
 }
 
-/// A developer's push does not run the audits (minutes would be added to every push); it says why. The member gate does.
+/// A developer's push runs the audits when the change reaches anything they read (they scan the whole tree: the tool's sources, the
+/// shared crates, conformance, the registers), so a builder meets safe_remove_lint, the parity corpus and the allow-list parity before
+/// the train does (the recurring miss of 2026-11-28: a push passed, the member gate failed member-audits). It skips with a reason only
+/// when every changed file is prose no audit reads ([`AUDIT_BLIND`]), and the member gate runs them whatever changed.
 #[test]
-fn a_developers_push_skips_the_member_audits_with_a_reason_and_the_member_gate_runs_them() {
+fn a_developers_push_runs_the_member_audits_when_a_change_reaches_what_they_read_and_skips_prose_only_changes() {
     let off = Facts {
         member_gate: false,
         ..facts()
     };
-    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &off);
-    assert!(!ids(&planned).contains(&"member-audits".to_string()), "{:?}", ids(&planned));
+    for files in [
+        &["tools/paddock-dev/src/test_cache/probe.rs"][..],
+        &["crates/a.rs"],
+        &["docs/gates.toml"],
+        &["docs/adr/0001-x.md", "tools/paddock-dev/src/a.rs"],
+        &["Mystery"],
+        &[],
+    ] {
+        let planned = plan_gates(&plan(), &change(files), &off);
+        assert!(ids(&planned).contains(&"member-audits".to_string()), "{files:?}: {planned:?}");
+    }
+    for files in [&["docs/adr/0999-x.md"][..], &["docs/research/a.md", "docs/plans/b.md"]] {
+        let planned = plan_gates(&plan(), &change(files), &off);
+        assert!(
+            !ids(&planned).contains(&"member-audits".to_string()),
+            "{files:?}: {:?}",
+            ids(&planned)
+        );
+        assert!(
+            planned
+                .iter()
+                .any(|p| matches!(p, Planned::Skip { id, reason } if id == "member-audits" && reason.contains("no audit reads"))),
+            "skipped with its reason: {planned:?}"
+        );
+    }
+    // The developer's run is the source audits only: the member gate's command plus the declared filter; the gate itself has none.
+    let dev = plan_gates(&plan(), &change(&["tools/paddock-dev/src/test_cache/probe.rs"]), &off);
+    let g = run_gates(&dev).into_iter().find(|g| g.id == "member-audits").expect("planned");
+    let args = g.args.join(" ");
+    assert!(args.ends_with(&format!("-E {}", audit_dev_filter())), "{args}");
     assert!(
-        planned
-            .iter()
-            .any(|p| matches!(p, Planned::Skip { id, reason } if id == "member-audits" && reason.contains("--member-gate"))),
-        "skipped with its reason: {planned:?}"
+        audit_dev_filter().contains("test(/(^|::)graph_[^:]*$/)") && audit_dev_filter().contains("test(/(^|::)tree_[^:]*$/)"),
+        "the class filters come from test_cost::Class: {}",
+        audit_dev_filter()
     );
-    let on = Facts {
-        member_gate: true,
-        ..facts()
+    let gate = plan_gates(&plan(), &change(&["tools/paddock-dev/src/test_cache/probe.rs"]), &facts());
+    let g = run_gates(&gate).into_iter().find(|g| g.id == "member-audits").expect("planned");
+    assert!(!g.args.iter().any(|a| a == "-E"), "the member gate runs every audit: {:?}", g.args);
+    // Positive control (ER-33): a change with an unknown base is never judged prose-only, and the member gate runs whatever changed.
+    let unknown = Change {
+        base: None,
+        ..change(&["docs/adr/0999-x.md"])
     };
-    assert!(ids(&plan_gates(&plan(), &change(&["crates/a.rs"]), &on)).contains(&"member-audits".to_string()));
+    assert!(ids(&plan_gates(&plan(), &unknown, &off)).contains(&"member-audits".to_string()));
+    assert!(ids(&plan_gates(&plan(), &change(&["docs/adr/0999-x.md"]), &facts())).contains(&"member-audits".to_string()));
 }
 
 /// ADR 0123 §7: the job-model check is a member-gate row (a layout change fails before a train, ER-9, ER-53), runs `./dev ci job-model check`
@@ -1549,6 +1643,7 @@ mod known_commit {
             all_apps: false,
             accept_not_measured: vec![],
             no_reuse: false,
+            overlap_since: None,
             set: Default::default(),
             cancel_ci_run: None,
             priority: Default::default(),
@@ -2198,6 +2293,7 @@ mod base_choice {
             all_apps: false,
             accept_not_measured: vec![],
             no_reuse: false,
+            overlap_since: None,
             set: Default::default(),
             cancel_ci_run: None,
             priority: Default::default(),
@@ -3476,6 +3572,32 @@ mod only_selection {
         assert_eq!(select_rows(rows(), &[]).unwrap().len(), 3, "no selector keeps every row");
     }
 
+    /// A docs-only sync tip plans no `clippy` row (nothing reaches a Cargo workspace): the bare kind `clippy` is a known per-workspace row, so
+    /// it becomes a skip with the reason and the other selected rows still run (train ac: it was "not measured" and the integrator
+    /// had to pass `--no-static`). A typo, a whole name of an unplanned workspace and an empty plan stay errors.
+    #[test]
+    fn a_known_row_kind_that_nothing_reaches_is_a_skip_with_a_reason_and_the_others_still_run() {
+        let got = select_rows(rows(), &["fmt".into(), "tests".into(), "overlap-tests".into()]).unwrap();
+        let ids: Vec<String> = got
+            .iter()
+            .map(|r| match r {
+                Planned::Skip { id, .. } => id.clone(),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(ids, ["fmt", "tests", "overlap-tests"]);
+        let reason = match &got[1] {
+            Planned::Skip { reason, .. } => reason.clone(),
+            _ => unreachable!(),
+        };
+        assert!(reason.contains("no `tests` row") && reason.contains("nothing"), "{reason}");
+        assert!(select_rows(rows(), &["clipy".into()]).is_err(), "a typo is still an error");
+        assert!(
+            select_rows(rows(), &["clippy nosuch".into()]).is_err(),
+            "a whole name that matches nothing is still an error"
+        );
+    }
+
     #[test]
     fn a_selection_that_matches_no_row_is_an_error_naming_it_and_the_valid_rows_never_an_empty_pass() {
         let e = select_rows(rows(), &["no such gate".into()]).unwrap_err();
@@ -3942,4 +4064,97 @@ fn the_rows_that_judge_approvals_carry_the_stage_of_the_run() {
         assert_eq!(stage_of(false, id).as_deref(), Some("branch-push"), "{id}: a push");
         assert_eq!(stage_of(true, id).as_deref(), Some("member-gate"), "{id}: the member gate");
     }
+}
+
+// ---- the overlap-tests row of `merge sync-member` (ER-21: green alone, broken with main) ----
+
+fn with_overlap(o: super::overlap::Overlap) -> Facts {
+    Facts { overlap: o, ..facts() }
+}
+
+fn overlap_of(ws: &str, names: &[&str]) -> super::overlap::Overlap {
+    super::overlap::Overlap::Packages(std::collections::BTreeMap::from([(
+        ws.to_string(),
+        names.iter().map(|n| n.to_string()).collect(),
+    )]))
+}
+
+fn overlap_rows(planned: &[Planned]) -> Vec<&Planned> {
+    planned.iter().filter(|p| id_of(p).starts_with("overlap-tests")).collect()
+}
+
+fn id_of(p: &Planned) -> &str {
+    match p {
+        Planned::Run(g) => &g.id,
+        Planned::Skip { id, .. } | Planned::NotMeasured { id, .. } | Planned::Broken { id, .. } => id,
+    }
+}
+
+/// Member and main both changed package X: the sync tip plans the host tests of X, narrowed to it, through the test cache.
+#[test]
+fn a_package_both_sides_changed_plans_its_overlap_tests_narrowed_to_it() {
+    let planned = plan_gates(
+        &plan(),
+        &change(&["crates/paddock-proc/src/lib.rs"]),
+        &with_overlap(overlap_of("crates", &["paddock-proc"])),
+    );
+    let rows = overlap_rows(&planned);
+    assert_eq!(rows.len(), 1, "{:?}", ids(&planned));
+    let Planned::Run(g) = rows[0] else {
+        panic!("not a run: {:?}", ids(&planned))
+    };
+    assert_eq!(g.id, "overlap-tests crates");
+    assert!(
+        g.args.windows(2).any(|w| w == ["--filter", "package(=paddock-proc)"]),
+        "{:?}",
+        g.args
+    );
+    assert!(g.args.contains(&"test-cache".to_string()) && g.heavy, "{:?}", g.args);
+}
+
+/// The sides touched disjoint packages: the row is skipped with that reason, never planned to run and never silent.
+#[test]
+fn disjoint_packages_skip_the_overlap_tests_with_the_reason() {
+    let planned = plan_gates(
+        &plan(),
+        &change(&["crates/paddock-proc/src/lib.rs"]),
+        &with_overlap(super::overlap::Overlap::Packages(Default::default())),
+    );
+    assert!(
+        matches!(overlap_rows(&planned).as_slice(), [Planned::Skip { id, reason }] if id == "overlap-tests" && reason.contains("disjoint")),
+        "{:?}",
+        ids(&planned)
+    );
+}
+
+/// Positive control (ER-33): an overlap that could not be computed is `not measured`, never a skip that reads as a pass.
+#[test]
+fn an_overlap_that_cannot_be_told_is_not_measured_never_a_skip() {
+    let planned = plan_gates(
+        &plan(),
+        &change(&["crates/paddock-proc/src/lib.rs"]),
+        &with_overlap(super::overlap::Overlap::Unknown("x".into())),
+    );
+    assert!(
+        matches!(overlap_rows(&planned).as_slice(), [Planned::NotMeasured { id, .. }] if id == "overlap-tests"),
+        "{:?}",
+        ids(&planned)
+    );
+}
+
+/// A developer's push does not ask for it: a skip naming `merge sync-member`, and it runs without `--member-gate`.
+#[test]
+fn a_push_skips_the_overlap_tests_and_the_row_needs_no_member_gate() {
+    let planned = plan_gates(&plan(), &change(&["crates/paddock-proc/src/lib.rs"]), &facts());
+    assert!(matches!(overlap_rows(&planned).as_slice(), [Planned::Skip { reason, .. }] if reason.contains("sync-member")));
+    let f = Facts {
+        member_gate: false,
+        ..with_overlap(overlap_of("crates", &["paddock-proc"]))
+    };
+    let planned = plan_gates(&plan(), &change(&["crates/paddock-proc/src/lib.rs"]), &f);
+    assert!(
+        matches!(overlap_rows(&planned).as_slice(), [Planned::Run(_)]),
+        "{:?}",
+        ids(&planned)
+    );
 }

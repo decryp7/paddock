@@ -621,6 +621,10 @@ impl Sim {
             }),
         );
         h.store = self.store.clone();
+        if self.mem.is_some() {
+            // No folder to ask the OS about (on Windows a path resolve and a drive query per agent).
+            h.fs_kind = Arc::new(|_| paddock_throttle::fsinfo::FsKind::Local);
+        }
         Agent { h, said }
     }
 
@@ -745,9 +749,10 @@ fn model_stuck_with(seed: u64, max: u32, sim: &Sim, broken: Broken) -> Option<St
 const MAXIMA: [u32; 3] = [1, 3, 5];
 /// Seeds per maximum of the full sweep (in memory).
 const MODEL_SEEDS: u64 = 400;
-/// Seeds per maximum against the real folder: 2 reach every kind of operation the full sweep reaches (measured, docs/benchmarks.md,
-/// "2026-11-28, the queue model in memory"); 4 keep a margin, and the test names what is missed if that ever changes.
-const REAL_SEEDS: u64 = 4;
+/// Seeds per maximum against the real folder: 2 reach every kind of operation the full sweep reaches, 1 does not (measured, docs/benchmarks.md,
+/// "2026-11-28, the throttle tests off the real folder"). A real seed costs 2 to 3 s on a Windows runner (file operations, run 9373), so
+/// no more run, and the test names what is missed if a rule change ever makes this too few.
+const REAL_SEEDS: u64 = 2;
 
 /// Runs `seeds` seeds per maximum in a fresh world each, in memory or on the real folder; returns the first failure and what it reached.
 fn sweep(real: bool, seeds: u64, broken: Broken) -> (Option<String>, BTreeSet<String>) {
@@ -780,7 +785,7 @@ fn the_queue_model_on_the_real_folder_reaches_every_operation_the_full_sweep_rea
     let missed: Vec<_> = full.difference(&real).collect();
     assert!(
         missed.is_empty(),
-        "the real-folder seeds miss what the in-memory sweep reaches (raise REAL_SEEDS to the measured number): {missed:?}"
+        "the real-folder seeds miss what the in-memory sweep reaches (raise REAL_SEEDS until it reaches them): {missed:?}"
     );
 }
 

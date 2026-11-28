@@ -211,7 +211,7 @@ fn write_shim(path: &Path, calls: &Path, fail: Fail) {
             .appends_with(&calls.with_file_name("tokens").display().to_string(), "tok={env:PADDOCK_DEV_TOKEN}\n")
             .appends_with(
                 &calls.display().to_string(),
-                "{args} port={env:SCCACHE_SERVER_PORT} io={env:SCCACHE_IGNORE_SERVER_IO_ERROR} dir={env:SCCACHE_DIR} size={env:SCCACHE_CACHE_SIZE} redis={env:SCCACHE_REDIS_ENDPOINT} db={env:SCCACHE_REDIS_DB} chain={env:SCCACHE_MULTILEVEL_CHAIN} bucket={env:SCCACHE_BUCKET} idle={env:SCCACHE_IDLE_TIMEOUT} meta={env:AWS_EC2_METADATA_DISABLED} key={env:AWS_ACCESS_KEY_ID} secret={env:AWS_SECRET_ACCESS_KEY} errlog={env:SCCACHE_ERROR_LOG} endpoint={env:SCCACHE_ENDPOINT} ssl={env:SCCACHE_S3_USE_SSL}\n",
+                "{args} port={env:SCCACHE_SERVER_PORT} io={env:SCCACHE_IGNORE_SERVER_IO_ERROR} dir={env:SCCACHE_DIR} size={env:SCCACHE_CACHE_SIZE} redis={env:SCCACHE_REDIS_ENDPOINT} db={env:SCCACHE_REDIS_DB} chain={env:SCCACHE_MULTILEVEL_CHAIN} bucket={env:SCCACHE_BUCKET} idle={env:SCCACHE_IDLE_TIMEOUT} meta={env:AWS_EC2_METADATA_DISABLED} key={env:AWS_ACCESS_KEY_ID} secret={env:AWS_SECRET_ACCESS_KEY} errlog={env:SCCACHE_ERROR_LOG} endpoint={env:SCCACHE_ENDPOINT} ssl={env:SCCACHE_S3_USE_SSL} conf={env:SCCACHE_CONF}\n",
             )
     };
     let mut shim = StandIn::new(path.parent().unwrap(), path.file_name().unwrap().to_str().unwrap())
@@ -524,13 +524,40 @@ fn redis_is_used_when_asked_for_or_when_auto_has_an_endpoint() {
 }
 
 #[test]
-fn a_server_that_does_not_start_or_answer_leaves_the_wrapper_unset_and_the_step_green() {
-    for shim in ["--start-server", "--show-stats"] {
+fn a_server_that_does_not_start_or_answer_is_tried_twice_then_the_job_is_plainly_uncached_and_says_why() {
+    for (shim, cause) in [("--start-server", "start-failed-twice"), ("--show-stats", "no-answer-after-start")] {
         let r = Runner::new(Some(Fail::On(shim)));
         let (_, rs) = same(&r, &LOCAL, &[], true);
-        assert_eq!((rs.code, rs.env.as_str()), (0, ""), "{shim}");
+        // No wrapper, no port, no conf: only the state, so the stats step reads "not measured", never the default port's numbers (ER-33, ER-51).
+        assert_eq!(
+            (rs.code, rs.env.as_str()),
+            (0, format!("PADDOCK_SCCACHE_STATE=off:{cause}\n").as_str()),
+            "{shim}"
+        );
         assert!(rs.out.contains("::warning::the sccache server did not start"), "{}", rs.out);
+        assert_eq!(rs.calls.matches("--start-server").count(), 2, "one retry, no more: {}", rs.calls);
+        assert!(rs.out.contains(cause), "the cause is in the log: {}", rs.out);
     }
+}
+
+#[test]
+fn a_server_that_starts_gets_a_start_timeout_above_the_guards_stall_in_its_conf_and_the_jobs_env() {
+    let r = Runner::new(Some(Fail::Never));
+    let (sh, rs) = same(&r, &LOCAL, &[], true);
+    for res in [&sh, &rs] {
+        let conf = res
+            .env
+            .lines()
+            .find_map(|l| l.strip_prefix("SCCACHE_CONF="))
+            .unwrap_or_else(|| panic!("SCCACHE_CONF is in the job's env: {}", res.env));
+        let text = std::fs::read_to_string(conf).unwrap_or_else(|e| panic!("the conf {conf}: {e}"));
+        assert_eq!(text.trim(), "server_startup_timeout_ms = 30000", "{conf}");
+        assert!(res.env.contains("SCCACHE_SERVER_PORT="), "the job's own port: {}", res.env);
+        assert!(!res.env.contains("PADDOCK_SCCACHE_STATE"), "{}", res.env);
+    }
+    // The server's own start sees the conf too (the client's wait is read there, from the file named by SCCACHE_CONF).
+    let start = rs.calls.lines().find(|l| l.starts_with("--start-server")).unwrap();
+    assert!(!start.trim_end().ends_with("conf="), "the start call has SCCACHE_CONF: {start}");
 }
 
 #[test]

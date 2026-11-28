@@ -32,6 +32,11 @@ fn dev(path: &str, args: &[&str]) -> (i32, String, String) {
     dev_heavy(path, args, Some("off"), true)
 }
 
+/// The state folder of a run whose `PATH` starts with the test's own folder `path`.
+fn state_of(path: &str) -> String {
+    path.split(':').next().unwrap_or("/nonexistent").to_string() + "/state"
+}
+
 #[allow(clippy::disallowed_methods)]
 fn dev_heavy(path: &str, args: &[&str], heavy: Option<&str>, test_off: bool) -> (i32, String, String) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -48,6 +53,9 @@ fn dev_heavy(path: &str, args: &[&str], heavy: Option<&str>, test_off: bool) -> 
         .env_remove("PADDOCK_THROTTLE")
         .envs(heavy.map(|h| ("PADDOCK_THROTTLE", h)))
         .envs(test_off.then_some(("PADDOCK_TEST_THROTTLE_OFF", "1")))
+        // Its own state folder (logs, history, build-folder locks): the repository's is shared by every worktree and held by real gates,
+        // and a test that took a lock there waited for them for 900 s (train aa member 6, 2026-11-28; ER-14, ER-51).
+        .env("PADDOCK_PREPUSH_STATE", state_of(path))
         // An empty cache: the heavy tool is built (by the fake cargo, which builds nothing) and never taken from the user's.
         .env(
             "PADDOCK_DEV_HOME",
@@ -139,6 +147,23 @@ fn tree_everything_that_runs_green_is_exit_0() {
     );
 }
 
+/// ER-14, ER-51: a run keeps its logs and its build-folder lock in the folder the test gave it. The repository's own state folder is
+/// shared by every worktree, and a lock taken there waits for the real gates that hold it (train aa member 6: 900 s, no CPU).
+#[test]
+fn tree_a_run_takes_its_build_folder_lock_in_the_state_folder_it_was_given() {
+    let d = tempfile::tempdir().unwrap();
+    let path = fake_bin(d.path(), Actions::new());
+    let (code, out, err) = dev(&path, &["--only", "fmt,clippy"]);
+    assert_eq!(code, 0, "{err}{out}");
+    let state = std::path::PathBuf::from(state_of(&path));
+    let locks: Vec<_> = std::fs::read_dir(state.join("build-locks"))
+        .unwrap_or_else(|e| panic!("no lock folder in the given state folder {}: {e}\n{out}", state.display()))
+        .flatten()
+        .collect();
+    assert!(!locks.is_empty(), "the clippy row took no build-folder lock in {}", state.display());
+    assert!(state.join("logs").is_dir(), "no gate logs in {}", state.display());
+}
+
 #[test]
 fn tree_when_heavy_cannot_be_built_the_compiles_are_not_measured_exit_6_never_a_pass() {
     let d = tempfile::tempdir().unwrap();
@@ -169,6 +194,7 @@ fn listed(name: &str) -> bool {
     const NAMED: &[&str] = &[
         crate::dev_bin::OFF.0,
         "PADDOCK_DEV_HOME",
+        "PADDOCK_PREPUSH_STATE",
         "PADDOCK_THROTTLE",
         "PADDOCK_TEST_THROTTLE_OFF",
         "ENGINEERING_RULES",

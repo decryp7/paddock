@@ -82,6 +82,24 @@ fn newest_folder_mtime(dir: &Path, depth: u32, budget: &mut u32) -> std::time::S
     newest
 }
 
+/// How long the sccache client waits for a server to start, in milliseconds (`server_startup_timeout_ms` of the config file named by
+/// `SCCACHE_CONF`; sccache has no environment variable for it, its default is 10 s). Cause, measured: at its start the server runs a
+/// storage check (a GET and a PUT of `.sccache_check`, sccache 0.20.1 src/server.rs `start_server`, src/cache/storage.rs `check`),
+/// and a hung S3 store is cut by the stall guard only after its own 10 s (`paddock_net::stall_guard::Limits`), so the client gave up
+/// at the same moment and the tolerant l0 policy never ran: in run 9274 (RustFS hung, 14:41 to 14:44Z) four starts took exactly
+/// 10.0 s and those jobs built uncached. 30 s covers the check's GET and PUT each cut by the guard (ER-12: a limit raised with its
+/// measured cause beside it). Twin: the shell step of `.gitea/actions/setup-rust/action.yml`; a test keeps both above the guard.
+pub const SERVER_STARTUP_TIMEOUT_MS: u64 = 30_000;
+
+/// The text of the job's sccache config file: only the client's start wait; every other setting stays in the environment, which
+/// outranks the file.
+pub fn server_conf_text() -> String {
+    format!("server_startup_timeout_ms = {SERVER_STARTUP_TIMEOUT_MS}\n")
+}
+
+/// The `$GITHUB_ENV` variable that says the job's server did not start (`off:<cause>`); `dev ci sccache-stats` reads it.
+pub const STATE_VAR: &str = "PADDOCK_SCCACHE_STATE";
+
 /// The server port in a Linux container (one job per host there); a host job takes its slot's from ports.txt.
 const CONTAINER_PORT: &str = "4227";
 /// What an sccache child gets from the job's environment besides the base list (paddock_proc::KEPT_ENV): its own settings,
@@ -769,6 +787,21 @@ impl Step<'_> {
         if let Some(full) = server_settings.as_mut() {
             full.extend(basedirs);
         }
+        // The client's start wait (SERVER_STARTUP_TIMEOUT_MS): the server's own start and every later client of the job read it.
+        let conf = self.temp_base().join("paddock-sccache.toml");
+        match std::fs::write(&conf, server_conf_text()) {
+            Ok(()) => {
+                let kv = ("SCCACHE_CONF".to_string(), conf.display().to_string());
+                settings.push(kv.clone());
+                if let Some(full) = server_settings.as_mut() {
+                    full.push(kv);
+                }
+            }
+            Err(e) => self.say(format!(
+                "::warning::sccache: cannot write its config {} ({e}); the client keeps its 10 s start wait.",
+                conf.display()
+            )),
+        }
         let secret = endpoint
             .rsplit_once('@')
             .map(|(userinfo, _)| userinfo.to_string())
@@ -792,27 +825,45 @@ impl Step<'_> {
         }
         // A server left on this port by an earlier job would keep that job's backend: start it fresh with this job's settings.
         let _ = self.run(&call("--stop-server"));
-        // The server outlives this step and would hold a pipe open, so its starter writes to a file.
-        let log = self
-            .temp_base()
-            .join(format!("paddock-sccache-start-{}-{}.log", std::process::id(), nanos()));
-        let started = self.run(&call("--start-server").output(Output::File(log.clone())));
-        let _ = std::fs::remove_file(&log);
-        let answers = matches!(&started, Ok(r) if r.success) && matches!(self.run(&call("--show-stats")), Ok(r) if r.success);
-        if !answers {
-            // The cache must slow a build down, never fail it: RUSTC_WRAPPER stays unset and the job builds without sccache.
+        // Two tries: a slow storage check at the start (run 9274) is not a reason to build uncached. The server outlives this step and
+        // would hold a pipe open, so its starter writes to a file.
+        let mut cause = "start-failed-twice";
+        let mut answers = false;
+        for attempt in 0..2 {
+            if attempt == 1 {
+                self.say("sccache: the server did not start; stopping it and starting it once more.");
+                let _ = self.run(&call("--stop-server"));
+            }
+            let log = self
+                .temp_base()
+                .join(format!("paddock-sccache-start-{}-{}.log", std::process::id(), nanos()));
+            let started = self.run(&call("--start-server").output(Output::File(log.clone())));
+            let _ = std::fs::remove_file(&log);
+            let up = matches!(&started, Ok(r) if r.success);
+            answers = up && matches!(self.run(&call("--show-stats")), Ok(r) if r.success);
+            if answers {
+                break;
+            }
+            cause = if up { "no-answer-after-start" } else { "start-failed-twice" };
             if let Ok(r) = &started
                 && !r.success
             {
                 let t = tail(&r.stderr, TAIL_LINES);
                 self.say(t);
             }
+        }
+        if !answers {
+            // The cache must slow a build down, never fail it: RUSTC_WRAPPER and the port stay unset (plainly uncached, never half
+            // wired) and the state says why, so the stats step reports "not measured" instead of asking some other server.
             let _ = self.run(&call("--stop-server"));
             if let Some(port) = guard_port {
                 crate::ci_s3_guard::stop(port);
             }
-            self.say("::warning::the sccache server did not start; the build runs without the compile cache.");
-            return Ok(());
+            self.say(format!(
+                "::warning::the sccache server did not start ({cause}); the build runs without the compile cache."
+            ));
+            self.summary_line(&format!("- sccache: OFF ({cause}); this job built without the compile cache"));
+            return self.append("GITHUB_ENV", &[format!("{STATE_VAR}=off:{cause}")]);
         }
         // sccache itself is the wrapper, never a script around it (Windows starts a .cmd through cmd.exe, whose 8191-character
         // command line rustc's arguments for a large crate exceed). Cached builds are not incremental.
@@ -1364,6 +1415,23 @@ mod tests {
         assert_eq!(slot_cache_size(Some("x1"), 4), "10G", "not a number: the default 40");
         assert_eq!(slot_cache_size(Some(""), 4), "10G");
         assert_eq!(slot_cache_size(Some("3"), 4), "2G");
+    }
+
+    #[test]
+    fn the_clients_start_wait_is_above_the_s3_guards_stall_so_the_servers_storage_check_can_finish() {
+        // The server's start runs a storage check (a GET and a PUT of `.sccache_check`); a store that hangs is cut by the guard only
+        // after its stall. The client's 10 s default gave up at the same moment (run 9274), so the tolerant l0 policy never ran.
+        let stall = paddock_net::stall_guard::Limits::default().stall;
+        assert!(
+            Duration::from_millis(SERVER_STARTUP_TIMEOUT_MS) > stall,
+            "{SERVER_STARTUP_TIMEOUT_MS} ms must exceed the guard's {stall:?}"
+        );
+        assert_eq!(server_conf_text(), "server_startup_timeout_ms = 30000\n");
+        let parsed: toml::Table = server_conf_text().parse().expect("sccache reads its config file as TOML");
+        assert_eq!(
+            parsed["server_startup_timeout_ms"].as_integer(),
+            Some(SERVER_STARTUP_TIMEOUT_MS as i64)
+        );
     }
 
     #[test]

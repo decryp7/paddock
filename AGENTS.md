@@ -85,7 +85,7 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 - **Merge queue: parked (user, 2026-11-24).** `./dev queue` and `./dev pr` (docs/plans/merge-queue.md) stay in the tool, but
   nothing runs them and CI does not test them; trains are built by hand with the member gate (`./dev merge check --gates`).
   A member merges current main and re-runs its member gate on that tip before it joins a train (rule 100). `./dev merge sync-member <train>`, run after the merge, runs the
-  fast static rows (fmt, conformance, gates-register, clippy, clippy-windows, in the train lane: `--priority train`) on the sync tip first and fails on a bad row (`--no-static "<reason>"` skips them, logged);
+  fast static rows (fmt, conformance, gates-register, clippy, clippy-windows, `goldens` and `overlap-tests`, in the train lane: `--priority train`) on the sync tip first and fails on a bad row (`--no-static "<reason>"` skips them, logged). `overlap-tests` (user, 2026-11-28, in chat) runs the host tests of the packages that both the member (its pre-merge tip against the fork point) and main (fork point to the train tip) changed, by the planner's reach (`pre_push/overlap.rs`): a member green alone that breaks on the combined tree is where both sides changed one package. No shared package skips it with the reason; a fork point or plan that cannot be computed is not measured, never a pass;
   the member's own CI trial (the affected jobs on the train, `ci dispatch --trial` on `sync/<member>/<short sha>`, a new ref per synced commit that sync-member pushes with a plain push: integrator role only) is dispatched
   **only for a member with no green trial of its own on main** (a Linux trial with `--onto origin/main` on its current head, or on a head whose only differences are merges of main; user 2026-11-27).
   A member that has one runs sync-member and joins with `--no-trial "trial <run id> green on main"` (logged); members without one join on the static rows, and **one trial of the
@@ -181,12 +181,16 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   (6, not held, while a slow row is unfinished or missing). A run with `--set fast` or `--set slow` leaves no whole-run pass record. The
   Linux tests are CI's Linux jobs on d-gtr9. A push or member gate prints a per-row table (queued s, run s, concurrent) and writes
   `row-timings.tsv` in its log folder.
-- **Mutation-testing of the diff (user decision 127, 2026-11-27).** The member gate's `mutants` row (`./dev mutants gate --base <merge base>`,
-  tools/paddock-dev/src/mutants_gate.rs) runs the pinned cargo-mutants (`mutants_gate::PIN`; install it with `cargo install cargo-mutants
-  --version <PIN> --locked`, nothing installs it for you) `--in-diff` over the Rust functions changed in `tools/paddock-dev` and `crates/`, to find
-  a test or a guard that never reaches the code it claims to check. A MISSED mutant is a `::warning::` naming the function and the mutation;
-  timeouts, unviable mutants and a run cut by the cap are counted apart and never a pass. Report-only until its first green run (the
-  `row:mutants` entry of docs/gates.toml, `MODE`); skipped in a developer's push. Measured: docs/benchmarks.md.
+- **Mutation-testing of the diff (user decisions 127 and 143, 2026-11-27 and 11-28).** `.gitea/workflows/mutants.yml` (Linux; a push to main
+  after a landing and `workflow_dispatch` with a `base`; report-only; **not in ci.yml**: its shards held the Linux runner and made trains queue
+  43 to 62 minutes) runs the pinned cargo-mutants (`mutants_gate::PIN`, `./dev mutants pin`, `cargo install --locked`) `--in-diff` over the Rust
+  functions the landing changed in `tools/paddock-dev` and `crates/` (tools/paddock-dev/src/mutants_gate.rs), to find a test or a guard that never
+  reaches the code it claims to check. Its plan job counts the diff's mutants (`./dev mutants plan --base <rev>`) and plans one shard for each 6 of
+  them (at most 12); the shards run one at a time (`./dev mutants gate --base <rev> --shard k/n`), and the plan and each shard first end at once
+  while a train is in CI (`./dev ci schedule-skip --any-event`: nothing waits on a slot), saying so in the record line. A MISSED mutant is a
+  `::warning::` naming the function and the mutation; timeouts, unviable mutants and a shard that ran out of time are counted apart and never a
+  pass. Report-only until its first green run (`MODE`, review 2026-12-11). Locally: `./dev mutants gate --base <rev>` (pin installed by hand).
+  Measured: docs/benchmarks.md.
 - Before committing, the gates of the affected projects, for example:
 
   ```sh
@@ -208,7 +212,7 @@ Run these as well as the touched-file checks, on the merged tree when you hand b
 - Last, on a branch for a train: merge `origin/main` into the branch, then run `./dev check --pre-push --member-gate --base origin/main`
   on that head (user, 2026-11-25). The train's member gate reuses its green rows for every workspace only this branch touched; a
   branch behind main has another tree there, so the train runs them again (`.claude/skills/land-train`, step 3).
-- The member audits, the repository-wide audits of tools/paddock-dev that only the member gate runs (a developer's `./dev check --pre-push` skips them): `cargo nextest run --profile member-audits --locked --no-tests=fail` in `tools/paddock-dev`.
+- The member audits, the repository-wide audits of tools/paddock-dev (a developer's `./dev check --pre-push` runs the source audits too (not the `graph_` and `tree_` classes) and skips them only when every changed file is under `AUDIT_BLIND` in `tools/paddock-dev/src/pre_push/gates.rs`, the design record's prose; user, 2026-11-28, in chat): `cargo nextest run --profile member-audits --locked --no-tests=fail` in `tools/paddock-dev`.
 - A review reads a diff with `git show` and builds only in a scratch copy, never in the author's worktree.
 - A design document (ADR, plan, research note) records the branch heads it read (ADR 0091), checks claims about shipped code with `git tag --contains <commit>`, and names every check it relies on as built on origin/main, held on a named branch, or a prerequisite (ADR 0096).
 - A loop that runs a command, process, query or request once per item needs a `// per-item: <reason>` comment, and a new bulk command needs a budget test (rule 85, ADR 0108).

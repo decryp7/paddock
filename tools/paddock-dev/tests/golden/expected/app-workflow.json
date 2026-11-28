@@ -21,6 +21,7 @@
  },
  "packages": {},
  "cargoOnly": [],
+ "gradePackages": {},
  "why": {
   "app:x": [
    "its workflow .gitea/workflows/x.yml"
