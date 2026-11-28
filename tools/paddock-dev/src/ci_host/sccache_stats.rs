@@ -12,6 +12,7 @@ use crate::ci_tool::ToolCall;
 use crate::pathfind::on_path;
 use std::collections::HashMap;
 use std::io::Write;
+use std::path::Path;
 use std::time::Duration;
 
 const STATS_TIMEOUT: Duration = Duration::from_secs(120);
@@ -79,6 +80,91 @@ pub(super) fn warm_label(stats: &str) -> Option<String> {
     })
 }
 
+/// How much of the end of the server's error log is read for the causes ([`error_causes`]): bounded, as a bad night writes one line per
+/// refused write.
+const ERROR_LOG_READ_BYTES: u64 = 64 * 1024;
+/// The longest a cause is shown.
+const CAUSE_CHARS: usize = 200;
+
+/// A signed URL loses its query, a secret-named value is replaced: what the log lines show never carries a signature or a key.
+fn masked(line: &str) -> String {
+    use regex::Regex;
+    use std::sync::LazyLock;
+    // The patterns are literals of this file, run by the tests below.
+    #[allow(clippy::expect_used)]
+    fn re(pattern: &str) -> Regex {
+        Regex::new(pattern).expect("a valid pattern")
+    }
+    static QUERY: LazyLock<Regex> = LazyLock::new(|| re(r#"(https?://[^\s"'<>?,)}]+)\?[^\s"'<>,)}]*"#));
+    static SECRET: LazyLock<Regex> = LazyLock::new(|| {
+        re(
+            r#"(?i)((?:secret|token|password|signature|credential|authorization|access[_-]?key)[a-z_-]*["']?\s*[=:]\s*)("[^"]*"|[^\s,&"'}]+)"#,
+        )
+    });
+    let no_query = QUERY.replace_all(line, "${1}?...");
+    SECRET.replace_all(&no_query, "${1}***").into_owned()
+}
+
+/// The cause one error-log line names: the store's own message (opendal's `message: "..."`, or an XML `<Message>`), else the line after
+/// its level word, both masked and cut. `None` for a blank line.
+fn cause_of(line: &str) -> Option<String> {
+    let line = line.trim();
+    if line.is_empty() {
+        return None;
+    }
+    let between = |from: &str, to: &str| {
+        line.split_once(from)
+            .and_then(|(_, r)| r.split_once(to))
+            .map(|(m, _)| m.to_string())
+    };
+    let cause = between("message: \\\"", "\\\"")
+        .or_else(|| between("message: \"", "\""))
+        .or_else(|| between("<Message>", "</Message>"))
+        .unwrap_or_else(|| {
+            ["ERROR ", "WARN "]
+                .iter()
+                .find_map(|lvl| line.split_once(lvl).map(|(_, r)| r))
+                .unwrap_or(line)
+                .to_string()
+        });
+    Some(masked(&cause).chars().take(CAUSE_CHARS).collect())
+}
+
+/// The distinct causes in the server's error log, most frequent first (ties in first-seen order), each with its count.
+pub(super) fn error_causes(log: &str) -> Vec<(String, usize)> {
+    let mut seen: Vec<(String, usize)> = Vec::new();
+    for cause in log.lines().filter_map(cause_of) {
+        match seen.iter_mut().find(|(c, _)| *c == cause) {
+            Some((_, n)) => *n += 1,
+            None => seen.push((cause, 1)),
+        }
+    }
+    seen.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+    seen
+}
+
+/// ER-27, ER-33: the one warning for a job whose S3 level (L1) stored nothing although it tried (runs 9381 and 9388: RustFS answered
+/// every PUT with "Bucket quota exceeded" and the log said only "writes 0"). `Some(line)` when L1 writes are 0 and its write failures
+/// are above 0; the top cause comes from the error log (`log` is its path when the job has one). `None` when the counters are missing
+/// (not measured) or some write went through.
+pub(super) fn write_refusal_warning(stats: &str, causes: &[(String, usize)], log: Option<&str>) -> Option<String> {
+    let (writes, failures) = (stat(stats, "L1 (s3) writes")?, stat(stats, "L1 (s3) write failures")?);
+    if writes != 0 || failures == 0 {
+        return None;
+    }
+    let tail = match (causes.first(), log) {
+        (Some((cause, _)), _) if cause.to_lowercase().contains("quota") => {
+            format!("{cause}; free space or raise the quota on the sccache bucket")
+        }
+        (Some((cause, _)), _) => format!("{cause}; check the S3 store (bucket, key policy, server)"),
+        (None, Some(log)) => {
+            format!("cause unknown: the error log {log} has no line about it; check the S3 store (bucket, quota, key policy)")
+        }
+        (None, None) => "cause unknown: no error log (set SCCACHE_ERROR_LOG, which setup-rust sets when the S3 level is on)".to_string(),
+    };
+    Some(format!("::warning::sccache: {failures} S3 writes refused: {tail}"))
+}
+
 /// The command over the real machine.
 pub fn run(env: &HashMap<String, String>, out: &mut dyn Write) -> i32 {
     let mut step = Step {
@@ -123,6 +209,14 @@ pub fn run(env: &HashMap<String, String>, out: &mut dyn Write) -> i32 {
             if let Some(line) = miss_warning(&r.stdout, &leg, step.var("PADDOCK_CI_SLOT").unwrap_or("none")) {
                 step.say(line);
             }
+            let log = step.var("SCCACHE_ERROR_LOG").map(str::to_string);
+            let causes = log
+                .as_deref()
+                .map(|l| error_causes(&crate::ci_tool::read_tail(Path::new(l), ERROR_LOG_READ_BYTES)))
+                .unwrap_or_default();
+            if let Some(line) = write_refusal_warning(&r.stdout, &causes, log.as_deref()) {
+                step.say(line);
+            }
         }
         _ => step.say("::notice::sccache statistics are unavailable (the cache server was not reachable)."),
     }
@@ -141,11 +235,16 @@ fn job_end(env: &HashMap<String, String>, step: &mut Step, stop_server: bool) {
     {
         let lines: Vec<&str> = text.trim_end().lines().collect();
         let from = lines.len().saturating_sub(ERROR_LOG_LINES);
+        let causes = error_causes(&crate::ci_tool::read_tail(Path::new(log), ERROR_LOG_READ_BYTES))
+            .iter()
+            .map(|(c, n)| format!("  (x{n}) {c}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         step.say(format!(
-            "::warning::sccache's error log {log} is not empty ({} lines); the last {}:\n{}",
+            "::warning::sccache's error log {log} is not empty ({} lines); the distinct causes:\n{causes}\nthe last {}:\n{}",
             lines.len(),
             lines.len() - from,
-            lines[from..].join("\n")
+            lines[from..].iter().map(|l| masked(l)).collect::<Vec<_>>().join("\n")
         ));
     }
     // The S3 timeout guard (setup-rust starts it when the S3 level is on): what it cut, then its stop.
@@ -491,6 +590,101 @@ Multi-level cache levels              2
             &[("SCCACHE_ERROR_LOG", &d.path().join("absent.log").display().to_string())],
         );
         assert!(!out.contains("error log"), "a missing log says nothing: {out}");
+    }
+
+    /// What the job's counters read when RustFS refused every PUT (runs 9381 and 9388): 0 L1 writes, 897 write failures.
+    const REFUSED: &str = "Cache hits                            0
+Cache misses                         897
+Multi-level cache levels              2
+  L1 (s3) hits                        0
+  L1 (s3) misses                     897
+  L1 (s3) writes                      0
+  L1 (s3) write failures            897
+";
+    /// Two refused writes as the server logs them (opendal's error text, with a signed URL and a key in it) and one other line.
+    const QUOTA_LOG: &str = "2026-11-28T10:00:01Z ERROR sccache::cache::multilevel: Failed to write: Unexpected (persistent) at write, context: { uri: http://172.16.1.220:15000/sccache-paddock/paddock-ci/Linux-x86_64/a/b/key?X-Amz-Signature=deadbeef&X-Amz-Credential=AKIAEXAMPLEKEY12345, response: Parts { status: 400 }, service: s3 } => S3Error { code: \"InvalidRequest\", message: \"Bucket quota exceeded. Current usage: 107374182274 bytes, limit: 107374182400 bytes\", resource: \"/x\" }
+2026-11-28T10:00:02Z ERROR sccache::cache::multilevel: Failed to write: Unexpected (persistent) at write, context: { uri: http://172.16.1.220:15000/sccache-paddock/paddock-ci/Linux-x86_64/c/d/key2?X-Amz-Signature=cafe, response: Parts { status: 400 }, service: s3 } => S3Error { code: \"InvalidRequest\", message: \"Bucket quota exceeded. Current usage: 107374182274 bytes, limit: 107374182400 bytes\", resource: \"/y\" }
+2026-11-28T10:00:03Z ERROR sccache: connection reset by peer
+";
+
+    #[test]
+    fn a_quota_refused_error_log_is_counted_by_cause_with_no_signature_or_key() {
+        let causes = error_causes(QUOTA_LOG);
+        assert_eq!(causes.len(), 2, "{causes:?}");
+        assert_eq!(causes[0].1, 2, "the most frequent cause first: {causes:?}");
+        assert!(
+            causes[0]
+                .0
+                .starts_with("Bucket quota exceeded. Current usage: 107374182274 bytes, limit: 107374182400 bytes"),
+            "{causes:?}"
+        );
+        let all = format!("{causes:?}");
+        assert!(
+            !all.contains("deadbeef") && !all.contains("AKIA") && !all.contains("X-Amz-Signature"),
+            "no secret: {all}"
+        );
+    }
+
+    #[test]
+    fn s3_writes_of_zero_with_failures_get_one_warning_naming_the_quota() {
+        let w = write_refusal_warning(REFUSED, &error_causes(QUOTA_LOG), Some("/tmp/e.log")).unwrap();
+        assert!(w.starts_with("::warning::") && !w.contains('\n'), "{w}");
+        assert!(
+            w.contains("897 S3 writes refused: Bucket quota exceeded") && w.contains("free space or raise the quota on the sccache bucket"),
+            "{w}"
+        );
+    }
+
+    #[test]
+    fn without_an_error_log_the_cause_is_unknown_and_the_setting_is_named() {
+        let w = write_refusal_warning(REFUSED, &[], None).unwrap();
+        assert!(
+            w.contains("897 S3 writes refused") && w.contains("cause unknown") && w.contains("SCCACHE_ERROR_LOG"),
+            "{w}"
+        );
+        let w = write_refusal_warning(REFUSED, &[], Some("/tmp/e.log")).unwrap();
+        assert!(
+            w.contains("cause unknown") && w.contains("/tmp/e.log"),
+            "a log with no cause line: {w}"
+        );
+    }
+
+    /// The positive control (ER-33): with writes that succeeded, or no failures, or no counters, the warning stays silent.
+    #[test]
+    fn healthy_or_unmeasured_s3_writes_get_no_refusal_warning() {
+        let ok = REFUSED
+            .replace("writes                      0", "writes                    500")
+            .replace("failures            897", "failures              0");
+        assert_eq!(write_refusal_warning(&ok, &error_causes(QUOTA_LOG), Some("l")), None);
+        assert_eq!(
+            write_refusal_warning("Cache hits 0\n", &[], None),
+            None,
+            "no counters: not measured"
+        );
+        let some = REFUSED.replace("writes                      0", "writes                     12");
+        assert_eq!(write_refusal_warning(&some, &[], None), None, "some writes went through");
+    }
+
+    #[test]
+    fn the_step_prints_the_refusal_warning_from_a_quota_error_log() {
+        let d = crate::ci_host::canonical_tempdir();
+        let calls = d.path().join("calls").display().to_string();
+        StandIn::new(d.path(), "sccache")
+            .answers(Actions::new().appends_with(&calls, CALL_LINE).stdout(REFUSED))
+            .install()
+            .unwrap();
+        let log = d.path().join("sccache-error.log");
+        std::fs::write(&log, QUOTA_LOG).unwrap();
+        let (code, out, _) = go(
+            d.path(),
+            &[("SCCACHE_SERVER_PORT", "4999"), ("SCCACHE_ERROR_LOG", &log.display().to_string())],
+        );
+        assert_eq!(code, 0);
+        assert!(out.contains("897 S3 writes refused: Bucket quota exceeded"), "{out}");
+        assert!(out.contains("(x2)"), "the distinct causes are listed with counts: {out}");
+        assert!(!out.contains("deadbeef") && !out.contains("AKIAEXAMPLE"), "{out}");
+        let (_, out, _) = go(d.path(), &[("SCCACHE_SERVER_PORT", "4999")]);
+        assert!(out.contains("cause unknown") && out.contains("SCCACHE_ERROR_LOG"), "{out}");
     }
 
     #[test]
