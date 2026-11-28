@@ -122,15 +122,59 @@ pub struct Lookup {
 
 /// The store port. The calls are bulk: N targets cost one call (ER-20). A lookup fails per item (ADR 0116 §5, amended 2026-11-28): a key
 /// whose request failed is an `Err` for that key and the others keep their answers, and a caller runs only that target (fail open).
-/// Writes and deletes are atomic: an error is for the whole call.
+/// Writes and deletes fail per key too (amended 2026-11-28, run 9350: one PUT timing out lost all 61 records of a leg): a record whose
+/// request failed is an `Err` for that record and the others are stored.
 pub trait Store {
     /// One answer per lookup, in order: the record, `None` for a miss, or the cause that this key could not be read.
     fn get_many(&self, lookups: &[Lookup]) -> Vec<Result<Option<Record>, StoreError>>;
-    /// Writes the records, replacing one with the same key.
-    fn put_many(&self, records: &[Record]) -> Result<(), StoreError>;
+    /// Writes the records, replacing one with the same key. One answer per record, in order: `Ok` when it is stored, else the cause.
+    fn put_many(&self, records: &[Record]) -> Vec<Result<(), StoreError>>;
     /// Deletes the records under these keys and returns each one that was there (the nightly's invalidation names the run a deleted
-    /// pass came from, ADR 0116 §6). One answer per lookup, in order.
-    fn delete_many(&self, lookups: &[Lookup]) -> Result<Vec<Option<Record>>, StoreError>;
+    /// pass came from, ADR 0116 §6). One answer per lookup, in order: the deleted record, `None` when there was none, or the cause.
+    fn delete_many(&self, lookups: &[Lookup]) -> Vec<Result<Option<Record>, StoreError>>;
+}
+
+/// What a write answered, per record: how many were stored and which were lost, with the cause counted (ER-27).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Stored {
+    /// Records stored.
+    pub stored: usize,
+    /// Each lost record's target and cause.
+    pub lost: Vec<(String, String)>,
+}
+
+impl Stored {
+    /// Pairs each record with its answer from [`Store::put_many`].
+    pub fn of(records: &[Record], answers: Vec<Result<(), StoreError>>) -> Stored {
+        let mut out = Stored::default();
+        for (r, a) in records.iter().zip(answers) {
+            match a {
+                Ok(()) => out.stored += 1,
+                Err(e) => out.lost.push((r.target.clone(), e.0)),
+            }
+        }
+        out
+    }
+
+    /// The lost records by cause: `1 of 61 records not stored: 1 x curl failed: ... (28) ...`; `None` when nothing was lost.
+    pub fn lost_line(&self) -> Option<String> {
+        if self.lost.is_empty() {
+            return None;
+        }
+        let mut causes: Vec<(&str, usize)> = Vec::new();
+        for (_, c) in &self.lost {
+            match causes.iter_mut().find(|(k, _)| k == c) {
+                Some((_, n)) => *n += 1,
+                None => causes.push((c, 1)),
+            }
+        }
+        let list = causes.iter().map(|(c, n)| format!("{n} x {c}")).collect::<Vec<_>>().join("; ");
+        Some(format!(
+            "{} of {} records not stored: {list}",
+            self.lost.len(),
+            self.lost.len() + self.stored
+        ))
+    }
 }
 
 /// The local store: `<dir>/v<schema>/<class>/<target slug>/<key>.json`.
@@ -215,17 +259,20 @@ impl FsStore {
 }
 
 impl Store for FsStore {
-    fn delete_many(&self, lookups: &[Lookup]) -> Result<Vec<Option<Record>>, StoreError> {
-        let found = self.get_many(lookups).into_iter().collect::<Result<Vec<_>, _>>()?;
-        for l in lookups {
-            let p = self.path(&l.target, &l.class, &l.key);
-            match std::fs::remove_file(&p) {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(StoreError(format!("{} cannot be deleted: {e}", p.display()))),
-            }
-        }
-        Ok(found)
+    fn delete_many(&self, lookups: &[Lookup]) -> Vec<Result<Option<Record>, StoreError>> {
+        self.get_many(lookups)
+            .into_iter()
+            .zip(lookups)
+            .map(|(found, l)| {
+                let found = found?;
+                let p = self.path(&l.target, &l.class, &l.key);
+                match std::fs::remove_file(&p) {
+                    Ok(()) => Ok(found),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(found),
+                    Err(e) => Err(StoreError(format!("{} cannot be deleted: {e}", p.display()))),
+                }
+            })
+            .collect()
     }
 
     fn get_many(&self, lookups: &[Lookup]) -> Vec<Result<Option<Record>, StoreError>> {
@@ -239,16 +286,18 @@ impl Store for FsStore {
             .collect()
     }
 
-    fn put_many(&self, records: &[Record]) -> Result<(), StoreError> {
-        for r in records {
-            let p = self.path(&r.target, &r.class, &r.key);
-            let err = |e: std::io::Error| StoreError(format!("{} cannot be written: {e}", p.display()));
-            std::fs::create_dir_all(p.parent().unwrap_or(&self.dir)).map_err(err)?;
-            // A temp file and a rename: a reader never sees half a record, and two worktrees writing one key leave one whole file.
-            let tmp = p.with_extension(format!("tmp{}", std::process::id()));
-            std::fs::write(&tmp, serde_json::to_string(&r.json()).unwrap_or_default()).map_err(err)?;
-            std::fs::rename(&tmp, &p).map_err(err)?;
-        }
-        Ok(())
+    fn put_many(&self, records: &[Record]) -> Vec<Result<(), StoreError>> {
+        records
+            .iter()
+            .map(|r| {
+                let p = self.path(&r.target, &r.class, &r.key);
+                let err = |e: std::io::Error| StoreError(format!("{} cannot be written: {e}", p.display()));
+                std::fs::create_dir_all(p.parent().unwrap_or(&self.dir)).map_err(err)?;
+                // A temp file and a rename: a reader never sees half a record, and two worktrees writing one key leave one whole file.
+                let tmp = p.with_extension(format!("tmp{}", std::process::id()));
+                std::fs::write(&tmp, serde_json::to_string(&r.json()).unwrap_or_default()).map_err(err)?;
+                std::fs::rename(&tmp, &p).map_err(err)
+            })
+            .collect()
     }
 }
