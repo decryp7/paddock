@@ -111,9 +111,6 @@ fn the_variable_names_the_file_through_the_settings() {
         &|k| (k == status::STATUS_FILE_VAR).then(|| named.clone()),
         &paddock_throttle::places::Host::none(),
     );
-    assert_eq!(
-        cfg.status_file,
-        Some(std::path::PathBuf::from("/x/row.queue.jsonl"))
-    );
+    assert_eq!(cfg.status_file, Some(file));
     assert!(w.is_empty(), "{w:?}");
 }
