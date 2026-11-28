@@ -280,7 +280,7 @@ interim ended on 2026-11-26, user decision 95, below):
   gone from `ci_runs/green.rs`: it held train 2026-11-26-t, which reached the crates workspace through `crates/Cargo.lock` alone, for a test in
   a package it did not touch (run 9168). The reader is back at ER-12 at the package level: a FLAKY test blocks only when the Cargo package that
   holds it changed or depends on a changed crate, judged by the planner's Cargo graph. A lockfile touches the workspace packages whose resolved
-  dependencies changed (`plan_cargo_lock`: the dependency closure of each package before and after; the plan's `lockGraded` list), and a lock
+  dependencies changed (`plan_cargo_lock`: the dependency closure of each package before and after; the plan's `packageGraded` list), and a lock
   that cannot be read on both sides reaches the whole workspace. A project reached for any other reason beyond Cargo (a UI file, a script) still
   touches every test of it.
 - **Then, exactly ER-12's feature level** (WP-3b, below): a FLAKY test makes the run `Red` only if the test's own file changed, or the
