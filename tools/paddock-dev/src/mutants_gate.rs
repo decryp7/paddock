@@ -1267,23 +1267,22 @@ mod tests {
     /// Written against the proof run 9374's two MISSED mutants (`-> Ok(Default::default())` and `delete !` of the empty-value filter).
     #[test]
     fn the_scratch_parent_is_the_dev_targets_folder_else_the_runner_temp_else_the_cause() {
-        let root = tempfile::tempdir().unwrap();
-        let env =
-            |vars: &'static [(&'static str, &'static str)]| move |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
-        let targets = crate::places::DEV_TARGETS_ENV;
+        let dir = tempfile::tempdir().unwrap();
+        let (root, targets, runner) = (dir.path().join("repo"), dir.path().join("targets"), dir.path().join("runner"));
+        std::fs::create_dir_all(&root).unwrap();
+        let text = |p: &Path| p.to_string_lossy().into_owned();
+        let env = |vars: Vec<(&'static str, String)>| move |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.clone());
         // A named dev-targets folder wins over RUNNER_TEMP.
-        let both: &'static [(&str, &str)] = &[("PADDOCK_DEV_TARGETS", "/data/targets"), ("RUNNER_TEMP", "/ci/tmp")];
-        assert_eq!(targets, "PADDOCK_DEV_TARGETS");
-        assert_eq!(
-            scratch_parent(root.path(), &env(both)).unwrap(),
-            PathBuf::from("/data/targets/mutants")
-        );
+        let both = env(vec![
+            (crate::places::DEV_TARGETS_ENV, text(&targets)),
+            ("RUNNER_TEMP", text(&runner)),
+        ]);
+        assert_eq!(scratch_parent(&root, &both).unwrap(), targets.join("mutants"));
         // CI has no dev-targets folder: the job's temp folder.
-        let ci: &'static [(&str, &str)] = &[("RUNNER_TEMP", "/ci/tmp")];
-        assert_eq!(scratch_parent(root.path(), &env(ci)).unwrap(), PathBuf::from("/ci/tmp/mutants"));
+        let ci = env(vec![("RUNNER_TEMP", text(&runner))]);
+        assert_eq!(scratch_parent(&root, &ci).unwrap(), runner.join("mutants"));
         // An empty RUNNER_TEMP is no folder: the dev-targets cause, never a path below "".
-        let empty: &'static [(&str, &str)] = &[("RUNNER_TEMP", "")];
-        assert!(scratch_parent(root.path(), &env(empty)).is_err());
-        assert!(scratch_parent(root.path(), &env(&[])).is_err());
+        assert!(scratch_parent(&root, &env(vec![("RUNNER_TEMP", String::new())])).is_err());
+        assert!(scratch_parent(&root, &env(vec![])).is_err());
     }
 }
