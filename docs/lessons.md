@@ -4553,3 +4553,13 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   a name with `\t\r`; the record step prints a `::warning::` with the cause when its lookup fails (ER-27, ER-44); the crate job runs
   `ci test-cache selfcheck --shared` on every leg before it records (ER-33). Not covered: the shell and Node scripts that write a config
   (`conformance/ci/dev-tool-publish.sh`, a token with no backslash or quote) are not Rust and still write their own line.
+
+## A golden went stale and the push passed (2026-11-28, fix/prepush-golden-rows, trials 9286, 9327, 9360)
+- **What happened.** Three times in two days a change altered what a golden records and only a CI trial went red: `fix/sccache-start-reliable` and
+  `fix/pipefail-grep-q` changed setup-rust shell steps and left `tests/golden/ci-run/commands.tsv` stale (9286, 9327); `fix/flaky-touched-grading`
+  changed the planner's output and left the planner goldens stale (9360). The push gate ran no golden test, and the member gate's `tests` row only
+  runs for a workspace with a changed file of its own: an action file belongs to no Cargo workspace.
+- **Fix.** The generator registry already declared the ci-run golden's inputs; it now declares every golden (`golden = true`: `ci-run-golden`,
+  `planner-golden`, `ci-host-golden`) and the push gate's `goldens` row runs `./dev gen check --only <the goldens the change reaches>`, planned from the
+  same registry and model (no second mapping, ER-22); a stale golden prints its entry's bless command. A test fails when a file holding a golden test is
+  marked by no golden entry, with controls (ER-33). Cost: docs/benchmarks.md, "the golden row in the push gate".

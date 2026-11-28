@@ -23,6 +23,11 @@
 #               graph derives everything they import, run or depend on, so a change to a module a script imports makes the entry due
 #               without a path typed here (ADR 0117 §5, WP-7). `paths` then names only what no edge names (a lockfile, a data file).
 #               A node the model lacks makes the entry due on every change (fail closed) and is named in the warning.
+#   golden      `true` for an entry whose check is a golden test (a test that compares what code answers with a recorded file). The
+#               pre-push `goldens` row runs `gen check --only` for the golden entries a change reaches (their `paths`, and what `reads`
+#               derives), so a change that leaves a golden stale fails the push and not only a CI trial (ER-21). The `paths` of a golden
+#               entry are its declared inputs: the code and data it reads and the test files themselves; a test (`tree_every_file_with_a_golden_test_...`
+#               in src/generators/tests.rs) fails when a file holding a golden test is marked by no golden entry. Default false.
 #   outputs     globs of the files it writes: what C116 matches generated files against. May be empty for a check only.
 #   cost        "fast" (no compile and no download: a script over files, or a tool that reads its lockfile; run four at a time, never
 #               queued for the heavy slot) or "heavy" (a build, the network or a long tool; one at a time, through the slot). Measured
@@ -428,9 +433,59 @@ check = ["cargo", "test", "--lib", "ci_run::tests::tree_the_contracts_run_exactl
 build = ["cargo", "test", "--no-run", "--lib"]
 regenerate = "PADDOCK_UPDATE_GOLDEN=1 cargo nextest run --lib --no-capture ci_run::tests::tree_the_contracts_run_exactly_the_commands_in_the_golden   # in tools/paddock-dev; it prints the rows it adds and removes (refused under CI=true)"
 cwd = "tools/paddock-dev"
+golden = true
 reads = ["wf:ci.yml"]
-paths = ["**/paddock.ci.json", ".gitea/actions/**", "tools/paddock-dev/src/gates/**", "tools/paddock-dev/src/ci_run/**", "tools/paddock-dev/tests/golden/ci-run/**"]
+paths = ["**/paddock.ci.json", ".gitea/actions/**", ".gitea/workflows/**", "tools/paddock-dev/src/gates/**", "tools/paddock-dev/src/ci_run/**", "tools/paddock-dev/tests/golden/ci-run/**"]
 outputs = ["tools/paddock-dev/tests/golden/ci-run/commands.tsv"]
+cost = "heavy"
+drift_marker = ["test result: FAILED"]
+
+[[generator]]
+id = "planner-golden"
+what = "the planner's recorded answers (tools/paddock-dev/tests/golden/: cases.json, ci-cases.json, ci-jobs.json, expected/, rules/) against `./dev plan` and the repository model on the committed fixture repositories, and the CI jobs table; a change to the planner, the model or the files they read leaves an answer stale (trial 9360)"
+check = ["cargo", "test", "--test", "it", "--", "golden::", "plan_graph_ci::", "repo_graph_net::graph_recorded_rule_goldens"]
+build = ["cargo", "test", "--no-run", "--test", "it"]
+regenerate = "PADDOCK_GOLDEN_BLESS=1 cargo nextest run -E 'test(golden::) | test(plan_graph_ci::) | test(repo_graph_net::graph_recorded_rule_goldens)'   # in tools/paddock-dev; review the diff, commit it (refused under CI)"
+cwd = "tools/paddock-dev"
+golden = true
+paths = [
+  "docs/repo-graph.toml",
+  "docs/ci-active-apps.toml",
+  "crates/paddock-repo-graph/**",
+  "crates/paddock-repo-files/**",
+  "tools/paddock-dev/src/plan*.rs",
+  "tools/paddock-dev/src/plan_graph/**",
+  "tools/paddock-dev/src/repo_model.rs",
+  "tools/paddock-dev/src/repo_model/**",
+  "tools/paddock-dev/src/repo_inputs.rs",
+  "tools/paddock-dev/src/run_scope.rs",
+  "tools/paddock-dev/src/run_scope/**",
+  "tools/paddock-dev/src/active_apps.rs",
+  "tools/paddock-dev/tests/golden/**",
+  "tools/paddock-dev/tests/it/golden.rs",
+  "tools/paddock-dev/tests/it/plan_graph_ci.rs",
+  "tools/paddock-dev/tests/it/repo_graph_net.rs",
+]
+outputs = ["tools/paddock-dev/tests/golden/cases.json", "tools/paddock-dev/tests/golden/ci-cases.json", "tools/paddock-dev/tests/golden/ci-jobs.json", "tools/paddock-dev/tests/golden/expected/**", "tools/paddock-dev/tests/golden/rules/**"]
+cost = "heavy"
+drift_marker = ["test result: FAILED"]
+
+[[generator]]
+id = "ci-host-golden"
+what = "the literal answers of `dev ci build-jobs` and the host steps of `dev ci` (tools/paddock-dev/tests/it/build_jobs_golden.rs and host_steps_golden.rs, the Windows twins of the parity tests); a change to the code of either leaves a literal stale"
+check = ["cargo", "test", "--test", "it", "--", "build_jobs_golden::", "host_steps_golden::"]
+build = ["cargo", "test", "--no-run", "--test", "it"]
+regenerate = "none: the answers are literals in the two test files; read the diff of the failing case and edit the literal when the new answer is the intended one (the parity cases in build_jobs.rs and host_steps.rs show the script's answer)"
+cwd = "tools/paddock-dev"
+golden = true
+paths = [
+  "tools/paddock-dev/src/ci_build_jobs.rs",
+  "tools/paddock-dev/src/ci_build_env.rs",
+  "tools/paddock-dev/src/ci_host/**",
+  "tools/paddock-dev/tests/it/build_jobs_golden.rs",
+  "tools/paddock-dev/tests/it/host_steps_golden.rs",
+]
+outputs = []
 cost = "heavy"
 drift_marker = ["test result: FAILED"]
 

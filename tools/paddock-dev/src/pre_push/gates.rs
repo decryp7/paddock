@@ -145,6 +145,9 @@ pub struct Facts {
     pub nextest_config: std::collections::BTreeMap<String, String>,
     /// The packages each workspace's change reaches, where [`Facts::test_filters`] narrows to them (absent: every package).
     pub reached: std::collections::BTreeMap<String, BTreeSet<String>>,
+    /// The ids of the golden entries of `docs/generators.toml` the change reaches ([`crate::generators::golden_due_in`]), or why they
+    /// cannot be told (the `goldens` row is then not measured, never a pass).
+    pub goldens: Result<Vec<String>, String>,
 }
 
 /// The reason of every row an inactive app's set leaves out: a skip with this reason is never a pass ([`super::render_timed`]
@@ -198,6 +201,7 @@ pub const ROW_SET: &[&str] = &[
     "conformance-tests",
     "dyno-wire-fixtures",
     "gates-register",
+    "goldens",
     "job-model",
     "locks-guard",
     "member-audits",
@@ -446,6 +450,7 @@ fn plan_rows(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
     out.extend(commit_lint(change));
     out.push(member_audits(facts));
     out.push(job_model(facts));
+    out.push(goldens(facts));
     out.extend(member_tests(plan, change, facts));
     let reaches_pitwall = plan["apps"].as_array().is_some_and(|a| a.iter().any(|x| x == "pitwall"));
     if reaches_pitwall && app_inactive(facts, "pitwall") {
@@ -842,6 +847,43 @@ fn locks_guard(change: &Change, facts: &Facts) -> Planned {
             )
         },
     )
+}
+
+/// The golden row (ER-21: three times in two days a change altered what a generated golden records, the push passed because it ran no
+/// golden test, and only a CI trial went red): `./dev gen check --only <ids>` for the golden entries of `docs/generators.toml` the change
+/// reaches ([`Facts::goldens`]; each entry declares its inputs, `golden = true`). Each runs its golden tests and, on a stale golden,
+/// prints the exact bless command from its `regenerate` line. A change that reaches none skips the row with the reason. Whatever
+/// changed (ER-41): the inputs are declared next to the golden, not guessed here. Blocking from the start, like the member audits: the
+/// golden tests are CI's own established tests, not a new check. Measured in docs/benchmarks.md, "Golden row in the push gate".
+fn goldens(facts: &Facts) -> Planned {
+    match &facts.goldens {
+        Err(why) => Planned::NotMeasured {
+            id: "goldens".into(),
+            reason: format!("which goldens the change reaches could not be told: {why}"),
+            next: "run `./dev gen check --all` (it runs every generator and golden), or fix the cause above; this is not a finding in your change".into(),
+        },
+        Ok(ids) if ids.is_empty() => Planned::Skip {
+            id: "goldens".into(),
+            reason: "no golden's declared inputs changed (the `golden = true` entries of docs/generators.toml and their paths)".into(),
+        },
+        Ok(ids) => dev_run(
+            facts,
+            Gate {
+                args: strs(&["gen", "check", "--only", &ids.join(",")]),
+                ..gate(
+                    "goldens".into(),
+                    "",
+                    "",
+                    &[],
+                    3,
+                    format!(
+                        "a golden is stale: the line above names the test and its bless command (the `regenerate` of {} in docs/generators.toml); run it on your machine, review the diff and commit it with the change",
+                        ids.join(", ")
+                    ),
+                )
+            },
+        ),
+    }
 }
 
 /// ADR 0123 §7: `./dev ci job-model check`, the member gate's copy of the plan job's step, so a layout change in ci.yml (a job without
