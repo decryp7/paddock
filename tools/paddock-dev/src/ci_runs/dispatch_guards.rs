@@ -22,10 +22,10 @@
 use super::client::{Client, RunInfo, TimedJob, encode_path};
 use super::dispatch::{DispatchTag, ReadWorkflow, Request, RunKind, Target, is_train};
 use crate::active_apps;
+use crate::http::Http;
 use crate::job_outcome::JobOutcome;
 use crate::plan_since::read_marker;
 use crate::registers::DISPATCH_GUARDS;
-use crate::wait::Http;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// A guard of `ci dispatch`.

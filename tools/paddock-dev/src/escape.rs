@@ -5,17 +5,17 @@
 //! the previous nightly: a failure of a target that a commit's change could reach (its `reach`) but its plan did not run is an
 //! **escape**. When several commits dropped the target, the culprit is bisected within [`MAX_COMMITS`] commits and [`MAX_RUNS`] runs;
 //! past the bound, or with a record missing or unreadable, the answer is `not measured`, never a guess and never clean. No database
-//! (D13, amended 2026-11-27): the plan job writes its record to a file ([`artifact::FileSink`]) that ci.yml uploads as the run's
+//! (D13, amended 2026-11-27): the plan job writes its record to a file ([`crate::escape_ci::artifact::FileSink`]) that ci.yml uploads as the run's
 //! artifact `plan-record`, kept [`RETENTION_DAYS`] days by the server; the nightly reads the artifacts of the commits' runs through
-//! the Actions API ([`artifact::ArtifactStore`]). ci.yml stays read-only: nothing pushes a ref.
+//! the Actions API ([`crate::escape_ci::artifact::ArtifactStore`]). ci.yml stays read-only: nothing pushes a ref.
 //!
 //! The old planner's rule tables may be deleted only after [`register::REQUIRED`] consecutive clean nightlies ([`register`]).
 
-pub mod artifact;
-pub mod cmd;
 pub mod register;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub(crate) mod testutil;
 
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;

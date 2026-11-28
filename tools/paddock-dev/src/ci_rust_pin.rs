@@ -3,7 +3,8 @@
 //! `::error::` line naming both versions when they differ or when the channel is a floating one (`stable`, `beta`, a date). A release
 //! is therefore never built with a floating stable, whatever the job's environment says (`RUSTUP_TOOLCHAIN` outranks the file).
 
-use crate::ci_tool::{NETWORK_ENV, ToolCall, error_line};
+use crate::ci_tool::{NETWORK_ENV, ToolCall};
+use crate::log_text::error_line;
 use clap::Args;
 use paddock_cli::{CliError, Report};
 use serde_json::json;
