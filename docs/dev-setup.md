@@ -175,7 +175,7 @@ tools and never by your shell profile (user decision 2026-11-16; docs/research/s
 - One server takes one cache at a time. To switch the backend, run `sccache --stop-server` once, then the next build starts the
   server with the new setting. A server on the port that uses another cache is never stopped by the tools.
 
-The shared RustFS cache (S3 API `http://172.16.1.220:15000`, bucket `sccache-paddock`, 50 GiB quota, policy `sccache-paddock-rw`) is
+The shared RustFS cache (S3 API `http://172.16.1.220:15000`, bucket `sccache-paddock`, 200 GiB quota with a 30-day expiry (user, 2026-11-28, in chat), policy `sccache-paddock-rw`) is
 used by default once the key file above exists; nothing else to set. A server already running with the old local-only setting is
 left alone with a warning: run `sccache --stop-server` once. Create the access key bound to that policy in the RustFS console (port 15001) and write it as:
 
@@ -252,7 +252,7 @@ shared backend on 2026-10-28 and again on 2026-11-17 (CI keeps its per-slot cach
   is cut by the **timeout guard** (`paddock_net::stall_guard`, a localhost proxy `setup-rust` starts in front of the store: a request with no
   byte for 10 s fails, then new connections are refused for 60 s, so sccache uses its local disk; the job log shows what it cut).
   The store must be an `http://` endpoint for that. The store's size is the store's job: before a release check
-  `rc bucket lifecycle rule list <alias>/sccache-paddock` shows the 14-day expiry rule, as sccache never evicts from S3.
+  `rc bucket lifecycle rule list <alias>/sccache-paddock` shows the 30-day expiry rule, as sccache never evicts from S3.
 - `setup-rust` uses the sccache already on the runner, else installs a pinned release (checksum-verified, in the runner's tool
   cache) for Linux x86_64/aarch64, macOS aarch64 and Windows x86_64. Bump the version and the four SHA-256 values together.
 - It also sets `CARGO_INCREMENTAL=0` and `SCCACHE_IGNORE_SERVER_IO_ERROR=1`, so an unreachable cache slows a build and

@@ -482,7 +482,7 @@ pub(super) fn fetch_retrying(
 
 /// The error code and message of an S3 error body (`<Code>AccessDenied</Code><Message>..</Message>`), for a log line: both are the
 /// server's words about the request, never the key.
-fn s3_error(body: &str) -> String {
+pub(crate) fn s3_error(body: &str) -> String {
     let tag = |t: &str| {
         body.split(&format!("<{t}>"))
             .nth(1)
