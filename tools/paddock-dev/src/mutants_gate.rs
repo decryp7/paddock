@@ -248,11 +248,11 @@ impl Tool for Real {
     }
 
     fn checkout(&self, root: &Path, head: &str, tree: &Path) -> Result<(), String> {
-        // A local clone (objects hardlinked, so it is quick), with the whole history: tests replay trains from `git log`. Its `origin` is
+        // A shared clone (it borrows the repository's objects, so it is quick and crosses devices: CI's temp folder is not on the checkout's disk), with the whole history: tests replay trains from `git log`. Its `origin` is
         // the repository at `root`, whose branches it holds as remote branches, which is what the safe-remove proof reads. Then `head`.
         let step = Limits::new(Duration::from_secs(900)).max_output(1 << 22);
         let mut clone = crate::git_env::git();
-        clone.args(["clone", "--quiet", "--local", "--no-checkout"]).arg(root).arg(tree);
+        clone.args(["clone", "--quiet", "--shared", "--no-checkout"]).arg(root).arg(tree);
         let out = run_bounded(clone, step).map_err(|e| format!("git clone could not run: {e}"))?;
         if !out.success() {
             return Err(format!("git clone failed: {}", tail(&out.stderr_text())));
