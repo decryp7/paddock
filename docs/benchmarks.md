@@ -3384,6 +3384,42 @@ before): 12 caught, 0 MISSED, 0 timeouts. cargo-mutants' default copy of one wor
 repository around it and its dev-dependencies' `../../crates` paths are not rewritten; the baseline failed in 6 s), which is why the mutants run in place
 in a checkout. Limits: three Mac diffs and one CI run, each once; the findings were read from the runs' output and not judged one by one for true positives.
 
+## Mutation testing: the per-mutant cost (2026-11-28, fix/mutants-fast, main c5cd28247)
+
+ER-12, ER-20, ER-37. Why mutants.yml took hours: runs 9393 and 9400 (read from the Gitea API) and four mutants of train ae's diff on the Mac.
+**CI before.** Run 9400 (train ae, base `0cb699637`, 156 mutants: 134 in `tools/paddock-dev`, 22 in `crates`) planned 12 shards; shard 0/12 ran
+72.8 minutes (`./dev mutants gate` 3359 s) and measured 7 of its 12 paddock-dev mutants before the 3300 s run limit (about 7 minutes a mutant
+with the shard's setup), and its `crates` part was NOT MEASURED: the unmutated tree failed, every `real_browser` test of paddock-chromium
+("Running as root without --no-sandbox"), because the job lacked ci.yml's `PADDOCK_BROWSER_NO_SANDBOX`. Run 9393 (237 mutants) planned 12 slices
+of 20, over the per-shard cap of 16: ten shards refused their paddock-dev slice in about 0.5 minutes, printed it as a plain line, and the record
+said "shards success". These were not yields to a train; a yielded shard also measured nothing, and the old record could not tell either.
+**Mac, the same four mutants** (`src/ci_setup_rust.rs` 264 and 269, `--shard 0/34` of train ae's paddock-dev diff, all caught; cargo-mutants
+27.1.0 `--in-place`, nextest 0.9.152, 14 cores at a 1-minute load of 7 to 46; phase times from cargo-mutants' `debug.log`):
+
+| run | nextest | incremental | baseline build + test | per mutant: build, test | 4 mutants |
+| --- | --- | --- | --- | --- | --- |
+| A, before | `--profile ci` | on (the Mac's default) | 45.9 s + 227.7 s | 5.2 to 6.8 s, 174.9 to 248.1 s | 18 min |
+| A0, as CI builds | `ci` + `--max-fail=1:immediate --retries=0` | `CARGO_INCREMENTAL=0` | skipped | 21.6 to 28.0 s, 5.5 to 6.2 s | 2 min |
+| B, after | `ci` + `--max-fail=1:immediate --retries=0` | on (`MUTANTS_ENV`) | 54.7 s + 258.0 s | 5.1 to 11.4 s, 11.2 to 12.2 s | 6 min with the baseline |
+
+In A the first mutant's one failing test was number 732 of 2990 and the run went on to the end (248 s, the test tried twice): the `ci` profile has
+`fail-fast = false` and `retries = 1`. **Per caught mutant: about 200 s before, 16 to 24 s after (8 to 14 times less).** A mutant no test catches
+still runs the whole suite (the baseline's 228 to 258 s here, about 6 minutes in a Linux shard, trial 9349), so it costs the same as before; an
+unviable one costs its build. CI builds with `CARGO_INCREMENTAL=0` (setup-rust, for sccache), which made each mutant's build 4 times the
+incremental one here (A0 against B) on 14 cores, and more on a Linux shard's 5 build jobs.
+**Expected in CI, not measured:** with the verdict mix of the CI runs so far (9349, 9374, 9393 shard 11, 9400 shard 0: 31 caught, 20 missed, 14
+unviable), about 2.3 minutes a mutant (half the mutants caught in under a minute, a third at a whole suite), against about 7 before. A shard of
+`SHARD_TARGET` 10 is then about 35 minutes with about 12 minutes of setup, control and unmutated build and tests; at most `MAX_PER_SHARD` 14 (about
+44 minutes, under the 75-minute job cap). Train ae: 156 mutants in 12 slices of 13, all measured, about 8 hours one shard at a time on one Linux
+slot (before: 12 shards of 72 to 75 minutes, about 15 hours, with about half of the mutants cut by the run limit and `crates` not measured).
+**Choices:** no `--baseline=skip` (run 9400's baseline is what found the missing sandbox opt-in; a green CI run of the commit ran in another job's
+environment), the hang detector stays 900 s (four times the Mac suite, 2.5 times the Linux one), `--test-workspace` stays off (cargo-mutants already
+tests only the mutated package; paddock-dev is one package of 2990 tests, and a narrower filter would turn caught mutants into false MISSED ones).
+Limits: four mutants of one file, all caught, one run each on a loaded Mac; no missed mutant timed with the new arguments; no CI run yet.
+**Then (user decision 2026-11-28, in chat):** at most 60 mutants a landing (`MAX_PER_LANDING`, round-robin over the changed functions; train ae's
+156, 134 of them in 46 functions of tools/paddock-dev: 60 chosen, 96 NOT MEASURED in the plan and the record) and two shards at once (`max-parallel: 2`, each yielding to a train
+at its start). Expected for train ae, not measured: six slices of 10, about 35 minutes each, about 1.75 hours.
+
 ## Push gate hang limits of the long rows (2026-11-27, fix/gate-row-stall)
 
 ER-12, ER-36, a Mac with 14 cores. When the local sccache server hung on 2026-11-27 a gate row sat idle until the 60-minute row cap: the rows had
