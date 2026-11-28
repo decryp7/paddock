@@ -601,8 +601,8 @@ Multi-level cache levels              2
   L1 (s3) write failures            897
 ";
     /// Two refused writes as the server logs them (opendal's error text, with a signed URL and a key in it) and one other line.
-    const QUOTA_LOG: &str = "2026-11-28T10:00:01Z ERROR sccache::cache::multilevel: Failed to write: Unexpected (persistent) at write, context: { uri: http://172.16.1.220:15000/sccache-paddock/paddock-ci/Linux-x86_64/a/b/key?X-Amz-Signature=deadbeef&X-Amz-Credential=AKIAEXAMPLEKEY12345, response: Parts { status: 400 }, service: s3 } => S3Error { code: \"InvalidRequest\", message: \"Bucket quota exceeded. Current usage 107374182400, limit 107374182400\", resource: \"/x\" }
-2026-11-28T10:00:02Z ERROR sccache::cache::multilevel: Failed to write: Unexpected (persistent) at write, context: { uri: http://172.16.1.220:15000/sccache-paddock/paddock-ci/Linux-x86_64/c/d/key2?X-Amz-Signature=cafe, response: Parts { status: 400 }, service: s3 } => S3Error { code: \"InvalidRequest\", message: \"Bucket quota exceeded. Current usage 107374182400, limit 107374182400\", resource: \"/y\" }
+    const QUOTA_LOG: &str = "2026-11-28T10:00:01Z ERROR sccache::cache::multilevel: Failed to write: Unexpected (persistent) at write, context: { uri: http://172.16.1.220:15000/sccache-paddock/paddock-ci/Linux-x86_64/a/b/key?X-Amz-Signature=deadbeef&X-Amz-Credential=AKIAEXAMPLEKEY12345, response: Parts { status: 400 }, service: s3 } => S3Error { code: \"InvalidRequest\", message: \"Bucket quota exceeded. Current usage: 107374182274 bytes, limit: 107374182400 bytes\", resource: \"/x\" }
+2026-11-28T10:00:02Z ERROR sccache::cache::multilevel: Failed to write: Unexpected (persistent) at write, context: { uri: http://172.16.1.220:15000/sccache-paddock/paddock-ci/Linux-x86_64/c/d/key2?X-Amz-Signature=cafe, response: Parts { status: 400 }, service: s3 } => S3Error { code: \"InvalidRequest\", message: \"Bucket quota exceeded. Current usage: 107374182274 bytes, limit: 107374182400 bytes\", resource: \"/y\" }
 2026-11-28T10:00:03Z ERROR sccache: connection reset by peer
 ";
 
@@ -614,7 +614,7 @@ Multi-level cache levels              2
         assert!(
             causes[0]
                 .0
-                .starts_with("Bucket quota exceeded. Current usage 107374182400, limit 107374182400"),
+                .starts_with("Bucket quota exceeded. Current usage: 107374182274 bytes, limit: 107374182400 bytes"),
             "{causes:?}"
         );
         let all = format!("{causes:?}");
