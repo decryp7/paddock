@@ -6,10 +6,9 @@
 # it, and what those use. A module refers (`crate::<module>`) to its own layer or a used one, never another: the check reads this file and
 # reports each production reference that breaks it, each module of src/ not listed here and each entry with no module in src/.
 #
-# Modules the plan splits (escape: its `cmd` goes to ci; ci_run: its command part goes to ci; ci_tool: two text helpers go to core; the
-# new `git`, `repo_root`, `http`, `registers`, `subject` and `throttle`) are filed here by their whole module, in the layer that holds most
-# of it, so the references those splits remove are reported until they land (the plan's batches B1 to B6, the ADR's WP-4). Review this
-# table with them.
+# The plan's splits are done (batches B1 to B5 and the moves of WP-4's last branch): git, repo_root, registers, subject, throttle, http (the
+# `Http` port; its curl adapter stays in `wait`), git_diff and trailers (from merge_check), the error-line and exit-status wording in
+# log_text, escape's CI edges as escape_ci, `landing_held` in pre_push. The remaining open items of the plan are B6, its optional diamond.
 
 [[layer]]
 name = "core"
@@ -19,8 +18,10 @@ modules = [
     "curl_config",
     "full_tree",
     "git",
+    "git_diff",
     "git_env",
     "host_tests",
+    "http",
     "input_hash",
     "job_outcome",
     "log_text",
@@ -36,6 +37,7 @@ modules = [
     "test_sleeper",
     "throttle",
     "tool_cache",
+    "trailers",
     "wait_lock",
 ]
 
@@ -104,6 +106,7 @@ uses = ["host", "repo"]
 modules = [
     "ci_job_model",
     "ci_runs",
+    "escape_ci",
     "generators",
     "load",
     "merge_check",
