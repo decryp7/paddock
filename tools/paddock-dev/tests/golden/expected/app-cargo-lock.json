@@ -26,6 +26,11 @@
  "cargoOnly": [
   "app:z"
  ],
+ "gradePackages": {
+  "apps/z/app/src-tauri": [
+   "z"
+  ]
+ },
  "why": {
   "app:z": [
    "apps/z/app/src-tauri/Cargo.lock"

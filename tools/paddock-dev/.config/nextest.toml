@@ -125,7 +125,7 @@ path = "junit.xml"
 [profile.member-audits]
 default-filter = '''
 (binary(it) & (
-    (test(/^(dev_bin|cargo_target_lint|parity_corpus|tree|golden|check_allow_list|safe_remove_lint)::/))
+    (test(/^(dev_bin|cargo_target_lint|parity_corpus|tree|golden|check_allow_list|safe_remove_lint|build_cost)::/))
     | test(/^check::(tree_)?live_/)
     | test(/^check_c1[0-9]{2}::(tree_)?(live_|this_working_tree_)/)
     | test(/^check_engine::(tree_)?this_working_tree_/)

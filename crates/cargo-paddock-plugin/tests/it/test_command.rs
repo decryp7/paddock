@@ -13,7 +13,7 @@ fn project(dir: &Path) -> &Path {
 }
 
 #[test]
-fn run_describes_the_plugin_and_test_finds_nothing_in_a_conforming_one() {
+fn build_run_describes_the_plugin_and_test_finds_nothing_in_a_conforming_one() {
     let dir = tempfile::tempdir().unwrap();
     let project = project(dir.path());
     let program = fixture::locate().unwrap();
@@ -42,7 +42,7 @@ fn run_describes_the_plugin_and_test_finds_nothing_in_a_conforming_one() {
 }
 
 #[test]
-fn a_packed_and_extracted_program_is_the_program_that_was_tested() {
+fn build_a_packed_and_extracted_program_is_the_program_that_was_tested() {
     let dir = tempfile::tempdir().unwrap();
     let project = project(dir.path());
     let program = fixture::locate().unwrap();
@@ -75,7 +75,7 @@ fn a_packed_and_extracted_program_is_the_program_that_was_tested() {
 }
 
 #[test]
-fn findings_end_with_exit_five_and_name_each_check() {
+fn build_findings_end_with_exit_five_and_name_each_check() {
     let dir = tempfile::tempdir().unwrap();
     let project = project(dir.path());
     // A copy that ignores the MCP budget (the test kit's `greedy` plugin), and one with no contributions at all.
@@ -107,7 +107,7 @@ fn findings_end_with_exit_five_and_name_each_check() {
 }
 
 #[test]
-fn a_program_that_exits_at_once_or_a_missing_project_is_a_failure_with_a_next_step() {
+fn build_a_program_that_exits_at_once_or_a_missing_project_is_a_failure_with_a_next_step() {
     let dir = tempfile::tempdir().unwrap();
     let r = cli(dir.path(), &["test", "--no-build"]);
     assert_eq!(r.exit, Exit::Failure);
@@ -131,7 +131,7 @@ fn a_program_that_exits_at_once_or_a_missing_project_is_a_failure_with_a_next_st
 }
 
 #[test]
-fn a_plugin_built_for_an_older_protocol_is_refused_and_says_to_rebuild_it() {
+fn build_a_plugin_built_for_an_older_protocol_is_refused_and_says_to_rebuild_it() {
     let dir = tempfile::tempdir().unwrap();
     let project = project(dir.path());
     let v1 = fixture::locate_v1().unwrap();

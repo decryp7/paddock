@@ -28,6 +28,8 @@ use std::time::{Duration, Instant};
 const EXE: &str = std::env::consts::EXE_SUFFIX;
 
 fn fake_runner() -> PathBuf {
+    // Before the look for a built example: a warm run must judge the test's name as a cold one does (the build cost class).
+    paddock_testkit::build_cost::charge("pitcrew-service's fake_runner example (cargo build)");
     static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     BUILT
         .get_or_init(|| {
@@ -371,7 +373,7 @@ fn count(h: &[HistoryEvent], f: impl Fn(&HistoryKind) -> bool) -> usize {
 }
 
 #[test]
-fn a_runner_that_exits_is_restarted_after_the_backoff() {
+fn build_a_runner_that_exits_is_restarted_after_the_backoff() {
     let mut h = Harness::new("crashy", "mode=exit\ncode=3\n", true);
     h.until("first exit", Duration::from_millis(100), |h| {
         let hist = h.history();
@@ -399,7 +401,7 @@ fn a_runner_that_exits_is_restarted_after_the_backoff() {
 }
 
 #[test]
-fn runners_start_with_the_login_path_and_their_own_env() {
+fn build_runners_start_with_the_login_path_and_their_own_env() {
     let mut h = Harness::with_runner_toml("envy", "mode=ok\n", true, "[runners.env]\nCI_FLAG = \"yes\"\n");
     let dump = h.runner_dir.join("env.txt");
     // Wait for the line that is asserted, not just for the file: the runner may still be writing it.
@@ -421,7 +423,7 @@ fn runners_start_with_the_login_path_and_their_own_env() {
 }
 
 #[test]
-fn a_stalled_runner_is_stopped_gracefully_and_restarted() {
+fn build_a_stalled_runner_is_stopped_gracefully_and_restarted() {
     let mut h = Harness::new("stally", "mode=stall\n", true);
     h.until("stall", Duration::from_millis(200), |h| {
         count(&h.history(), |k| matches!(k, HistoryKind::Stalled { .. })) == 1
@@ -443,7 +445,7 @@ fn a_stalled_runner_is_stopped_gracefully_and_restarted() {
 }
 
 #[test]
-fn stop_waits_for_the_running_job() {
+fn build_stop_waits_for_the_running_job() {
     // The job runs until the test releases it, however slow the machine is.
     let mut h = Harness::new("busy", "mode=job\njob_secs=hold\n", true);
     h.until_job_processes_seen();
@@ -471,7 +473,7 @@ fn stop_waits_for_the_running_job() {
 }
 
 #[test]
-fn usage_follows_the_runner_and_the_processes_it_started() {
+fn build_usage_follows_the_runner_and_the_processes_it_started() {
     let mut h = Harness::new("meter", "mode=job\njob_secs=hold\n", true);
     // The runner alone is one process; on Windows its console host (`conhost.exe`) makes two.
     let base = if cfg!(windows) { 2 } else { 1 };
@@ -513,7 +515,7 @@ fn usage_follows_the_runner_and_the_processes_it_started() {
 }
 
 #[test]
-fn an_unregistered_runner_is_registered_from_the_app() {
+fn build_an_unregistered_runner_is_registered_from_the_app() {
     let mut h = Harness::new("fresh", "mode=ok\n", false);
     h.pump(Duration::from_secs(1));
     assert_eq!(h.status().status, RunnerStatus::NotRegistered);
@@ -543,7 +545,7 @@ fn an_unregistered_runner_is_registered_from_the_app() {
 }
 
 #[test]
-fn registering_a_folder_that_is_registered_already_adopts_it() {
+fn build_registering_a_folder_that_is_registered_already_adopts_it() {
     // The wizard's "existing runner folder" sends AddRunner, then Register: the registered folder is used as it is.
     let mut h = Harness::new("adopt", "mode=ok\n", true);
     h.pump(Duration::from_secs(1));
@@ -565,7 +567,7 @@ fn registering_a_folder_that_is_registered_already_adopts_it() {
 }
 
 #[test]
-fn settings_and_bad_requests_are_validated() {
+fn build_settings_and_bad_requests_are_validated() {
     let mut h = Harness::new("cfg", "mode=ok\n", true);
     let Response::Settings { mut config, .. } = h.ask(Request::GetSettings) else {
         panic!()
@@ -592,7 +594,7 @@ fn settings_and_bad_requests_are_validated() {
 }
 
 #[test]
-fn a_manual_cleanup_reports_what_it_did() {
+fn build_a_manual_cleanup_reports_what_it_did() {
     let mut h = Harness::new("tidy", "mode=ok\n", true);
     std::fs::create_dir_all(h.runner_dir.join("work/old-job")).unwrap();
     std::fs::write(h.runner_dir.join("work/old-job/blob"), vec![0u8; 4096]).unwrap();
@@ -612,7 +614,7 @@ fn a_manual_cleanup_reports_what_it_did() {
 }
 
 #[test]
-fn a_replaced_service_program_restarts_the_service_only_when_no_job_runs() {
+fn build_a_replaced_service_program_restarts_the_service_only_when_no_job_runs() {
     // The job's process starts after its "task started" line, as on a loaded machine (CI run 6628 failed here).
     let mut h = Harness::new("selfup", "mode=job\njob_secs=hold\nspawn_delay_ms=500\n", true);
     h.until_job_processes_seen();
@@ -693,7 +695,7 @@ impl Harness {
 
 #[cfg(unix)]
 #[test]
-fn a_leftover_is_listed_and_stopped_after_the_keep_time_when_the_runner_is_idle() {
+fn build_a_leftover_is_listed_and_stopped_after_the_keep_time_when_the_runner_is_idle() {
     let mut h = Harness::new("lefty", "mode=leftover\njob_secs=hold\nleftovers=sleep:600\n", true);
     h.until_leftovers(1);
     let list = h.processes();
@@ -756,7 +758,7 @@ fn a_leftover_is_listed_and_stopped_after_the_keep_time_when_the_runner_is_idle(
 
 #[cfg(unix)]
 #[test]
-fn rules_set_the_keep_time_per_process_and_never_means_never() {
+fn build_rules_set_the_keep_time_per_process_and_never_means_never() {
     let rules = "[runners.processes]\nkeep = { amount = 1, unit = \"minutes\" }\n[[runners.processes.rules]]\npattern = \"tail\"\nkeep = \"never\"\n";
     let mut h = Harness::with_runner_toml("rulesy", "mode=leftover\njob_secs=hold\nleftovers=sleep:600,tail\n", true, rules);
     h.until_leftovers(2);
@@ -820,7 +822,7 @@ fn rules_set_the_keep_time_per_process_and_never_means_never() {
 
 #[cfg(unix)]
 #[test]
-fn keep_longer_postpones_the_stop_and_cleanup_can_be_turned_off() {
+fn build_keep_longer_postpones_the_stop_and_cleanup_can_be_turned_off() {
     let mut h = Harness::new("keeper", "mode=leftover\njob_secs=hold\nleftovers=sleep:600\n", true);
     h.until_leftovers(1);
     let row = h.processes().entries.into_iter().find(|e| e.leftover.is_some()).unwrap();
@@ -902,7 +904,7 @@ fn end_leftover(pid: u32, started_at: Option<Timestamp>) {
 
 #[cfg(unix)]
 #[test]
-fn nothing_is_stopped_while_a_job_runs() {
+fn build_nothing_is_stopped_while_a_job_runs() {
     // A keep time of one minute: the busy stretch below needs a few clock steps, not eighty process-table reads.
     let keep = "[runners.processes]\nkeep = { amount = 1, unit = \"minutes\" }\n";
     let mut h = Harness::with_runner_toml("busyleft", "mode=leftover\njob_secs=hold\nleftovers=sleep:600\n", true, keep);
@@ -929,7 +931,7 @@ fn nothing_is_stopped_while_a_job_runs() {
 
 #[cfg(unix)]
 #[test]
-fn a_stop_outside_the_runners_tree_is_refused() {
+fn build_a_stop_outside_the_runners_tree_is_refused() {
     let mut h = Harness::new("fence", "mode=leftover\njob_secs=hold\nleftovers=sleep:600\n", true);
     h.until_leftovers(1);
     let stranger = TestCommand::new("sleep").arg("120").spawn();
@@ -987,7 +989,7 @@ fn get_config(h: &mut Harness) -> (String, String) {
 }
 
 #[test]
-fn a_saved_configuration_restarts_the_runner_after_its_job_and_the_labels_are_verified() {
+fn build_a_saved_configuration_restarts_the_runner_after_its_job_and_the_labels_are_verified() {
     let mut h = Harness::new("cfgsave", "mode=job\njob_secs=hold\n", true);
     let original = "# my runner\nlog:\n  level: info # keep this\nrunner:\n  capacity: 1\n";
     write_config(&h, original);
@@ -1121,7 +1123,7 @@ fn a_saved_configuration_restarts_the_runner_after_its_job_and_the_labels_are_ve
 }
 
 #[test]
-fn a_label_mismatch_after_the_restart_is_reported_and_a_stopped_runner_just_saves() {
+fn build_a_label_mismatch_after_the_restart_is_reported_and_a_stopped_runner_just_saves() {
     let mut h = Harness::new("cfgmis", "mode=ok\ndeclare=other\n", true);
     h.until("running", Duration::from_millis(200), |h| h.status().status == RunnerStatus::Idle);
     let (_, fp) = get_config(&mut h);
@@ -1193,7 +1195,7 @@ fn set_defaults(h: &mut Harness, f: impl FnOnce(&mut pitcrew_core::config::Defau
 }
 
 #[test]
-fn a_nearly_full_disk_drains_the_runner_and_it_resumes_when_space_recovers() {
+fn build_a_nearly_full_disk_drains_the_runner_and_it_resumes_when_space_recovers() {
     let mut h = Harness::new("diskguard", "mode=idle\n", true);
     h.until("running", Duration::from_millis(200), |h| h.status().running_since.is_some());
     assert!(h.status().hold.is_none());
@@ -1223,7 +1225,7 @@ fn a_nearly_full_disk_drains_the_runner_and_it_resumes_when_space_recovers() {
 }
 
 #[test]
-fn a_pause_the_user_made_is_not_lifted_by_a_hold_that_ends() {
+fn build_a_pause_the_user_made_is_not_lifted_by_a_hold_that_ends() {
     let mut h = Harness::new("userpause", "mode=idle\n", true);
     h.until("running", Duration::from_millis(200), |h| h.status().running_since.is_some());
     set_defaults(&mut h, |d| {
@@ -1264,7 +1266,7 @@ fn a_pause_the_user_made_is_not_lifted_by_a_hold_that_ends() {
 }
 
 #[test]
-fn an_update_that_keeps_failing_is_reported_as_a_loop_with_its_cause() {
+fn build_an_update_that_keeps_failing_is_reported_as_a_loop_with_its_cause() {
     let now = pitcrew_service::cleanup::now().0;
     let failed = |i: u64| {
         format!(
@@ -1288,7 +1290,7 @@ fn an_update_that_keeps_failing_is_reported_as_a_loop_with_its_cause() {
 }
 
 #[test]
-fn the_actions_cache_of_a_runner_is_reported_previewed_and_trimmed() {
+fn build_the_actions_cache_of_a_runner_is_reported_previewed_and_trimmed() {
     use pitcrew_core::hygiene::CacheLimits;
     let mut h = Harness::new("cacher", "mode=idle\n", true);
     let cache = h.root.join("cachedir");

@@ -652,6 +652,10 @@ pub struct ScheduleSkipArgs {
     /// docs/ci-active-apps.toml's `active`. The nightly names none: it runs every app.
     #[arg(long)]
     app: Option<String>,
+    /// Decide for any event, as for a schedule, with no bound by the workflow's history: a run that is not scheduled and yields to trains
+    /// (mutants.yml, after a landing) and records what it skipped itself.
+    #[arg(long)]
+    any_event: bool,
 }
 
 /// `ci schedule-skip`: `skip=true|false` to `GITHUB_OUTPUT` (standard output without it), the annotation on standard output,
@@ -683,10 +687,14 @@ pub fn schedule_skip(a: &ScheduleSkipArgs) -> Result<Report, CliError> {
     }
     let d = match schedule_skip::inactive(&event, a.app.as_deref(), set) {
         Some(d) => d,
+        None if a.any_event => schedule_skip::decide_yield(&mut client, now_ms),
         None => schedule_skip::decide_scheduled(&mut client, &event, &a.workflow, now_ms, a.max_gap_hours),
     };
     let answer = format!("skip={}", d.skip());
-    let mut text: Vec<String> = d.annotation().into_iter().collect();
+    let mut text: Vec<String> = match &d {
+        schedule_skip::Decision::Skip { trains, .. } if a.any_event => vec![schedule_skip::yield_notice(trains)],
+        _ => d.annotation().into_iter().collect(),
+    };
     match env("GITHUB_OUTPUT") {
         Some(path) => append(&path, &format!("{answer}\n"))?,
         None => text.push(answer),

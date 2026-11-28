@@ -466,11 +466,29 @@ pub fn git_text(root: &Path, args: &[&str]) -> Option<String> {
 }
 
 /// The folder for this checkout's gate logs and override log: `<git common dir>/paddock-pre-push`.
+///
+/// `PADDOCK_PREPUSH_STATE` replaces it (a test's own folder, so it never waits for a build-folder lock a real gate of this checkout holds,
+/// ER-14, ER-51); the run, the test cache and the slow-row records all read it through here.
 pub fn state_dir(root: &Path) -> PathBuf {
+    if let Some(own) = state_override("PADDOCK_PREPUSH_STATE") {
+        return own;
+    }
     git_text(root, &["rev-parse", "--path-format=absolute", "--git-common-dir"])
         .map(|t| PathBuf::from(t.trim()))
         .unwrap_or_else(|| root.join(".git"))
         .join("paddock-pre-push")
+}
+
+/// The folder a state-folder setting names (`PADDOCK_PREPUSH_STATE`, `PADDOCK_WAIT_STATE`: test-only rows of the settings register), when
+/// it is set and not empty. A tool's state otherwise lives under the git common dir, which every worktree shares; the test harness
+/// sets every one of these to the test's own folder (`paddock_testkit::process::STATE_FOLDERS`, ER-14, ER-51). In the core layer so
+/// [`state_dir`] reads it; `places::state_override` is this function.
+pub fn state_override(name: &str) -> Option<PathBuf> {
+    paddock_env::vars()
+        .find(|(k, _)| k == name)
+        .map(|(_, v)| v)
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
 }
 
 /// The first nine characters of a revision name or hash, for messages.
