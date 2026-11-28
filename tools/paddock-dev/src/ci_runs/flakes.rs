@@ -627,7 +627,6 @@ mod tests {
 
     fn measure(f: &mut Fake) -> Report {
         let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "s3cr3t");
-        c.backoff_ms = 0;
         collect(&mut c, &request(Vec::new()), &mut |_| {}).unwrap()
     }
 
@@ -871,7 +870,6 @@ mod tests {
     fn a_precondition_that_hides_flakes_in_passing_jobs_makes_the_report_incomplete() {
         let mut f = scenario();
         let mut c = Client::new(&mut f, "https://gitea.invalid", "decryp7/paddock", "s3cr3t");
-        c.backoff_ms = 0;
         let msg = "Playwright flakes in passing jobs are not visible (no failOnFlakyTests)";
         let r = collect(&mut c, &request(vec![msg.into()]), &mut |_| {}).unwrap();
         assert!(r.gaps.contains(&msg.to_string()));
@@ -951,7 +949,6 @@ mod tests {
     fn until_a_date_or_a_commit_moves_the_window_for_the_tag_gate() {
         let mut f = scenario();
         let mut c = Client::new(&mut f, "https://gitea.invalid", "decryp7/paddock", "s3cr3t");
-        c.backoff_ms = 0;
         // Until the end of 2026-11-05 (UTC), three days: runs 106 (02:00 UTC on the 5th) and 107 (the 4th).
         let mut req = request(Vec::new());
         req.until = Until::Date("2026-11-05".into());

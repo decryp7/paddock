@@ -134,7 +134,7 @@ healthy() { # exit 0 when the kept folder holds a usable clone of this repositor
 foreign_key() {
   gq -C "$stable" config --local --list 2>/dev/null | cut -d= -f1 | tr 'A-Z' 'a-z' | grep -Ev \
     '^(core\.(repositoryformatversion|filemode|bare|logallrefupdates|ignorecase|precomposeunicode|symlinks|sparsecheckout|sparsecheckoutcone)|extensions\.(partialclone|objectformat)|remote\.origin\.(url|fetch|tagopt|promisor|partialclonefilter)|branch\.[^.=]+\.(remote|merge))$' |
-    head -n 1 || true
+    sed -n 1p || true
 }
 # sanitize: nothing a job could have planted in .git is left to act: hooks (also never run: core.hooksPath), attributes, excludes.
 sanitize() {
@@ -215,7 +215,7 @@ verify_clone() {
   [ -z "$bad" ] || { echo "the local git config key '$bad' is not one this script writes" >&2; return 1; }
   head="$(g -C "$stable" rev-parse HEAD)"
   [ "$head" = "$sha" ] || { echo "HEAD is $head, not the job's commit $sha" >&2; return 1; }
-  [ -z "$(g -C "$stable" status --porcelain --untracked-files=all)" ] || { echo "the tree is not clean: $(g -C "$stable" status --porcelain | head -n 3 | tr '\n' ' ')" >&2; return 1; }
+  [ -z "$(g -C "$stable" status --porcelain --untracked-files=all)" ] || { echo "the tree is not clean: $(g -C "$stable" status --porcelain | sed -n 1,3p | tr '\n' ' ')" >&2; return 1; }
   for p in ${excludes[@]+"${excludes[@]}"}; do
     if compgen -G "$stable/$p" >/dev/null; then echo "excluded path $p exists" >&2; return 1; fi
   done

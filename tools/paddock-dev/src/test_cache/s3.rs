@@ -9,6 +9,7 @@
 
 use super::key::RunnerClass;
 use super::store::{Lookup, Record, Store, StoreError, rel_path};
+use crate::curl_config;
 use paddock_ci_config::settings::sccache::{TestCacheAddress, test_cache_address, test_cache_key};
 use paddock_ci_config::settings::{EnvMap, Settings};
 use paddock_proc::{Limits, run_bounded_with_input};
@@ -95,15 +96,19 @@ impl S3Store {
             if i > 0 {
                 out.push_str("next\n");
             }
-            out.push_str(&format!(
-                "url = \"{url}\"\naws-sigv4 = \"aws:amz:{}:s3\"\nuser = \"{}:{}\"\nconnect-timeout = {REQUEST_SECS}\nmax-time = {REQUEST_SECS}\nsilent\nshow-error\noutput = \"{}\"\nwrite-out = \"%{{http_code}}|%{{redirect_url}}|%{{filename_effective}}\\n\"\n",
-                self.region,
-                self.keys.0.expose(),
-                self.keys.1.expose(),
-                file.display()
+            out.push_str(&curl_config::line("url", url));
+            out.push_str(&format!("aws-sigv4 = \"aws:amz:{}:s3\"\n", self.region));
+            out.push_str(&curl_config::line(
+                "user",
+                &format!("{}:{}", self.keys.0.expose(), self.keys.1.expose()),
             ));
+            out.push_str(&format!(
+                "connect-timeout = {REQUEST_SECS}\nmax-time = {REQUEST_SECS}\nsilent\nshow-error\n"
+            ));
+            out.push_str(&curl_config::line("output", &file.display().to_string()));
+            out.push_str("write-out = \"%{http_code}|%{redirect_url}|%{filename_effective}\\n\"\n");
             if let Some(up) = up {
-                out.push_str(&format!("upload-file = \"{}\"\n", up.display()));
+                out.push_str(&curl_config::line("upload-file", &up.display().to_string()));
             }
             if *method != "GET" && up.is_none() {
                 out.push_str(&format!("request = \"{method}\"\n"));
@@ -400,4 +405,40 @@ pub(super) fn parse_done(text: &str) -> Result<Vec<(u16, String)>, StoreError> {
         done.push((code, file.to_string()));
     }
     Ok(done)
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+
+    fn store(scratch: &str) -> S3Store {
+        S3Store {
+            base: "http://127.0.0.1:9".into(),
+            region: "us-east-1".into(),
+            keys: (
+                Secret::new(String::from("AKIDEXAMPLE")).unwrap(),
+                Secret::new(String::from("s3cr3t-value")).unwrap(),
+            ),
+            scratch: PathBuf::from(scratch),
+        }
+    }
+
+    /// Run 9265: on the Windows runner the scratch folder is `D:\a\_temp\...`; curl drops a backslash before a letter and reads `\t` and `\r`
+    /// as a tab and a return, so it wrote the answer to another file, the call failed and nothing was recorded.
+    #[test]
+    fn a_windows_path_reaches_curl_with_its_backslashes_doubled() {
+        let s = store("D:\\a\\_temp\\test-cache\\scratch");
+        let blocks = [(s.url("v2/a/b.json"), s.body_path(0), Some(s.body_path(1)), "PUT")];
+        let c = s.config(&blocks);
+        let file = format!("{}", s.body_path(0).display()).replace('\\', "\\\\");
+        assert!(c.contains(&format!("output = \"{file}\"\n")), "{c}");
+        assert!(c.contains("output = \"D:\\\\a\\\\_temp\\\\test-cache\\\\scratch"), "{c}");
+        assert!(c.contains("upload-file = \"D:\\\\a\\\\_temp"), "{c}");
+        // One writer for every curl config of the tool (curl_config): the lines are exactly its lines.
+        assert!(
+            c.contains(&curl_config::line("output", &s.body_path(0).display().to_string())),
+            "{c}"
+        );
+        assert!(c.contains(&curl_config::line("url", &s.url("v2/a/b.json"))), "{c}");
+    }
 }

@@ -1,8 +1,8 @@
 use crate::{
     audit, check, check_ids, ci_build_env, ci_build_jobs, ci_dev_tool_store, ci_dyno_linux_units, ci_host, ci_isolation, ci_job_model,
     ci_run, ci_runs, ci_rust_pin, ci_s3_guard, ci_setup_rust, deps_cache, disk, gates, generators, heavy_cmd, heavy_install, hook,
-    input_hash, ipc_endpoints, lessons_driver, load, local_sccache, locks, locks_guard, merge_check, places, plan_cmd, pr, pre_push, queue,
-    release_isolation, slots, test_cache, test_features, wait, worktree,
+    input_hash, ipc_endpoints, lessons_driver, load, local_sccache, locks, locks_guard, merge_check, mutants_gate, places, plan_cmd, pr,
+    pre_push, queue, release_isolation, slots, test_cache, test_features, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -56,6 +56,12 @@ enum Command {
     Audit {
         #[command(subcommand)]
         command: audit::AuditCommand,
+    },
+    /// Mutation-testing of the diff (cargo-mutants `--in-diff`), ci.yml's `mutants` job: a function whose every mutation passes
+    /// the tests is a finding. Report-only for now (warnings, exit 0).
+    Mutants {
+        #[command(subcommand)]
+        command: MutantsCommand,
     },
     /// Lockfiles: are they all current, and regenerate them with cargo, cargo-hakari and npm (never by hand).
     Locks {
@@ -220,8 +226,8 @@ enum MergeCommand {
     /// Before merging the train into a member branch: list the commands that re-apply the member's own work the train reverted
     /// (`git revert <sha>`, git's "revert a faulty merge"; run them after `git merge <train>`), and warn about reverts of other
     /// branches' merges the member holds. Run it before the merge of the train: it changes nothing. Run it again after the merge and it
-    /// also runs the fast static rows on the sync tip (`check --pre-push --only conformance,gates-register,clippy,clippy-windows
-    /// --base <train>`); a failing row is exit 5 (6 not measured) with the rows and the next step, unless `--no-static` says why not. Once
+    /// also runs the fast static rows on the sync tip (`check --pre-push --priority train --only fmt,conformance,gates-register,clippy,clippy-windows
+    /// --base <train>`, in the train lane of the queue); a failing row is exit 5 (6 not measured) with the rows and the next step, unless `--no-static` says why not. Once
     /// they pass it dispatches the member's own CI trial: it pushes the sync tip as the new ref `sync/<member>/<short sha>` (integrator role only) and runs `ci dispatch ci.yml
     /// --trial sync/<member>/<short sha> --onto <train>` (the affected jobs of the member on the train), printing the run id, unless `--no-trial` says why not.
     SyncMember(SyncMemberArgs),
@@ -512,6 +518,27 @@ enum SlotCommand {
     /// The detached holder that `acquire` starts. Not for people.
     #[command(hide = true)]
     Hold(slots::HoldArgs),
+}
+
+#[derive(Subcommand)]
+enum MutantsCommand {
+    /// Run cargo-mutants over the Rust functions changed in `tools/paddock-dev` and `crates` since `--base`, after its positive control.
+    Gate(MutantsArgs),
+    /// Print the pinned cargo-mutants version (`mutants_gate::PIN`): the one definition ci.yml installs it from.
+    Pin,
+}
+
+#[derive(Args)]
+struct MutantsArgs {
+    /// The repository root (default: the folder containing .git, found from the current folder).
+    #[arg(long)]
+    root: Option<PathBuf>,
+    /// The commit the change is measured from (the merge base).
+    #[arg(long)]
+    base: String,
+    /// Test only this slice of the diff's mutants, `k/n` with k below n (cargo-mutants `--shard`): one leg of ci.yml's `mutants` matrix.
+    #[arg(long)]
+    shard: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -891,6 +918,12 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Load(a) => load::command(&a),
         Command::Places(a) => places::command(&a),
         Command::Audit { command } => audit::command(command),
+        Command::Mutants {
+            command: MutantsCommand::Gate(a),
+        } => mutants_gate::command_gate(a.root, &a.base, a.shard.as_deref()),
+        Command::Mutants {
+            command: MutantsCommand::Pin,
+        } => Ok(Report::new(serde_json::json!({"pin": mutants_gate::PIN}), mutants_gate::PIN)),
         Command::Locks {
             command: LocksCommand::Sync(a),
         } => locks::sync(a.root),
@@ -908,6 +941,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
                 release_tag: a.release_tag,
                 warn: a.warn,
                 base: a.base,
+                stage: crate::check::growth_approval::stage_from_env(&|k| std::env::var(k).ok()).map_err(CliError::usage)?,
             },
             dev_command_paths(),
         ),
