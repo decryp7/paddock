@@ -2772,7 +2772,7 @@ mod sync_static {
             .unwrap();
     }
 
-    const GREEN: &str = r#"[{"id":"fmt crates","verdict":"passed"},{"id":"conformance","verdict":"passed"},{"id":"gates-register","verdict":"passed"},{"id":"clippy crates","verdict":"passed"},{"id":"clippy-windows crates","verdict":"passed"},{"id":"goldens","verdict":"skipped"},{"id":"overlap-tests","verdict":"skipped"}]"#;
+    const GREEN: &str = r#"[{"id":"fmt crates","verdict":"passed"},{"id":"conformance","verdict":"passed"},{"id":"gates-register","verdict":"passed"},{"id":"clippy crates","verdict":"passed"},{"id":"clippy-windows crates","verdict":"passed"}]"#;
 
     /// The member has merged the train: HEAD is the sync tip.
     fn merged() -> Repo {
@@ -2825,13 +2825,10 @@ mod sync_static {
         assert!(text.contains("static rows: passed"), "{text}");
         let main = r.git(&["rev-parse", "main"]);
         assert!(
-            log.contains("--priority train --only fmt,conformance,gates-register,clippy,clippy-windows,goldens,overlap-tests")
+            log.contains("--priority train --only fmt,conformance,gates-register,clippy,clippy-windows")
                 && log.contains(&format!("--base {main}")),
             "{log}"
         );
-        // The overlap's main side is measured from the member's fork point: the merge base of its pre-merge tip and the train.
-        let fork = r.git(&["merge-base", "HEAD^1", "main"]);
-        assert!(log.contains(&format!("--overlap-since {fork}")), "{fork}: {log}");
     }
 
     #[test]
@@ -2883,7 +2880,7 @@ mod sync_static {
 mod member_trial {
     use super::*;
 
-    const GREEN: &str = r#"[{"id":"conformance","verdict":"passed"},{"id":"gates-register","verdict":"passed"},{"id":"goldens","verdict":"skipped"},{"id":"overlap-tests","verdict":"skipped"}]"#;
+    const GREEN: &str = r#"[{"id":"conformance","verdict":"passed"},{"id":"gates-register","verdict":"passed"}]"#;
     const RED: &str = r#"[{"id":"conformance","verdict":"failed"},{"id":"gates-register","verdict":"passed"}]"#;
 
     /// The member (feat/x) has merged the train (main) and has a bare `origin`.
