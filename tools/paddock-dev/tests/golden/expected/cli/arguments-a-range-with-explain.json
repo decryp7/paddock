@@ -42,6 +42,15 @@
   "cargoOnly": [
    "crates"
   ],
+  "gradePackages": {
+   "apps/x/app/src-tauri": [
+    "x"
+   ],
+   "crates": [
+    "fx-a",
+    "fx-b"
+   ]
+  },
   "why": {
    "app:x": [
     "cargo apps/x/app/src-tauri reaches crates/a",
