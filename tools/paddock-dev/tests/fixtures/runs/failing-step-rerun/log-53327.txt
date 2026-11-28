@@ -1,0 +1,9 @@
+2026-11-27T15:28:52.2112990Z Job: conformance
+2026-11-27T15:32:20.3503511Z [32;1m    Starting[0m [1m20[0m tests across [1m3[0m binaries ([1m2934[0m tests [33;1mskipped[0m)
+2026-11-27T15:32:20.8282123Z [32;1m     Summary[0m [   0.474s] [1m20[0m tests run: [1m20[0m [32;1mpassed[0m, [1m2934[0m [33;1mskipped[0m
+2026-11-27T15:33:23.0958752Z Success - Post ./.gitea/actions/sccache-stats
+2026-11-27T15:33:23.1195337Z Success - Post ./dev tool cache
+2026-11-27T15:33:23.1367737Z Success - Post ./.gitea/actions/setup-rust
+2026-11-27T15:33:23.3129034Z Success - Post actions/checkout@v4
+2026-11-27T15:33:30.5001781Z Cleaning up container for job conformance (checks, release scripts)
+2026-11-27T15:33:39.9645888Z Job succeeded

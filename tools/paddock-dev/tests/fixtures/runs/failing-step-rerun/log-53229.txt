@@ -1,0 +1,9 @@
+2026-11-27T15:29:00.9176925Z Job: crates
+2026-11-27T15:31:08.2442813Z [32;1m    Starting[0m [1m46[0m tests across [1m4[0m binaries ([1m435[0m tests [33;1mskipped[0m)
+2026-11-27T15:31:08.3727555Z [32;1m     Summary[0m [   0.129s] [1m46[0m tests run: [1m46[0m [32;1mpassed[0m, [1m435[0m [33;1mskipped[0m
+2026-11-27T15:31:10.0837976Z Success - Post ./.gitea/actions/sccache-stats
+2026-11-27T15:31:10.1206560Z Success - Post ./dev tool cache
+2026-11-27T15:31:10.1426324Z Success - Post ./.gitea/actions/setup-rust
+2026-11-27T15:31:10.3443967Z Success - Post actions/checkout@v4
+2026-11-27T15:31:17.9048414Z Cleaning up container for job crates (fmt, workspace hack, unused deps, coverage, deny)
+2026-11-27T15:31:19.9154913Z Job succeeded

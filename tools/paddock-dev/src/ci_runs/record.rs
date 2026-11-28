@@ -87,7 +87,7 @@ fn identity(key: &str, value: &str, runners: &mut BTreeMap<String, usize>) -> Op
 /// API answers are: the server and owner names ([`rename`]), runner and disk names, and the user folder of a home path.
 pub fn trim_log(log: &str, real_host: &str, real_owner: &str) -> String {
     let keep = regex::Regex::new(
-        r"^\s*(Job: |plan (scope|verdict): |Starting \d+ tests?|(FAIL|TIMEOUT|TMT|SIG\w*|FLAKY|FLKY\S*|TRY \d+ (FAIL|TIMEOUT|PASS|SIG\w*))\b|Summary \[|.*tests? (were |was )?not run|Cancelling due to|##\[error\]|::error::)",
+        r"^\s*(Job: |plan (scope|verdict): |Starting \d+ tests?|(FAIL|TIMEOUT|TMT|SIG\w*|FLAKY|FLKY\S*|TRY \d+ (FAIL|TIMEOUT|PASS|SIG\w*))\b|Summary \[|.*tests? (were |was )?not run|Cancelling due to|##\[error\]|::error::|(Success|Failure|Skipped|Cancelled) - |Cleaning up container for job|Job (succeeded|failed))",
     );
     let Ok(keep) = keep else { return String::new() };
     // (pattern, replacement), in order. Runner work folders name the runner and the disk: `/Volumes/<disk>/gitea-runners/<runner>`;
@@ -172,6 +172,23 @@ pub fn record(
         for n in 1..attempts {
             // per-item: one list per earlier attempt; a rerun has one or two.
             let mut earlier = http.get_json(&format!("{api}/runs/{id}/attempts/{n}/jobs?limit=50&page=1"), token)?;
+            // The log of each failed job of that attempt: the verdict reads it to tell a lost report from a failure (user decision 137).
+            let failed: Vec<u64> = earlier["jobs"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter(|j| matches!(JobOutcome::from_api(j["conclusion"].as_str().unwrap_or("")), JobOutcome::Failed))
+                        .filter_map(|j| j["id"].as_u64())
+                        .collect()
+                })
+                .unwrap_or_default();
+            // per-item: the server has no bulk log call; an attempt has one or two failed jobs, a recording is made once per shape.
+            for job in failed {
+                match http.get_text(&format!("{api}/jobs/{job}/logs"), token) {
+                    Ok(t) => files.push((format!("log-{job}.txt"), trim_log(&t, host, owner))),
+                    Err(e) => log(&format!("::warning::job {job} (attempt {n}): its log was not recorded ({e})")),
+                }
+            }
             scrub(&mut earlier, host, owner, &mut runners);
             files.push((format!("attempt-{id}-{n}.json"), format!("{earlier:#}\n")));
         }
@@ -448,6 +465,37 @@ mod tests {
                 && !files[0].1.contains("noise")
         );
         assert!(files[1].1.contains("Summary") && !files[1].1.contains("noise"));
+    }
+
+    #[test]
+    fn a_rerun_records_the_log_of_each_failed_job_of_an_earlier_attempt() {
+        let mut f = Fake::default();
+        let api = "https://real.example.net/api/v1/repos/jdoe/paddock/actions";
+        let mut run = sample();
+        run["run_attempt"] = json!(2);
+        f.json(&format!("{api}/runs/12"), run);
+        f.json(
+            &format!("{api}/runs/12/jobs?limit=50&page=1"),
+            json!({"total_count": 0, "jobs": []}),
+        );
+        f.json(
+            &format!("{api}/runs/12/attempts/1/jobs?limit=50&page=1"),
+            json!({"total_count": 2, "jobs": [{"id": 7, "name": "ui", "conclusion": "failure"}, {"id": 8, "name": "x", "conclusion": "success"}]}),
+        );
+        f.log(7, "2026-01-01T00:00:00.0Z noise\n2026-01-01T00:00:01.0Z Success - Post a\n2026-01-01T00:00:02.0Z Cleaning up container for job ui\n");
+        let files = record(&mut f, "https://real.example.net", "jdoe/paddock", "t", &[12], &mut |_| {}).unwrap();
+        let (_, text) = files
+            .iter()
+            .find(|(n, _)| n == "log-7.txt")
+            .expect("the failed job's log is recorded");
+        assert!(
+            text.contains("Success - Post a") && text.contains("Cleaning up container") && !text.contains("noise"),
+            "{text}"
+        );
+        assert!(
+            files.iter().all(|(n, _)| n != "log-8.txt"),
+            "a job that passed in that attempt has no log recorded"
+        );
     }
 
     #[test]

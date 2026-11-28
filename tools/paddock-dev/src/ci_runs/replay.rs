@@ -69,6 +69,7 @@ enum R {
 #[derive(Debug)]
 enum T {
     Green,
+    Red(&'static str),
     NotMeasured(&'static str),
 }
 
@@ -260,6 +261,32 @@ const SHAPES: &[Shape] = &[
         trial: Some(T::Green),
         why: "a member's trial with a v3 line that ran only its affected jobs (eslint and icons not run): the trial reader grades a trial on its own scope line (every expected job ran and passed), so it is green; the full scope is the landing verdict's",
     },
+    Shape {
+        name: "lost-report-rerun",
+        workflow: "ci.yml",
+        run: 9388,
+        asking: None,
+        touched: Touch::Nothing,
+        on_scope: V::Red(None, "a landing run"),
+        on_line: V::Red(None, "a landing run"),
+        on_landing: V::Green(9388),
+        reuse: None,
+        trial: None,
+        why: "train ad's run, in place rerun: the `ui` job failed on attempt 1 with all 18 steps success and a log that ran to its clean-up (the runner's final report was lost), so the rerun's green counts for the landing (user decision 137, 2026-11-28); it is a landing run, never a full one, so the full-run bases still say so",
+    },
+    Shape {
+        name: "failing-step-rerun",
+        workflow: "ci.yml",
+        run: 9280,
+        asking: None,
+        touched: Touch::Nothing,
+        on_scope: V::Red(None, "no ci.yml run for"),
+        on_line: V::Red(None, "no ci.yml run for"),
+        on_landing: V::Red(None, "no ci.yml run for"),
+        reuse: None,
+        trial: Some(T::Red("only after a retry")),
+        why: "a trial whose `crates` job failed on attempt 1 with failing steps (the orphan guardian and cargo deny), rerun green: a rerun that hid a real failure stays red (decision 137 accepts only a proven lost report)",
+    },
 ];
 
 /// A recorded artifact reader shape: what the real server answered for a run's artifacts (the list, the redirect of the download, the
@@ -399,6 +426,7 @@ fn every_shape_is_answered_as_written_down() {
             let got = verdict::trial(&mut client(&mut f), s.workflow, &branch, &member);
             let ok = match (&got, want) {
                 (verdict::Trial::Green { run }, T::Green) => *run == s.run,
+                (verdict::Trial::Red { run, reason }, T::Red(phrase)) => *run == s.run && reason.contains(phrase),
                 (verdict::Trial::NotMeasured(why), T::NotMeasured(phrase)) => why.contains(phrase),
                 _ => false,
             };
