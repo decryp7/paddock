@@ -4522,6 +4522,24 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   (`moved`, not growth). C171 reads `git diff -M`, and its waiver may sit above the statement that holds the literal. A moved file's changed content is
   judged as usual: a new offending line still fails, and a new entry is still growth.
 
+## A test that starts the push gate takes its locks in its own state folder (2026-11-28, fix/prepush-test-hang, ER-14, ER-51)
+- **What happened.** `pre_push::tree_everything_that_runs_green_is_exit_0` timed out at 900 s with almost no CPU in a local member gate (train aa member 6)
+  and passed in 8.5 s on the retry. The test starts the real `./dev check --pre-push` in the repository's own tree, and the run keeps its state (logs,
+  step history, one lock per build folder) in `<git common dir>/paddock-pre-push`: the folder every worktree of the repository shares. Its clippy row
+  took the build-folder lock of `<worktree>/crates/target`, the same key the member gate's own clippy row holds for the whole step, so the test waited
+  for the real gate (a live holder inside its row cap is progress, so the wait is bounded only by the 30 min stall limit).
+- **Evidence.** Holding that lock from another process made the test run 237 s instead of 14 s and end when the holder let go; the new test below was red
+  before the fix. With the state folder given by the test, the same held lock leaves the test at about 10 s.
+- **Fix (ER-44).** `PADDOCK_PREPUSH_STATE` names the state folder of a run (test-only in the settings register); `dev_heavy` in
+  `tools/paddock-dev/tests/it/pre_push.rs` gives every run one under the test's own folder, which fixes all the `tree_` tests that run a gate row at once.
+  `tree_a_run_takes_its_build_folder_lock_in_the_state_folder_it_was_given` fails if the variable is ignored.
+- **The class (ER-21), closed in the same change.** Tool state under the git common dir (`<common>/paddock-pre-push`, `<common>/paddock/waits`) is
+  shared by every worktree. Each such folder has a test-only `*_STATE` row in the settings register (`PADDOCK_PREPUSH_STATE`, read by `pre_push::state_dir`, which
+  the test cache and the slow-row records use too; `PADDOCK_WAIT_STATE`, read by `wait_lock::dir_for`), and `paddock_testkit::process::STATE_FOLDERS` makes every
+  `TestCommand` set all of them inside its private folder. `tests/it/state_folders.rs` fails when the register declares a `*_STATE` setting the harness does not
+  set (shown red by dropping one). The owner map, the hook copies and the repository exclude file also live in the common dir, but only worktree, hook and disk
+  commands touch them and their tests run in repositories they make. No test started `ci test-cache` or `landing-held` in the checkout.
+
 ## A wait ended on a 401 its own token had not earned (2026-11-28, fix/ci-wait-token, ER-28)
 - **What happened.** On 2026-11-27/28 five `./dev wait --ci-run` waiters (runs 9284, 9285, 9286, 9320, 9321) ended after five failed looks with
   `HTTP 401 invalid username, password or token`, while a fresh `curl` or `./dev ci trial-verdict` with the same `GITEA_TOKEN` worked.
