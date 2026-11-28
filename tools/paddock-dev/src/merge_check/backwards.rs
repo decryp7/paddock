@@ -10,9 +10,10 @@
 //! Why: on 2026-11-05 a branch commit built on a stale tree reverted a memory fix, a redaction and test fixes with no conflict
 //! (b48df1818). A finding is answered with `Reverted: <path>: <reason>` (or `Hunks-dropped:`) in the merge message.
 
-use super::diff::{DIFF_FLAGS, FileDiff, Hunk, parse, trivial};
-use super::{Ctx, Finding, Kind, trailers};
+use super::{Ctx, Finding, Kind};
 use crate::git::{Git, short};
+use crate::git_diff::{DIFF_FLAGS, FileDiff, Hunk, parse, trivial};
+use crate::trailers;
 use std::collections::{HashMap, HashSet};
 
 /// Commits touching a file that are searched for the commit being reverted.

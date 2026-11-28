@@ -3490,3 +3490,57 @@ passed the push and failed the member gate)? user, 2026-11-28, in chat (the narr
   C178 on the unlisted module); the file was removed after the run.
 - **Not measured:** a cold build folder for the whole branch, a quiet machine, and the full `./dev check --pre-push` of this branch
   (see the hand-back report).
+
+## Gate rows whose child queues: priority passed on, queue told from run (2026-11-28, fix/gate-rows-child-queue, base c5cd28247)
+
+Question: why did the member gate's `goldens` row take 424 to 589 s when its build took 12 to 23 s, and does passing the gate's priority
+on and reading the child's queue through a status file remove it? (Class: throttle queue time counted as run time; train i's row
+study 64% queue, member-audits' queues of 156 s and 370 s.)
+
+- **Cause (diagnosed by the coordinator, before):** `./dev gen check` was started without `--priority train`, so its throttled build
+  queued at normal priority while every train-lane row overtook it; `gen check` buffers its build output, so the watchdog saw "no unit
+  finished for ~313 s, 0.1 s CPU"; `row-timings.tsv` counted the queue as run time (the row is not heavy, so no `throttle` timed it).
+- **Machine:** the shared Mac mini (arm64), other agents and trains running (1-minute load 17.7 at the start); `./dev throttle`, sccache,
+  warm build folders. One run per row, one run of the after case.
+- **Command (after):** `./dev check --pre-push --member-gate --priority train --only goldens,clippy,conformance-tests --base origin/main`
+  with one comment line appended to `tools/paddock-dev/src/ci_run/mod.rs` (a declared input of `ci-run-golden`, so the row is planned;
+  the line was removed after the run).
+
+  | Row | Before (train rows, coordinator's reading) queued s | run s | After queued s | run s |
+  |---|---:|---:|---:|---:|
+  | `goldens` | counted in run: 424 to 589 total | (build 12 to 23) | 0.0 | 30.0 |
+
+  Beside it in the same after run: `clippy crates` queued 156.6 s, `conformance-tests` queued 156.3 s (normal train rows waiting for a
+  slot, as designed), so the row was not fast because the machine was idle.
+- **Result:** the child's own status file (`goldens-<hash>.queue.jsonl` in the run's log folder) shows the two `throttle` runs of
+  `gen check` queued and admitted within 0.001 s and ran 27.4 s and 1.8 s; the row's table line splits queued 0.0 from run 30.0. The
+  before figures are the coordinator's diagnosis of earlier member-gate runs, not re-measured on this tree (no old build of `./dev` was
+  run again), so the 424 to 589 s to 30.0 s step is two different runs of the same row, not an A/B pair.
+- **Positive controls (unit tests):** a fake child that reports queued then admitted is judged waiting, not stuck, with its 7 s queue in
+  the row's `queued`; a silent child with the same duration is still ended as stuck; the row cap (3 s) does not cut a child that queued
+  6 s and does cut a silent one of the same length.
+- **Not measured:** a member gate whose goldens row queues for minutes behind a loaded train (no such queue formed in the after run), and
+  a gate with an older `throttle` on PATH (it writes no status file: the row is then watched as before, never taken as waiting).
+
+## The moved-path row in the push gate (2026-11-28, feat/moved-path-check, C183)
+
+Question: what does the `moved-paths` row cost, so a push that renames or deletes a file learns that a path register still names it before the full
+conformance run does (user, 2026-11-28, in chat: two gate rounds in the paddock-dev split)?
+
+- **Machine:** the shared Mac mini (arm64), other agents running; the release build of `./dev` warm; `/usr/bin/time -p`, three runs each.
+- **Command:** `./dev check run --only C183` (the row's command: one `git diff --name-status -M` against the merge base, 33 register files read,
+  the positive control run first).
+
+  | What | Wall s |
+  |---|---:|
+  | clean tree (no rename, no deletion), 3 runs | 0.69, 0.67, 0.67 |
+  | one staged rename of a file `docs/gates.toml` names, 3 runs | 1.17 (first), 0.71, 0.67 |
+  | `./dev check --pre-push --only moved-paths --no-reuse` with that rename (the whole gate: plan, row, table), 2 runs | 7.1, 7.2 |
+
+- **Result:** the check itself is about 0.7 s. The row runs only when the push has a rename or a deletion (`Change::moved`, one more
+  `git diff --name-status -M -z --diff-filter=DR` in `discover`); any other push skips it with its reason, so it costs nothing there. The
+  gate's 7 s are the planner and the table, paid by every row.
+- **Positive control:** the staged rename of `apps/debrief/scripts/ci/check-smoke-dialogs.mjs` gave one warning, `docs/gates.toml:181 ... moved to
+  ...-moved.mjs`; the file was moved back after the run. The fixture-repository tests in `tests/it/check_c183.rs` hold the same shape.
+- **Not measured:** a cold build of `./dev`, a quiet machine, and the row on a push that deletes hundreds of files (one `git diff` of the same size
+  as the push's own file list).

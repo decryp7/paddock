@@ -530,7 +530,9 @@ fn release_removes_our_record_and_frees_the_kernel_lock() {
     acq.release();
     assert!(!rig.lock_dir().exists());
     assert_eq!(rig.count(".plock."), 0);
-    assert!(!paddock_throttle::slotfile::is_held(&rig.root().join("throttle-slot1.lock")).unwrap());
+    paddock_testkit::lock::await_free("the kernel lock is free after the release", || {
+        paddock_throttle::slotfile::is_held(&rig.root().join("throttle-slot1.lock")).unwrap()
+    });
     assert!(a.h.log.has("released the lock"));
 }
 

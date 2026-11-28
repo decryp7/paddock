@@ -290,7 +290,7 @@ const SHAPES: &[Shape] = &[
 ];
 
 /// A recorded artifact reader shape: what the real server answered for a run's artifacts (the list, the redirect of the download, the
-/// zip), replayed through the escape monitor's store (`escape::artifact::ArtifactStore`, ADR 0117 amendment D13).
+/// zip), replayed through the escape monitor's store (`escape_ci::artifact::ArtifactStore`, ADR 0117 amendment D13).
 struct ArtifactShape {
     /// The folder below `tests/fixtures/runs`.
     name: &'static str,
@@ -460,8 +460,8 @@ fn every_recorded_folder_has_a_shape_and_every_shape_a_folder() {
 
 #[test]
 fn a_recorded_plan_record_artifact_is_read_back_through_the_store() {
-    use crate::escape::artifact::{ARTIFACT_NAME, ArtifactStore};
     use crate::escape::{Load, Store};
+    use crate::escape_ci::artifact::{ARTIFACT_NAME, ArtifactStore};
     for a in ARTIFACT_SHAPES {
         let head = run_json(a.name, a.run)["head_sha"].as_str().unwrap().to_string();
         let mut f = serve(a.name);

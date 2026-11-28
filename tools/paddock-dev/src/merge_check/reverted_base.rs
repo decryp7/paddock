@@ -13,9 +13,9 @@
 //! merge, or a reverted commit that is not a merge, says nothing. It never fails the check: one `::warning::` line per reverted
 //! branch, with the next step.
 
-use super::trailers::{self, TRAILERS_FORMAT, merge_member};
 use super::{Merge, generator_step::Step};
 use crate::git::{Git, short};
+use crate::trailers::{self, TRAILERS_FORMAT, merge_member};
 use paddock_cli::Exit;
 use serde_json::json;
 use std::collections::{HashMap, HashSet};

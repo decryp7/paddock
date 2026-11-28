@@ -987,7 +987,7 @@ mod tests {
             Some((true, false)),
             "(apply lock held, core lock free) between the merge and the effects"
         );
-        assert!(shared.settings_apply.try_lock().is_ok(), "and let go at the end");
+        assert!(!lock_is_held(&shared.settings_apply), "and let go at the end");
     }
 
     const PATH: &str = r"\Processor(_Total)\% Processor Time";

@@ -2286,6 +2286,7 @@ dependencies = [
  "paddock-slots",
  "paddock-testkit",
  "paddock-testkit-start",
+ "paddock-throttle",
  "proc-macro2",
  "ra-ap-rustc_lexer",
  "regex",
@@ -2437,6 +2438,19 @@ dependencies = [
  "paddock-proc",
  "paddock-testkit",
  "paddock-workspace-hack",
+]
+
+[[package]]
+name = "paddock-throttle"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "paddock-env",
+ "paddock-proc",
+ "paddock-workspace-hack",
+ "serde_json",
+ "sysinfo",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -10,9 +10,10 @@
 //! [`Fake::from_dir`](super::testutil::Fake::from_dir). `--name <shape>` records into `tests/fixtures/runs/<shape>/`, the shapes the
 //! replay suite reads (`ci_runs::replay`, docs/testing/ci-replay.md). Read-only on the server.
 
+use crate::http::Http;
 use crate::job_outcome::JobOutcome;
 use crate::log_text::plain;
-use crate::wait::{CurlHttp, Http};
+use crate::wait::CurlHttp;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
