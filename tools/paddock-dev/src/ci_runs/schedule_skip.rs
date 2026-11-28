@@ -280,6 +280,23 @@ pub fn decide_scheduled(client: &mut Client, event: &str, workflow: &str, now_ms
     d
 }
 
+/// The decision of a run that is not scheduled but yields to trains all the same (`--any-event`: mutants.yml, a push to main or a dispatch):
+/// read the dispatch runs and decide as for a schedule, with no bound by the workflow's history (the caller records what it skipped).
+pub fn decide_yield(client: &mut Client, now_ms: f64) -> Decision {
+    decide("schedule", read(client, now_ms), now_ms)
+}
+
+/// The notice of a yielded run: the trains, and that nothing was measured.
+pub fn yield_notice(trains: &[TrainRun]) -> String {
+    let branches: BTreeSet<&str> = trains.iter().map(|t| t.branch.as_str()).collect();
+    let runs: Vec<String> = trains.iter().map(|t| format!("{} {}", t.workflow, t.id)).collect();
+    format!(
+        "{SKIP_NOTICE}{} in CI (runs {}); this part measured nothing and holds no runner slot: dispatch the workflow again with the skipped diff's base after the train lands",
+        branches.into_iter().collect::<Vec<_>>().join(", "),
+        runs.join(", ")
+    )
+}
+
 /// The train branch a run's `path` names (`ci.yml@refs/heads/train/x` is `train/x`), `None` for any other ref.
 pub fn train_branch(path: &str) -> Option<&str> {
     path.split_once('@')
@@ -408,6 +425,23 @@ mod tests {
         assert_eq!(inactive("push", Some("debrief"), set(&[])), None);
         // Fail open: a set that cannot be read runs the schedule (the train check still decides).
         assert_eq!(inactive("schedule", Some("debrief"), Err("unreadable".into())), None);
+    }
+
+    #[test]
+    fn a_yielding_run_that_is_not_scheduled_skips_while_a_train_is_in_ci_and_says_what_it_measured() {
+        let runs = vec![run(1, "ci.yml@refs/heads/train/a", "workflow_dispatch", "queued", NOW)];
+        // `decide` with the event of a push answers nothing; the yield asks as a schedule does.
+        assert_eq!(decide("push", Ok(runs.clone()), now()), Decision::NotScheduled);
+        let d = decide("schedule", Ok(runs), now());
+        let Decision::Skip { trains, .. } = d else {
+            panic!("a queued train must skip: {d:?}")
+        };
+        let n = yield_notice(&trains);
+        assert!(
+            n.starts_with(SKIP_NOTICE) && n.contains("train/a") && n.contains("measured nothing"),
+            "{n}"
+        );
+        assert!(!n.contains("next schedule"), "{n}");
     }
 
     #[test]

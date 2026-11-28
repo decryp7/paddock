@@ -47,8 +47,9 @@ pub(super) fn miss_warning(stats: &str, leg: &str, slot: &str) -> Option<String>
     );
     (hits == 0 && l1_hits == 0 && l1_misses > MISS_WARNING_ABOVE).then(|| {
         format!(
-            "::warning::sccache-stats: leg {leg} (slot {slot}): 0 cache hits, S3 (L1) 0 hits and {l1_misses} misses; cache keys may contain a changing path \
-             (another slot or checkout folder than the last run of this job). Report-only, reviewed by {MISS_WARNING_REVIEW_BY}."
+            "::warning::sccache-stats: leg {leg} (slot {slot}): 0 cache hits, S3 (L1) 0 hits and {l1_misses} misses; not judged: the counters cannot tell a \
+             cold cache, a change cascade (first-party crates downstream of a changed crate miss by design) or a key fault (a changing \
+             path in the keys) apart. Report-only, reviewed by {MISS_WARNING_REVIEW_BY}."
         )
     })
 }
@@ -88,6 +89,18 @@ pub fn run(env: &HashMap<String, String>, out: &mut dyn Write) -> i32 {
     if !on_path(env, "sccache") {
         return 0;
     }
+    // ER-33, ER-51: only the job's own server is asked, the one whose port setup-rust set. Without it (the server did not start, or setup-rust
+    // never ran) the default port may hold a developer's server on a host runner, whose numbers would print as the job's.
+    let cause = match step.var(crate::ci_setup_rust::STATE_VAR).and_then(|v| v.strip_prefix("off:")) {
+        Some(c) => Some(c.to_string()),
+        None if step.var("SCCACHE_SERVER_PORT").is_none() => Some("setup-rust set no server port".to_string()),
+        None => None,
+    };
+    if let Some(cause) = cause {
+        step.say(format!("not measured: the job's server did not start ({cause})"));
+        job_end(env, &mut step, false);
+        return 0;
+    }
     let mut log = Vec::new();
     let stats = ToolCall::new("sccache")
         .args(["--show-stats"])
@@ -112,6 +125,13 @@ pub fn run(env: &HashMap<String, String>, out: &mut dyn Write) -> i32 {
         }
         _ => step.say("::notice::sccache statistics are unavailable (the cache server was not reachable)."),
     }
+    job_end(env, &mut step, true);
+    0
+}
+
+/// What every job ends with, measured or not: the server's error log, the S3 guard's log and its stop, then the job's own server's stop
+/// (only when `stop_server`: a port in the environment of a job whose server never started is not this job's).
+fn job_end(env: &HashMap<String, String>, step: &mut Step, stop_server: bool) {
     // What the server logged as an error (setup-rust puts it in the job's temp folder when the S3 level is on): a failed S3 write
     // never fails a build, so this is where it shows (ER-27).
     if let Some(log) = step.var("SCCACHE_ERROR_LOG")
@@ -154,7 +174,7 @@ pub fn run(env: &HashMap<String, String>, out: &mut dyn Write) -> i32 {
     // The guard and the server that holds the S3 secret end here (ci_s3_guard::stop_job_cache; `ci isolation release` is the net).
     crate::ci_s3_guard::stop_job_cache(env, step.out);
     // Only CI's own server (setup-rust sets its port); a server on the default port is never stopped.
-    if step.var("SCCACHE_SERVER_PORT").is_some() {
+    if stop_server && step.var("SCCACHE_SERVER_PORT").is_some() {
         let stop = ToolCall::new("sccache")
             .args(["--stop-server"])
             .pass(["SCCACHE_*"])
@@ -163,7 +183,6 @@ pub fn run(env: &HashMap<String, String>, out: &mut dyn Write) -> i32 {
         let _ = stop.run(env, &mut log);
         step.out.write_all(&log).ok();
     }
-    0
 }
 
 #[cfg(all(test, unix))]
@@ -226,7 +245,10 @@ Multi-level cache levels              2
             w.contains("leg CI/crate") && w.contains("slot s2") && w.contains("90 misses"),
             "{w}"
         );
-        assert!(w.contains("cache keys may contain a changing path"), "{w}");
+        assert!(
+            w.contains("not judged") && w.contains("change cascade") && !w.contains("cache keys may contain"),
+            "no key fault is claimed from counters alone: {w}"
+        );
         assert!(w.contains(MISS_WARNING_REVIEW_BY), "the review date is in the line: {w}");
     }
 
@@ -293,7 +315,7 @@ Multi-level cache levels              2
             .answers(Actions::new().appends_with(&calls, CALL_LINE).stdout(KEPT_FOLDER))
             .install()
             .unwrap();
-        let (code, out, _) = go(d.path(), &[]);
+        let (code, out, _) = go(d.path(), &[("SCCACHE_SERVER_PORT", "4501")]);
         assert_eq!(code, 0);
         assert_eq!(out.matches("::notice::sccache-stats: warm").count(), 1, "{out}");
         assert!(out.find("Compile requests").unwrap() < out.find("::notice::sccache-stats").unwrap());
@@ -335,7 +357,12 @@ Multi-level cache levels              2
             .unwrap();
         let (code, out, _) = go(
             d.path(),
-            &[("GITHUB_WORKFLOW", "CI"), ("GITHUB_JOB", "paddock-dev"), ("PADDOCK_CI_SLOT", "s2")],
+            &[
+                ("GITHUB_WORKFLOW", "CI"),
+                ("GITHUB_JOB", "paddock-dev"),
+                ("PADDOCK_CI_SLOT", "s2"),
+                ("SCCACHE_SERVER_PORT", "4501"),
+            ],
         );
         assert_eq!(code, 0, "report-only: it never fails the step");
         assert_eq!(out.matches("::warning::sccache-stats").count(), 1, "{out}");
@@ -350,7 +377,7 @@ Multi-level cache levels              2
             )
             .install()
             .unwrap();
-        let (code, out, _) = go(d.path(), &[]);
+        let (code, out, _) = go(d.path(), &[("SCCACHE_SERVER_PORT", "4501")]);
         assert_eq!(code, 0);
         assert!(!out.contains("::warning::sccache-stats"), "{out}");
     }
@@ -370,16 +397,52 @@ Multi-level cache levels              2
             calls, "sccache --show-stats port=4501 token=\nsccache --stop-server port=4501 token=\n",
             "the token never reaches sccache"
         );
+        // No port of the job's own: never a call, so never the numbers of a server on the default port (a developer's or another job's).
         let d = crate::ci_host::canonical_tempdir();
         let calls = d.path().join("calls").display().to_string();
         StandIn::new(d.path(), "sccache")
             .answers(Actions::new().appends_with(&calls, CALL_LINE).stdout("stats"))
             .install()
             .unwrap();
-        let (_, _, calls) = go(d.path(), &[]);
+        let (code, out, calls) = go(d.path(), &[]);
+        assert_eq!(code, 0);
+        assert_eq!(calls, "", "sccache is not called without the job's port");
+        assert!(
+            out.contains("not measured: the job's server did not start (setup-rust set no server port)"),
+            "{out}"
+        );
+        assert!(!out.contains("stats\n"), "no numbers are printed: {out}");
+    }
+
+    #[test]
+    fn the_off_state_setup_rust_wrote_is_not_measured_with_its_cause_and_calls_nothing() {
+        let d = crate::ci_host::canonical_tempdir();
+        let calls = d.path().join("calls").display().to_string();
+        StandIn::new(d.path(), "sccache")
+            .answers(
+                Actions::new()
+                    .appends_with(&calls, CALL_LINE)
+                    .stdout("Compile requests 0\nCache hits 0"),
+            )
+            .install()
+            .unwrap();
+        // Even a port in the environment (a stale or foreign one) is not asked once the job's server is known not to have started.
+        let (code, out, calls) = go(
+            d.path(),
+            &[("PADDOCK_SCCACHE_STATE", "off:start-failed-twice"), ("SCCACHE_SERVER_PORT", "4501")],
+        );
+        assert_eq!(code, 0, "it never fails the job");
+        assert!(
+            out.contains("not measured: the job's server did not start (start-failed-twice)"),
+            "{out}"
+        );
         assert_eq!(
-            calls, "sccache --show-stats port= token=\n",
-            "a server on the default port is left running"
+            calls, "",
+            "no --show-stats and no --stop-server: there is no server of this job to ask"
+        );
+        assert!(
+            !out.contains("Compile requests"),
+            "empty stats are never printed as a result: {out}"
         );
     }
 
@@ -391,7 +454,7 @@ Multi-level cache levels              2
             .answers(Actions::new().appends_with(&calls, CALL_LINE).exit(2))
             .install()
             .unwrap();
-        let (code, out, _) = go(d.path(), &[]);
+        let (code, out, _) = go(d.path(), &[("SCCACHE_SERVER_PORT", "4501")]);
         assert_eq!(code, 0);
         assert!(
             out.contains("::notice::sccache statistics are unavailable (the cache server was not reachable)."),

@@ -20,6 +20,7 @@
  },
  "packages": {},
  "cargoOnly": [],
+ "gradePackages": {},
  "why": {
   "app:y": [
    "apps/y/app/angular.json"
