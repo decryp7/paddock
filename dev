@@ -346,15 +346,21 @@ compiler_now() {
 }
 
 # only_build_folder <file>: the config sets nothing but the build folder (`target-dir` in `[build]`, or a top-level
-# `build.target-dir`), besides blank lines and comments. The build folder never changes the binary (CARGO_TARGET_DIR is not
-# hashed either), and CI's build-folder action writes exactly such a ci.toml next to the tool in the middle of a job. Prints
-# nothing, so a trace never shows what the file holds.
+# `build.target-dir`, and the path remap of that folder that CI's build-folder action writes next to it: the one line
+# `rustflags = ['--remap-path-prefix=<folder>=/paddock-target']` under `[target.'cfg(all())']`), besides blank lines and comments.
+# The build folder never changes the binary (CARGO_TARGET_DIR is not hashed either; the remap only renames the folder in the paths
+# the binary embeds), and CI's build-folder action writes exactly such a ci.toml next to the tool in the middle of a job. Prints
+# nothing, so a trace never shows what the file holds. The twin of input_hash::only_names_build_folder.
 only_build_folder() {
-  awk '
+  # q is the single quote (the program is itself in single quotes; a hex escape is not portable across awks).
+  awk -v q="'" '
+    BEGIN { remap_sec = "[target." q "cfg(all())" q "]"
+            remap_re = "^rustflags = \\[" q "--remap-path-prefix=[^" q "]*=/paddock-target" q "\\]$" }
     { line = $0; gsub(/\r/, "", line); sub(/^[ \t]+/, "", line) }
     line == "" || line ~ /^#/ { next }
-    line ~ /^\[/ { sec = line; gsub(/[ \t]/, "", sec); if (sec != "[build]") bad = 1; next }
+    line ~ /^\[/ { sec = line; gsub(/[ \t]/, "", sec); if (sec != "[build]" && sec != remap_sec) bad = 1; next }
     (sec == "[build]" && line ~ /^target-dir[ \t]*=/) || (sec == "" && line ~ /^build\.target-dir[ \t]*=/) { next }
+    sec == remap_sec && line ~ remap_re { next }
     { bad = 1 }
     END { exit bad ? 1 : 0 }' "$1"
 }
