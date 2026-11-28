@@ -152,6 +152,10 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   --priority train [--set slow]`, `./dev gen check --priority train`; `./dev merge check --gates` passes it itself): the step goes before
   normal waiters (tools/throttle/README.md, "Train priority").
 - **E2E and screenshots run on fresh code (guidance; a binding rule is proposed).** A running dev server is reused only with `PW_REUSE_SERVER=1`; default ports derive from the worktree path (`e2ePort` in `@decryp7/paddock-e2e`); a config that consumes `ui/dist` or the css fails at load with "rebuild ui: npm run build -w ui" when they were built from older sources (`build-guard.ts`, content stamps; lessons.md). New Playwright configs use these.
+- **A test that starts a compiler or `cargo build` is in the build class.** Its function name starts with `build_`, and a call to
+  `paddock_testkit::build_cost::charge` stands before the code that looks for or starts the build (a test of another name fails under
+  nextest with the new name). Each workspace's `.config/nextest.toml` gives the class its budget from a measured cold build
+  (docs/benchmarks.md, "test build cost class"); `tools/paddock-dev/tests/it/build_cost.rs` checks the places and the overrides.
 - **Git fixtures (rule 102).** A test that needs a git repository builds it once per machine with `paddock_testkit::git_fixture::template` and copies it per test with `copy_tree`; a fixture builder with six or more `git` starts per test is a C174 finding (report-only).
 - **A reader change adds or updates a replay shape (user decision 96, 2026-11-26).** A change to the CI verdict, reuse, green, fix-items or
   trial readers (`tools/paddock-dev/src/ci_runs/`, `run_scope`) records the real run that shows its shape with

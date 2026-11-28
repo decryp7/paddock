@@ -22,7 +22,7 @@ fn fault(r: Result<impl std::fmt::Debug, HostError>) -> (FaultKind, String) {
 }
 
 #[test]
-fn a_crashing_plugin_is_restarted_after_the_back_off_and_then_quarantined() {
+fn build_a_crashing_plugin_is_restarted_after_the_back_off_and_then_quarantined() {
     let rig = Rig::new();
     let s = rig.supervisor("", Grants::none());
     assert_eq!(s.status(), Status::Stopped);
@@ -86,7 +86,7 @@ fn a_crashing_plugin_is_restarted_after_the_back_off_and_then_quarantined() {
 }
 
 #[test]
-fn a_typed_failure_is_not_a_fault_but_a_panic_in_a_contribution_is() {
+fn build_a_typed_failure_is_not_a_fault_but_a_panic_in_a_contribution_is() {
     let rig = Rig::new();
     let s = rig.supervisor("", Grants::none());
     for _ in 0..5 {
@@ -118,7 +118,7 @@ fn a_typed_failure_is_not_a_fault_but_a_panic_in_a_contribution_is() {
 }
 
 #[test]
-fn a_hanging_call_past_its_grace_is_a_fault_and_the_process_is_ended() {
+fn build_a_hanging_call_past_its_grace_is_a_fault_and_the_process_is_ended() {
     let rig = Rig::new();
     let s = rig.supervisor("", Grants::none());
     echo(&s).unwrap();
@@ -145,7 +145,7 @@ fn a_hanging_call_past_its_grace_is_a_fault_and_the_process_is_ended() {
 }
 
 #[test]
-fn an_oversized_frame_fails_one_call_and_counts_one_fault() {
+fn build_an_oversized_frame_fails_one_call_and_counts_one_fault() {
     let rig = Rig::new();
     let s = rig.supervisor("", Grants::none());
     // 512 KiB frames: a reply of 800 KB does not fit.
@@ -173,7 +173,7 @@ fn an_oversized_frame_fails_one_call_and_counts_one_fault() {
 }
 
 #[test]
-fn a_program_changed_after_install_is_a_quarantine_grade_fault_and_is_not_started() {
+fn build_a_program_changed_after_install_is_a_quarantine_grade_fault_and_is_not_started() {
     let rig = Rig::new();
     let installed = rig.install("", Grants::none());
     let program = installed.program.clone();
@@ -201,7 +201,7 @@ fn a_program_changed_after_install_is_a_quarantine_grade_fault_and_is_not_starte
 }
 
 #[test]
-fn a_missing_program_is_refused_with_how_to_fix_it() {
+fn build_a_missing_program_is_refused_with_how_to_fix_it() {
     let rig = Rig::new();
     let installed = rig.install("", Grants::none());
     std::fs::remove_file(&installed.program).unwrap();
@@ -228,7 +228,7 @@ fn installed_with(
 }
 
 #[test]
-fn a_manifest_for_protocol_one_is_refused_before_anything_starts() {
+fn build_a_manifest_for_protocol_one_is_refused_before_anything_starts() {
     let rig = Rig::new();
     let manifest = fixture::manifest("1.1", "paddock-plugin-fixture", "");
     let installed = installed_with(&rig, manifest, "/does/not/exist".into(), [0; 32]);
@@ -259,7 +259,7 @@ fn a_manifest_for_protocol_one_is_refused_before_anything_starts() {
 }
 
 #[test]
-fn a_binary_that_speaks_protocol_one_is_refused_at_the_handshake_with_who_must_update() {
+fn build_a_binary_that_speaks_protocol_one_is_refused_at_the_handshake_with_who_must_update() {
     let rig = Rig::new();
     let program = rig.program("paddock-plugin-fixture-v1");
     let installed = rig.install_manifest(
@@ -282,7 +282,7 @@ fn a_binary_that_speaks_protocol_one_is_refused_at_the_handshake_with_who_must_u
 }
 
 #[test]
-fn a_newer_contract_minor_than_the_app_serves_says_which_side_updates() {
+fn build_a_newer_contract_minor_than_the_app_serves_says_which_side_updates() {
     let rig = Rig::new();
     let perms = "";
     let mut toml = fixture::manifest_toml("2.0", "paddock-plugin-fixture", perms);
@@ -333,7 +333,7 @@ fn a_newer_contract_minor_than_the_app_serves_says_which_side_updates() {
 }
 
 #[test]
-fn a_plugin_that_contributes_something_else_than_its_manifest_is_refused() {
+fn build_a_plugin_that_contributes_something_else_than_its_manifest_is_refused() {
     let rig = Rig::new();
     let toml = fixture::manifest_toml("2.0", "paddock-plugin-fixture", "").replace(
         "kind = \"mcpTool\"\nid = \"fixture_echo\"",
@@ -395,7 +395,7 @@ fn misbehaving(rig: &Rig, kind: &str) -> Supervisor {
 }
 
 #[test]
-fn a_plugin_that_describes_itself_in_nonsense_is_a_counted_garbled_fault() {
+fn build_a_plugin_that_describes_itself_in_nonsense_is_a_counted_garbled_fault() {
     let rig = Rig::new();
     let s = misbehaving(&rig, "garbled");
     let (kind, message) = fault(echo(&s));
@@ -409,7 +409,7 @@ fn a_plugin_that_describes_itself_in_nonsense_is_a_counted_garbled_fault() {
 }
 
 #[test]
-fn a_plugin_that_dies_while_describing_itself_is_a_counted_crash() {
+fn build_a_plugin_that_dies_while_describing_itself_is_a_counted_crash() {
     let rig = Rig::new();
     let s = misbehaving(&rig, "exit");
     let (kind, message) = fault(echo(&s));
@@ -419,7 +419,7 @@ fn a_plugin_that_dies_while_describing_itself_is_a_counted_crash() {
 }
 
 #[test]
-fn a_plugin_that_never_describes_itself_is_a_hang_on_the_clock() {
+fn build_a_plugin_that_never_describes_itself_is_a_hang_on_the_clock() {
     let rig = Rig::new();
     let s = misbehaving(&rig, "hang");
     let caller = {
@@ -442,7 +442,7 @@ fn a_plugin_that_never_describes_itself_is_a_hang_on_the_clock() {
 }
 
 #[test]
-fn settings_a_restarted_process_will_not_take_do_not_stop_it() {
+fn build_settings_a_restarted_process_will_not_take_do_not_stop_it() {
     let rig = Rig::new();
     let s = misbehaving(&rig, "forgetful");
     s.apply_settings(json!({"greeting": "ahoy"})).unwrap();
@@ -462,7 +462,7 @@ fn tool_greeting(s: &Supervisor) -> serde_json::Value {
 }
 
 #[test]
-fn a_process_that_ends_by_itself_is_noticed_as_a_crash_without_any_call() {
+fn build_a_process_that_ends_by_itself_is_noticed_as_a_crash_without_any_call() {
     let rig = Rig::new();
     let s = rig.supervisor("", Grants::none());
     assert_eq!(
@@ -484,7 +484,7 @@ fn a_process_that_ends_by_itself_is_noticed_as_a_crash_without_any_call() {
 }
 
 #[test]
-fn a_back_off_that_gives_up_quarantines_at_once() {
+fn build_a_back_off_that_gives_up_quarantines_at_once() {
     let rig = Rig::with(|c| {
         c.backoff = paddock_jobs::time::BackoffPolicy {
             initial: Duration::from_secs(1),
@@ -511,7 +511,7 @@ fn a_back_off_that_gives_up_quarantines_at_once() {
 }
 
 #[test]
-fn a_data_folder_that_cannot_be_made_refuses_the_plugin_with_the_reason() {
+fn build_a_data_folder_that_cannot_be_made_refuses_the_plugin_with_the_reason() {
     let rig = Rig::new();
     let mut installed = rig.install("", Grants::none());
     let file = rig.dir.path().join("a-file");
@@ -527,7 +527,7 @@ fn a_data_folder_that_cannot_be_made_refuses_the_plugin_with_the_reason() {
 }
 
 #[test]
-fn a_hung_call_that_the_connection_could_not_time_out_is_abandoned_by_the_guard() {
+fn build_a_hung_call_that_the_connection_could_not_time_out_is_abandoned_by_the_guard() {
     // With a peer timeout longer than the guard's budget the guard gives up first: here the call's own timeout is the
     // operation's budget (30 s) and the hang grace is zero, so the guard's budget equals timeout + the cancel grace.
     let rig = Rig::with(|c| c.hang_grace = Duration::ZERO);
@@ -551,7 +551,7 @@ fn a_hung_call_that_the_connection_could_not_time_out_is_abandoned_by_the_guard(
 }
 
 #[test]
-fn a_plugin_the_quarantine_will_not_admit_is_not_called_even_when_the_supervisor_thought_it_was_fine()
+fn build_a_plugin_the_quarantine_will_not_admit_is_not_called_even_when_the_supervisor_thought_it_was_fine()
  {
     let rig = Rig::new();
     let s = rig.supervisor("", Grants::none());
@@ -580,7 +580,7 @@ fn a_plugin_the_quarantine_will_not_admit_is_not_called_even_when_the_supervisor
 }
 
 #[test]
-fn a_plugin_that_cannot_be_served_stays_refused_when_it_is_switched_off_and_on() {
+fn build_a_plugin_that_cannot_be_served_stays_refused_when_it_is_switched_off_and_on() {
     let rig = Rig::new();
     let installed = installed_with(
         &rig,
@@ -603,7 +603,7 @@ fn a_plugin_that_cannot_be_served_stays_refused_when_it_is_switched_off_and_on()
 }
 
 #[test]
-fn a_plugin_with_no_contributions_has_no_settings_and_no_tools() {
+fn build_a_plugin_with_no_contributions_has_no_settings_and_no_tools() {
     let rig = Rig::new();
     let program = rig.program("misbehaving");
     let installed = rig.install_manifest(
@@ -624,7 +624,7 @@ fn a_plugin_with_no_contributions_has_no_settings_and_no_tools() {
 }
 
 #[test]
-fn an_mcp_answer_over_the_budget_is_refused_even_when_the_plugin_ignores_the_budget() {
+fn build_an_mcp_answer_over_the_budget_is_refused_even_when_the_plugin_ignores_the_budget() {
     let rig = Rig::new();
     let program = rig.program("misbehaving");
     let granted = Grants::none().allow(paddock_plugin_package::Permission::McpExpose);

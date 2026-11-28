@@ -47,9 +47,13 @@ impl Ambient {
     }
 }
 
-/// Variables the kit reads for itself (the compiler and the prebuilt stand-in a test names), captured with the others so no kit code
-/// reads the live environment. They are never passed to a child.
-pub const KIT_VARS: &[&str] = &["RUSTC", crate::stand_in::STAND_IN_ENV];
+/// Variables the kit reads for itself (the compiler, the prebuilt stand-in and the running test's name under nextest), captured with the
+/// others so no kit code reads the live environment. They are never passed to a child.
+pub const KIT_VARS: &[&str] = &[
+    "RUSTC",
+    crate::stand_in::STAND_IN_ENV,
+    crate::build_cost::TEST_NAME_ENV,
+];
 
 static CAPTURED: OnceLock<Ambient> = OnceLock::new();
 
