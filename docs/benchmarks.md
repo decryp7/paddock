@@ -84,6 +84,25 @@ uses it, results in
 
 ## Results of shared tooling
 
+### 2026-11-28, C99 fetch limits (fix/c99-fetch-fail-fast)
+
+- **Commit:** base c5cd28247, this branch. CI run 9395 (conformance C99, `cargo fetch --target aarch64-apple-darwin` for apps/debrief): `spawnSync cargo ETIMEDOUT` after about 15 minutes (the old 900 s spawn limit of each `cargo fetch`).
+- **Machine:** Mac mini, Apple M4 Pro, cargo 1.100.0, load from other agents; registry reached over the LAN. One run per row.
+- **Command:** (F1) `cargo fetch --locked --target aarch64-apple-darwin --target x86_64-apple-darwin` in `apps/debrief`, warm and with an empty `CARGO_HOME`; (F2) the same as two calls, one per target; (F3) `cargo fetch` of a one-dependency crate whose registry is a black hole (`sparse+http://10.255.255.1/`, no answer), with cargo's defaults (`CARGO_HTTP_TIMEOUT=30`, `CARGO_NET_RETRY=3`) and with the values C99 now sets (20 and 1). Settings: https://doc.rust-lang.org/cargo/reference/config.html#nethttp and `#netretry`.
+- **Numbers:**
+
+  | Row | Time |
+  |---|---:|
+  | F1 one call, warm | 0.4 s |
+  | F2 two calls, warm | 0.6 s |
+  | F1 one call, cold `CARGO_HOME` | 17.7 s |
+  | F2 two calls, cold `CARGO_HOME` | 13.3 s (run once each; the download dominates, the call count is noise) |
+  | F3 dead network, cargo defaults | 132 s (4 tries of 30 s) |
+  | F3 dead network, `CARGO_HTTP_TIMEOUT=20`, `CARGO_NET_RETRY=1` | 42 s (2 tries of 20 s) |
+
+- **Result:** C99 runs one `cargo fetch` for both Apple targets (cargo takes `--target` twice) with `CARGO_NET_RETRY=1` and `CARGO_HTTP_TIMEOUT=20` (a caller's own value wins), and the spawn limit of that call is 120 s, about 7 times the 17.7 s cold fetch (a hang detector, ER-12). A dead network ends with `cargo fetch: network timeout talking to the registry (crates.io, dev.decryptology.net); retry the job`, a not-measured finding of C99, never a pass (ER-33). The 15 minutes of run 9395 are not explained by a silent network (that ends in 132 s with cargo's defaults); a network that trickles bytes above `http.low-speed-limit` would never hit cargo's own timeout, and only the spawn limit ends that case (inferred, not read from the log).
+- **Not measured:** a cold fetch on the CI runner (the 120 s margin is from this Mac's 17.7 s; a run of the `conformance` job that times out at 120 s on a slow runner is the signal to re-measure), a trickling network.
+
 ### 2026-11-28, test build cost class (fix/nextest-build-cost-class)
 
 - **Commit:** measured on a scratch copy of origin/main a3d3d98ee (the tests unchanged: the class and its names are this branch); CI numbers from run 9371 (trial/tmp/sccache-remap-measure at 664b2228e, the `crate (ubuntu-latest, 1/3)` and `(2/3)` jobs 54415 and 54416).
