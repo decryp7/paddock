@@ -1,12 +1,10 @@
 //! `docs/test-cache.toml` through its one accessor (ER-42): the epoch, the age rule while the nightly is paused, the nextest profile, the
 //! never-cached list and the switch (ADR 0116 §2, §3, §6, §8).
 
+use crate::registers::TEST_CACHE;
 use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::Duration;
-
-/// The file, repository-relative.
-pub const FILE: &str = "docs/test-cache.toml";
 
 /// How many green train runs with no soundness finding switch reuse on (ADR 0116 §8, ER-41).
 pub const GREEN_RUNS_TO_SWITCH: usize = 2;
@@ -47,7 +45,7 @@ pub enum Mode {
 impl Config {
     /// The settings in `text`. An unknown key, a missing one or one of the wrong type is an error naming it (never a default).
     pub fn parse(text: &str) -> Result<Config, String> {
-        let bad = |m: String| format!("{FILE} cannot be read: {m}");
+        let bad = |m: String| format!("{TEST_CACHE} cannot be read: {m}");
         let t: toml::Table = text.parse().map_err(|e: toml::de::Error| bad(e.to_string()))?;
         for k in t.keys() {
             if !["epoch", "nightly_paused", "max_age_hours", "profile", "no_test_cache", "switch"].contains(&k.as_str()) {
@@ -111,7 +109,7 @@ impl Config {
 
     /// The settings of the checkout at `root`.
     pub fn read(root: &Path) -> Result<Config, String> {
-        let p = root.join(FILE);
+        let p = root.join(TEST_CACHE);
         let text = std::fs::read_to_string(&p).map_err(|e| format!("{} cannot be read: {e}", p.display()))?;
         Config::parse(&text)
     }

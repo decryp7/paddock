@@ -374,14 +374,7 @@ pub fn finding_line(f: &Finding) -> String {
 
 /// `./dev check test-features [--app <app>] [--root <dir>]`.
 pub fn command(root: Option<PathBuf>, app: Option<String>) -> Result<Report, CliError> {
-    let root = match root {
-        Some(r) => r,
-        None => {
-            let cwd = std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder cannot be read: {e}.")))?;
-            let out = crate::input_hash::Exec::run(&crate::input_hash::Real, "git", &["rev-parse", "--show-toplevel"], &cwd, None)?;
-            PathBuf::from(out.trim())
-        }
-    };
+    let root = crate::repo_root::repo_root(root.as_deref())?;
     let outcome = check(&root, app.as_deref(), &RealCargo).map_err(|e| {
         CliError::new(Exit::CheckBroken, format!("::error::{ID} check broken: {e}"))
             .with_hint("Fix the cause named above (a lockfile out of date, a tauri.conf.json, cargo on PATH) and run `./dev check test-features` again.")

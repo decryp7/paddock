@@ -8,8 +8,9 @@ use super::progress::{Counter, Progress, with_cargo_json, without_json};
 use super::stacks;
 use super::watchdog::{Observation, StepInfo, StepWatch, Stuck, WATCH_POLL, Watchdog, phase_line, stuck_how};
 use crate::ci_tool::{Output, ToolCall, tail};
+use crate::pathfind::on_path;
 use crate::throttle::{
-    CAP_GRACE, LOCK_TAKEN, QUEUE_STALL, ROW_CAP, WAIT_BACKSTOP, on_path, slot_wait, stall_line_holder, wait_status, with_agent_name,
+    CAP_GRACE, LOCK_TAKEN, QUEUE_STALL, ROW_CAP, WAIT_BACKSTOP, slot_wait, stall_line_holder, wait_status, with_agent_name,
 };
 use paddock_cli::{CheckId, Finding, Outcome, Reason, Subject, ToolVersion, UnixSeconds, measure};
 use std::collections::{BTreeMap, HashMap, VecDeque};

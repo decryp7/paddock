@@ -19,7 +19,8 @@ profile = "ci"
 #
 # crate:tools/paddock-dev (decision 113, user 2026-11-27): its whole-repository tests (tree_*, graph_*, live_*) read the whole tree,
 # and its node key (the crate's own inputs) does not cover that, so a pass of the same key proves nothing about them. It runs every
-# time and is still recorded (the evidence builds up) until those tests get their own tree-keyed target; then remove this entry
+# time and is never stored either (a never-cached, blind or dirty target is not looked up, so its record would be replaced unread, and nothing
+# reads it: user, 2026-11-28) until those tests get their own tree-keyed target; then remove this entry
 # (a weakening: it needs the user's approval in that change).
 no_test_cache = ["crate:tools/paddock-dev"]
 

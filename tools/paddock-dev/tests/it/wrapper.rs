@@ -350,6 +350,23 @@ fn a_config_that_only_names_the_build_folder_does_not_change_the_hash() {
         )
         .unwrap();
         assert_eq!(f.both(&[]), plain, "a build folder ({slot}) is not part of the hash");
+        // The same file with the remap of that folder (user decision 142), and a container's remap alone: the folder is still the
+        // only thing it names, so a slot's own folder in the flag never changes the hash (both implementations, as the wrapper's awk).
+        std::fs::write(
+            &ci,
+            format!(
+                "# Written by `./dev ci build-folder` for this CI job (git-ignored).\n[build]\ntarget-dir = 'C:/ci/target-paddock-{slot}'\n\
+                 [target.'cfg(all())']\nrustflags = ['--remap-path-prefix=C:/ci/target-paddock-{slot}=/paddock-target']\n"
+            ),
+        )
+        .unwrap();
+        assert_eq!(f.both(&[]), plain, "the remap of the build folder ({slot}) is not part of the hash");
+        std::fs::write(
+            &ci,
+            format!("[target.'cfg(all())']\r\nrustflags = ['--remap-path-prefix=/work/ws-{slot}/target=/paddock-target']\r\n"),
+        )
+        .unwrap();
+        assert_eq!(f.both(&[]), plain, "nor a container's remap alone ({slot})");
     }
     std::fs::write(f.cargo_home.path().join("config.toml"), "build.target-dir = \"/elsewhere\"\n").unwrap();
     assert_eq!(f.both(&[]), plain, "nor as a dotted key in $CARGO_HOME's config");
@@ -360,6 +377,12 @@ fn a_config_that_only_names_the_build_folder_does_not_change_the_hash() {
         "[build]\ntarget-dir = 'x'\n[profile.release]\nlto = true\n",
         "[profile.release]\ntarget-dir = 'x'\n",
         "build = { target-dir = 'x' }\n",
+        // Only the remap of the build folder to the one fixed name is skipped: another flag, another target or another table counts.
+        "[target.'cfg(all())']\nrustflags = ['-Dwarnings']\n",
+        "[target.'cfg(all())']\nrustflags = ['--remap-path-prefix=x=/elsewhere']\n",
+        "[target.'cfg(all())']\nrustflags = ['--remap-path-prefix=x=/paddock-target', '-Dwarnings']\n",
+        "[target.'cfg(unix)']\nrustflags = ['--remap-path-prefix=x=/paddock-target']\n",
+        "[target.'cfg(all())']\nlinker = 'x'\n",
     ] {
         std::fs::write(&ci, other).unwrap();
         assert_ne!(f.both(&[]).0, plain.0, "{other:?} is hashed");
@@ -2019,6 +2042,9 @@ fn the_cached_tool_holds_itself_for_its_run_and_completes_when_its_cache_entry_i
         // `wait` keeps its one-waiter lock in the git folder of the repository it runs in: run it in a repository of the test's own,
         // never the checkout (ER-45; the checkout is read-only in the Linux container, where the lock write failed the run).
         .current_dir(&repo)
+        // The harness points the lock folder at the test's private folder (STATE_FOLDERS); this test is about the repository's own, so the
+        // setting is removed (the repository is the test's own, never the checkout).
+        .env_remove("PADDOCK_WAIT_STATE")
         .env("PADDOCK_DEV_HOME", &home)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())

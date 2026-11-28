@@ -157,7 +157,7 @@ pub fn run(argv: &[String], out: &mut dyn Write, err: &mut dyn Write, env: &dyn 
         Err(m) => return usage_error(err, &m),
     };
     let root = abs(o.value("root"));
-    let subject = crate::pre_push::outcome::subject_of(&root, None);
+    let subject = crate::subject::subject_of(&root, None);
     if let Some(p) = full_checkout::problem(&root, env) {
         let _ = writeln!(err, "{p}");
         return outcome::USAGE;

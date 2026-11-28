@@ -22,6 +22,9 @@ impl Ran {
 
 /// Runs `cargo paddock-plugin <args>` in `cwd`.
 pub fn cli(cwd: &Path, args: &[&str]) -> Ran {
+    if args.first() == Some(&"build") {
+        paddock_testkit::build_cost::charge("cargo paddock-plugin build (the real cargo)");
+    }
     let args: Vec<String> = ["paddock-plugin"]
         .iter()
         .chain(args)

@@ -21,7 +21,7 @@ pub mod graph;
 pub mod registry;
 pub mod run;
 
-use crate::merge_check::git::Git;
+use crate::git::Git;
 use paddock_cli::{CliError, Exit, Report};
 use paddock_cli::{Outcome, Verdict};
 use registry::{PATH, Registry};
@@ -253,7 +253,7 @@ pub fn check_with_due(
 
 /// `./dev gen check`.
 pub fn command(a: &CheckArgs) -> Result<Report, CliError> {
-    let root = crate::gates::command::repo_root(a.root.as_deref())?;
+    let root = crate::repo_root::repo_root(a.root.as_deref())?;
     let reg = load(&root)?;
     let changed = if a.all || !a.files.is_empty() {
         a.files.clone()
@@ -290,9 +290,14 @@ fn changed_since(root: &Path, base: &str) -> Result<Vec<String>, CliError> {
             "::error::gen check NOT MEASURED: git could not list the change: {e}. Next step: give --base <rev> that exists, or --files a,b, or --all."
         ))
     };
-    let mb = git.text(&["merge-base", base, "HEAD"]).map_err(gap)?;
-    let mut paths = git.paths(&["diff", "--name-only", "-z", "--no-renames", mb.trim()]).map_err(gap)?;
-    paths.extend(git.paths(&["ls-files", "-z", "--others", "--exclude-standard"]).map_err(gap)?);
+    let mb = git.text(&["merge-base", base, "HEAD"]).map_err(|e| gap(e.to_string()))?;
+    let mut paths = git
+        .paths(&["diff", "--name-only", "-z", "--no-renames", mb.trim()])
+        .map_err(|e| gap(e.to_string()))?;
+    paths.extend(
+        git.paths(&["ls-files", "-z", "--others", "--exclude-standard"])
+            .map_err(|e| gap(e.to_string()))?,
+    );
     paths.sort();
     paths.dedup();
     Ok(paths)

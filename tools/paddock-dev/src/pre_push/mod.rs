@@ -48,8 +48,8 @@ pub mod reuse;
 pub mod row_timings;
 pub mod train_split;
 
+use crate::git::{git_text, state_dir};
 use crate::plan::{Request, plan_with_graph};
-use crate::plan_repo::git_text;
 use crate::throttle::{QUEUE_STALL, ROW_CAP};
 use clap::Args;
 use exec::{Kind, RealExec, Row, RunOpts, heavy_limit, run_all_limited, workers};
@@ -92,8 +92,9 @@ pub struct PrePushArgs {
     /// per line) and check exactly that commit in a throw-away worktree, not the working tree. The hook passes it.
     #[arg(long)]
     pub refs_from_stdin: bool,
-    /// Also run the repository-wide audits (`member-audits`): set by the member gate of `./dev merge check --gates`
-    /// on the merge commit, not by a developer's push, whose time budget it would grow.
+    /// The member gate of `./dev merge check --gates`, run on the merge commit: the repository-wide audits (`member-audits`) and the
+    /// whole-tree rows run whatever changed. A developer's push runs the source audits (no `graph_`, `tree_` class) unless the change
+    /// is prose no audit reads.
     #[arg(long)]
     pub member_gate: bool,
     /// Run every app's rows, whatever `docs/ci-active-apps.toml` says: for a release, or for the person bringing an app back. Without
@@ -299,7 +300,10 @@ struct RealLookups {
 
 impl known::Lookups for RealLookups {
     fn ls_remote(&self, remote: &str) -> Option<String> {
-        git_text(&self.root, &["ls-remote", "--", remote])
+        crate::git::Git::new(&self.root)
+            .with_own_environment()
+            .text(&["ls-remote", "--", remote])
+            .ok()
     }
     fn ci_green(&self, sha: &str) -> Result<u64, String> {
         match crate::ci_runs::ci_verdict(known::CI_WORKFLOW, sha) {
@@ -310,22 +314,9 @@ impl known::Lookups for RealLookups {
     }
 }
 
-/// The repository root: the given folder, else the top of the git checkout the current folder is in.
-pub(crate) fn repo_root(given: &Option<PathBuf>) -> Result<PathBuf, CliError> {
-    match given {
-        Some(r) => Ok(r.clone()),
-        None => {
-            let cwd = std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder cannot be read: {e}.")))?;
-            git_text(&cwd, &["rev-parse", "--show-toplevel"])
-                .map(|t| PathBuf::from(t.trim()))
-                .ok_or_else(|| CliError::failure("This is not a git checkout.").with_hint("Run it inside the repository."))
-        }
-    }
-}
-
 /// The command.
 pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
-    let root = repo_root(&args.root)?;
+    let root = crate::repo_root::repo_root(args.root.as_deref())?;
     let stdin = if args.refs_from_stdin { read_stdin()? } else { String::new() };
     // Prepared on first use by a cargo gate, never here and never in `command_in`: a push that runs no cargo gate, and the tests of
     // the push gate, must not start a server on the machine they run on (ER-45).
@@ -613,7 +604,7 @@ fn command_in(
     );
     // What the run is about (the commit and its tree) is the evidence of every pass, so it is known before the first gate runs.
     let checked = pushed.first().cloned().or_else(|| if clean { head_sha.clone() } else { None });
-    let subject = outcome::subject_of(&root, checked.as_deref());
+    let subject = crate::subject::subject_of(&root, checked.as_deref());
     // A test's executor runs no real gate, so it never reads or writes the machine's records.
     let reuse = if given.is_none() {
         reuse_for(&work, &state, &env, &graph.cargo, args.no_reuse)
@@ -782,14 +773,6 @@ fn accepted_ids(option: &[String], env: &HashMap<String, String>) -> Vec<String>
         .map(|v| v.split(',').map(|w| w.trim().to_string()).collect::<Vec<_>>())
         .unwrap_or_default();
     option.iter().cloned().chain(from_env).filter(|w| !w.is_empty()).collect()
-}
-
-/// The folder for this checkout's gate logs and override log: `<git common dir>/paddock-pre-push`.
-pub(crate) fn state_dir(root: &Path) -> PathBuf {
-    git_text(root, &["rev-parse", "--path-format=absolute", "--git-common-dir"])
-        .map(|t| PathBuf::from(t.trim()))
-        .unwrap_or_else(|| root.join(".git"))
-        .join("paddock-pre-push")
 }
 
 /// The most of git's pre-push input that is read (a push of thousands of refs is not a pre-push gate's case).
@@ -1501,9 +1484,9 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
             .and_then(|t| t.trim().parse::<u32>().ok())
             .unwrap_or(0)
     };
-    // File names through the shared reader (`merge_check::git::Git`): NUL-separated, never quoted, both names of a move
+    // File names through the shared reader (`git::Git`): NUL-separated, never quoted, both names of a move
     // (`--no-renames`), so a file moved out of a workspace still plans that workspace and a non-ASCII path is the real one.
-    let reader = crate::merge_check::git::Git::new(root);
+    let reader = crate::git::Git::new(root);
     let names = |args: &[&str]| {
         reader
             .paths(args)

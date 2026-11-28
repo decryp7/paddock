@@ -152,6 +152,10 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   --priority train [--set slow]`, `./dev gen check --priority train`; `./dev merge check --gates` passes it itself): the step goes before
   normal waiters (tools/throttle/README.md, "Train priority").
 - **E2E and screenshots run on fresh code (guidance; a binding rule is proposed).** A running dev server is reused only with `PW_REUSE_SERVER=1`; default ports derive from the worktree path (`e2ePort` in `@decryp7/paddock-e2e`); a config that consumes `ui/dist` or the css fails at load with "rebuild ui: npm run build -w ui" when they were built from older sources (`build-guard.ts`, content stamps; lessons.md). New Playwright configs use these.
+- **A test that starts a compiler or `cargo build` is in the build class.** Its function name starts with `build_`, and a call to
+  `paddock_testkit::build_cost::charge` stands before the code that looks for or starts the build (a test of another name fails under
+  nextest with the new name). Each workspace's `.config/nextest.toml` gives the class its budget from a measured cold build
+  (docs/benchmarks.md, "test build cost class"); `tools/paddock-dev/tests/it/build_cost.rs` checks the places and the overrides.
 - **Git fixtures (rule 102).** A test that needs a git repository builds it once per machine with `paddock_testkit::git_fixture::template` and copies it per test with `copy_tree`; a fixture builder with six or more `git` starts per test is a C174 finding (report-only).
 - **A reader change adds or updates a replay shape (user decision 96, 2026-11-26).** A change to the CI verdict, reuse, green, fix-items or
   trial readers (`tools/paddock-dev/src/ci_runs/`, `run_scope`) records the real run that shows its shape with
@@ -177,12 +181,16 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   (6, not held, while a slow row is unfinished or missing). A run with `--set fast` or `--set slow` leaves no whole-run pass record. The
   Linux tests are CI's Linux jobs on d-gtr9. A push or member gate prints a per-row table (queued s, run s, concurrent) and writes
   `row-timings.tsv` in its log folder.
-- **Mutation-testing of the diff (user decision 127, 2026-11-27).** The member gate's `mutants` row (`./dev mutants gate --base <merge base>`,
-  tools/paddock-dev/src/mutants_gate.rs) runs the pinned cargo-mutants (`mutants_gate::PIN`; install it with `cargo install cargo-mutants
-  --version <PIN> --locked`, nothing installs it for you) `--in-diff` over the Rust functions changed in `tools/paddock-dev` and `crates/`, to find
-  a test or a guard that never reaches the code it claims to check. A MISSED mutant is a `::warning::` naming the function and the mutation;
-  timeouts, unviable mutants and a run cut by the cap are counted apart and never a pass. Report-only until its first green run (the
-  `row:mutants` entry of docs/gates.toml, `MODE`); skipped in a developer's push. Measured: docs/benchmarks.md.
+- **Mutation-testing of the diff (user decisions 127 and 143, 2026-11-27 and 11-28).** `.gitea/workflows/mutants.yml` (Linux; a push to main
+  after a landing and `workflow_dispatch` with a `base`; report-only; **not in ci.yml**: its shards held the Linux runner and made trains queue
+  43 to 62 minutes) runs the pinned cargo-mutants (`mutants_gate::PIN`, `./dev mutants pin`, `cargo install --locked`) `--in-diff` over the Rust
+  functions the landing changed in `tools/paddock-dev` and `crates/` (tools/paddock-dev/src/mutants_gate.rs), to find a test or a guard that never
+  reaches the code it claims to check. Its plan job counts the diff's mutants (`./dev mutants plan --base <rev>`) and plans one shard for each 6 of
+  them (at most 12); the shards run one at a time (`./dev mutants gate --base <rev> --shard k/n`), and the plan and each shard first end at once
+  while a train is in CI (`./dev ci schedule-skip --any-event`: nothing waits on a slot), saying so in the record line. A MISSED mutant is a
+  `::warning::` naming the function and the mutation; timeouts, unviable mutants and a shard that ran out of time are counted apart and never a
+  pass. Report-only until its first green run (`MODE`, review 2026-12-11). Locally: `./dev mutants gate --base <rev>` (pin installed by hand).
+  Measured: docs/benchmarks.md.
 - Before committing, the gates of the affected projects, for example:
 
   ```sh
@@ -204,7 +212,7 @@ Run these as well as the touched-file checks, on the merged tree when you hand b
 - Last, on a branch for a train: merge `origin/main` into the branch, then run `./dev check --pre-push --member-gate --base origin/main`
   on that head (user, 2026-11-25). The train's member gate reuses its green rows for every workspace only this branch touched; a
   branch behind main has another tree there, so the train runs them again (`.claude/skills/land-train`, step 3).
-- The member audits, the repository-wide audits of tools/paddock-dev that only the member gate runs (a developer's `./dev check --pre-push` skips them): `cargo nextest run --profile member-audits --locked --no-tests=fail` in `tools/paddock-dev`.
+- The member audits, the repository-wide audits of tools/paddock-dev (a developer's `./dev check --pre-push` runs the source audits too (not the `graph_` and `tree_` classes) and skips them only when every changed file is under `AUDIT_BLIND` in `tools/paddock-dev/src/pre_push/gates.rs`, the design record's prose; user, 2026-11-28, in chat): `cargo nextest run --profile member-audits --locked --no-tests=fail` in `tools/paddock-dev`.
 - A review reads a diff with `git show` and builds only in a scratch copy, never in the author's worktree.
 - A design document (ADR, plan, research note) records the branch heads it read (ADR 0091), checks claims about shipped code with `git tag --contains <commit>`, and names every check it relies on as built on origin/main, held on a named branch, or a prerequisite (ADR 0096).
 - A loop that runs a command, process, query or request once per item needs a `// per-item: <reason>` comment, and a new bulk command needs a budget test (rule 85, ADR 0108).

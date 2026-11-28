@@ -1,20 +1,10 @@
 //! The `./dev gates` subcommands: argument handling and output only.
 
 use super::{ci, edge, evaluate, register::Date};
-use crate::input_hash;
+use crate::repo_root::repo_root;
 use paddock_cli::{CliError, Report};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
-
-/// The repository root: the given one, or git's top level from the current folder.
-pub fn repo_root(given: Option<&Path>) -> Result<PathBuf, CliError> {
-    if let Some(r) = given {
-        return Ok(r.to_path_buf());
-    }
-    let cwd = std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder cannot be read: {e}.")))?;
-    let out = input_hash::Exec::run(&input_hash::Real, "git", &["rev-parse", "--show-toplevel"], &cwd, None)?;
-    Ok(PathBuf::from(out.trim()))
-}
 
 /// `dev gates model`.
 pub fn model(root: Option<&Path>) -> Result<Report, CliError> {

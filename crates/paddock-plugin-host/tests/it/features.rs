@@ -34,7 +34,7 @@ fn invalid(r: Result<Value, HostError>) -> String {
 }
 
 #[test]
-fn the_plugin_describes_itself_and_tools_check_their_arguments_before_anything_is_sent() {
+fn build_the_plugin_describes_itself_and_tools_check_their_arguments_before_anything_is_sent() {
     let rig = Rig::new();
     let s = rig.supervisor("", Grants::none());
     assert!(s.described().is_none());
@@ -62,7 +62,7 @@ fn the_plugin_describes_itself_and_tools_check_their_arguments_before_anything_i
 }
 
 #[test]
-fn settings_are_validated_by_the_host_applied_and_given_again_after_a_restart() {
+fn build_settings_are_validated_by_the_host_applied_and_given_again_after_a_restart() {
     let rig = Rig::new();
     let s = rig.supervisor("", Grants::none());
     s.apply_settings(json!({"greeting": "ahoy", "shout": true}))
@@ -89,7 +89,7 @@ fn settings_are_validated_by_the_host_applied_and_given_again_after_a_restart() 
 }
 
 #[test]
-fn views_render_validated_documents_and_actions_must_be_declared() {
+fn build_views_render_validated_documents_and_actions_must_be_declared() {
     let rig = Rig::new();
     let s = rig.supervisor("", Grants::none());
     let doc = s
@@ -134,7 +134,7 @@ fn views_render_validated_documents_and_actions_must_be_declared() {
 }
 
 #[test]
-fn mcp_tools_need_the_permission_asked_and_granted_and_stay_within_their_budget() {
+fn build_mcp_tools_need_the_permission_asked_and_granted_and_stay_within_their_budget() {
     let rig = Rig::new();
     let budget = McpBudget {
         max_bytes: 1000,
@@ -174,7 +174,7 @@ fn mcp_tools_need_the_permission_asked_and_granted_and_stay_within_their_budget(
 }
 
 #[test]
-fn a_contract_is_called_through_a_guarded_proxy() {
+fn build_a_contract_is_called_through_a_guarded_proxy() {
     let rig = Rig::new();
     let s = rig.supervisor("", Grants::none());
     let r = s.remote::<FixtureContract>().unwrap();
@@ -218,7 +218,7 @@ fn a_contract_is_called_through_a_guarded_proxy() {
 
 /// IP1 item 4: a request variant newer than the minor the plugin declared is refused before it is sent, and is no fault.
 #[test]
-fn a_request_newer_than_the_plugins_minor_is_refused_before_sending() {
+fn build_a_request_newer_than_the_plugins_minor_is_refused_before_sending() {
     struct Ahead;
     impl paddock_plugin_api::Contract for Ahead {
         const NS: &'static str = "paddock.fixture.v1";
@@ -253,7 +253,7 @@ fn a_request_newer_than_the_plugins_minor_is_refused_before_sending() {
 }
 
 #[test]
-fn host_files_are_read_by_the_plugin_only_when_the_app_opened_them() {
+fn build_host_files_are_read_by_the_plugin_only_when_the_app_opened_them() {
     let rig = Rig::new();
     let docs = rig.dir.path().join("docs");
     std::fs::create_dir_all(&docs).unwrap();
@@ -301,7 +301,7 @@ fn host_files_are_read_by_the_plugin_only_when_the_app_opened_them() {
 }
 
 #[test]
-fn path_arguments_must_lie_inside_the_folders_the_user_granted() {
+fn build_path_arguments_must_lie_inside_the_folders_the_user_granted() {
     let rig = Rig::new();
     let (docs, secret) = (rig.dir.path().join("docs"), rig.dir.path().join("secret"));
     for d in [&docs, &secret] {
@@ -342,7 +342,7 @@ fn path_arguments_must_lie_inside_the_folders_the_user_granted() {
 }
 
 #[test]
-fn background_tasks_are_listed_reported_stopped_and_ended_with_the_process() {
+fn build_background_tasks_are_listed_reported_stopped_and_ended_with_the_process() {
     let rig = Rig::new();
     let s = rig.supervisor("", Grants::none());
     assert_eq!(tool(&s, "task", json!({})).unwrap(), json!("started"));
@@ -377,7 +377,7 @@ fn background_tasks_are_listed_reported_stopped_and_ended_with_the_process() {
 }
 
 #[test]
-fn output_files_land_in_the_folder_the_app_chose() {
+fn build_output_files_land_in_the_folder_the_app_chose() {
     let rig = Rig::new();
     let s = rig.supervisor("", Grants::none());
     let saved = tool(&s, "save", json!({"name": "capture.bin", "bytes": 300_000})).unwrap();
@@ -423,7 +423,7 @@ impl ElevatedRunner for Lift {
 }
 
 #[test]
-fn elevated_operations_run_only_by_a_name_the_user_allowed() {
+fn build_elevated_operations_run_only_by_a_name_the_user_allowed() {
     let m = fixture::manifest("2.0", "paddock-plugin-fixture", ELEVATE);
     let elevate = m.permissions[1].permission.clone();
     // Not granted: denied, with the reason the app can show.
@@ -457,7 +457,7 @@ fn elevated_operations_run_only_by_a_name_the_user_allowed() {
 }
 
 #[test]
-fn switching_off_stops_the_plugin_and_switching_on_lets_it_start_again() {
+fn build_switching_off_stops_the_plugin_and_switching_on_lets_it_start_again() {
     let rig = Rig::new();
     let s = rig.supervisor("", Grants::none());
     tool(&s, "echo", json!({"text": "a"})).unwrap();

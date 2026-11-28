@@ -3,7 +3,7 @@
 //! `heavy` built from tools/throttle). When none can be found it is an error with the next step: never an unthrottled run.
 
 use crate::heavy_tool::{BUILD_LIMIT, throttle_command_for};
-use crate::throttle::on_path;
+use crate::pathfind::on_path;
 use crate::tool_cache::Held;
 use clap::Args;
 use paddock_cli::{CliError, Report};
@@ -57,7 +57,7 @@ pub fn command(a: &ThrottleArgs) -> Result<Report, CliError> {
     let env: HashMap<String, String> = crate::process_env::vars().collect();
     let cwd = std::env::current_dir().map_err(|e| CliError::failure(format!("current folder: {e}")))?;
     // The tree being committed in (a hook runs in an app's folder): heavy is built from this tree's tools/throttle.
-    let root = crate::worktree::git::Git::at(&cwd)
+    let root = crate::worktree::git::git_at(&cwd)
         .text(&["rev-parse", "--show-toplevel"])
         .map(|t| PathBuf::from(t.trim()))
         .map_err(|e| CliError::failure(format!("dev throttle: {e}")))?;

@@ -2,7 +2,7 @@
 
 use super::budget::Timing;
 use super::exec::{Done, Exec, Kind, Limits, Row, RunOpts, run_all_timed, run_all_with, test_subject};
-use super::gates::{AUDIT_PROFILE, Change, Facts, Gate, Need, Planned, plan_gates, windows_skip_reason};
+use super::gates::{AUDIT_PROFILE, Change, Facts, Gate, Need, Planned, audit_dev_filter, plan_gates, windows_skip_reason};
 use super::{accept_not_measured, parse_refs, render, render_timed};
 use crate::throttle::QUEUE_STALL;
 use paddock_cli::Exit;
@@ -722,26 +722,61 @@ fn every_lib_clause_of_the_member_audits_selects_a_test_of_the_lib() {
     );
 }
 
-/// A developer's push does not run the audits (minutes would be added to every push); it says why. The member gate does.
+/// A developer's push runs the audits when the change reaches anything they read (they scan the whole tree: the tool's sources, the
+/// shared crates, conformance, the registers), so a builder meets safe_remove_lint, the parity corpus and the allow-list parity before
+/// the train does (the recurring miss of 2026-11-28: a push passed, the member gate failed member-audits). It skips with a reason only
+/// when every changed file is prose no audit reads ([`AUDIT_BLIND`]), and the member gate runs them whatever changed.
 #[test]
-fn a_developers_push_skips_the_member_audits_with_a_reason_and_the_member_gate_runs_them() {
+fn a_developers_push_runs_the_member_audits_when_a_change_reaches_what_they_read_and_skips_prose_only_changes() {
     let off = Facts {
         member_gate: false,
         ..facts()
     };
-    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &off);
-    assert!(!ids(&planned).contains(&"member-audits".to_string()), "{:?}", ids(&planned));
+    for files in [
+        &["tools/paddock-dev/src/test_cache/probe.rs"][..],
+        &["crates/a.rs"],
+        &["docs/gates.toml"],
+        &["docs/adr/0001-x.md", "tools/paddock-dev/src/a.rs"],
+        &["Mystery"],
+        &[],
+    ] {
+        let planned = plan_gates(&plan(), &change(files), &off);
+        assert!(ids(&planned).contains(&"member-audits".to_string()), "{files:?}: {planned:?}");
+    }
+    for files in [&["docs/adr/0999-x.md"][..], &["docs/research/a.md", "docs/plans/b.md"]] {
+        let planned = plan_gates(&plan(), &change(files), &off);
+        assert!(
+            !ids(&planned).contains(&"member-audits".to_string()),
+            "{files:?}: {:?}",
+            ids(&planned)
+        );
+        assert!(
+            planned
+                .iter()
+                .any(|p| matches!(p, Planned::Skip { id, reason } if id == "member-audits" && reason.contains("no audit reads"))),
+            "skipped with its reason: {planned:?}"
+        );
+    }
+    // The developer's run is the source audits only: the member gate's command plus the declared filter; the gate itself has none.
+    let dev = plan_gates(&plan(), &change(&["tools/paddock-dev/src/test_cache/probe.rs"]), &off);
+    let g = run_gates(&dev).into_iter().find(|g| g.id == "member-audits").expect("planned");
+    let args = g.args.join(" ");
+    assert!(args.ends_with(&format!("-E {}", audit_dev_filter())), "{args}");
     assert!(
-        planned
-            .iter()
-            .any(|p| matches!(p, Planned::Skip { id, reason } if id == "member-audits" && reason.contains("--member-gate"))),
-        "skipped with its reason: {planned:?}"
+        audit_dev_filter().contains("test(/(^|::)graph_[^:]*$/)") && audit_dev_filter().contains("test(/(^|::)tree_[^:]*$/)"),
+        "the class filters come from test_cost::Class: {}",
+        audit_dev_filter()
     );
-    let on = Facts {
-        member_gate: true,
-        ..facts()
+    let gate = plan_gates(&plan(), &change(&["tools/paddock-dev/src/test_cache/probe.rs"]), &facts());
+    let g = run_gates(&gate).into_iter().find(|g| g.id == "member-audits").expect("planned");
+    assert!(!g.args.iter().any(|a| a == "-E"), "the member gate runs every audit: {:?}", g.args);
+    // Positive control (ER-33): a change with an unknown base is never judged prose-only, and the member gate runs whatever changed.
+    let unknown = Change {
+        base: None,
+        ..change(&["docs/adr/0999-x.md"])
     };
-    assert!(ids(&plan_gates(&plan(), &change(&["crates/a.rs"]), &on)).contains(&"member-audits".to_string()));
+    assert!(ids(&plan_gates(&plan(), &unknown, &off)).contains(&"member-audits".to_string()));
+    assert!(ids(&plan_gates(&plan(), &change(&["docs/adr/0999-x.md"]), &facts())).contains(&"member-audits".to_string()));
 }
 
 /// ADR 0123 §7: the job-model check is a member-gate row (a layout change fails before a train, ER-9, ER-53), runs `./dev ci job-model check`
@@ -1379,7 +1414,7 @@ fn the_override_names_full_row_ids_and_is_announced() {
 /// A pushed commit is checked out on its own and removed after: a dirty main tree cannot change what is checked.
 #[test]
 fn a_pushed_commit_is_checked_out_in_a_throw_away_worktree_that_is_removed() {
-    use crate::plan_repo::git_text;
+    use crate::git::git_text;
     let d = tempfile::tempdir().unwrap();
     let main = d.path().join("main");
     std::fs::create_dir(&main).unwrap();
@@ -1464,7 +1499,7 @@ fn the_pre_push_folder_is_never_in_the_home_folder() {
 /// A crashed run's locked worktree is found and removed by the next run, a live one is left alone.
 #[test]
 fn a_leftover_locked_worktree_of_an_ended_run_is_swept_and_a_live_ones_is_kept() {
-    use crate::plan_repo::git_text;
+    use crate::git::git_text;
     let d = tempfile::tempdir().unwrap();
     let main = d.path().join("main");
     std::fs::create_dir(&main).unwrap();
@@ -1511,7 +1546,7 @@ fn extra_pushed_refs_are_not_measured_rows_and_never_passes() {
 /// drive) keeps its record, and a leftover of ours whose folder is gone is removed.
 #[test]
 fn the_sweep_never_drops_a_foreign_worktree_whose_folder_is_missing() {
-    use crate::plan_repo::git_text;
+    use crate::git::git_text;
     let d = tempfile::tempdir().unwrap();
     let main = d.path().join("main");
     std::fs::create_dir(&main).unwrap();
@@ -1568,7 +1603,7 @@ fn a_symlink_into_home_a_relative_path_and_a_tilde_are_refused() {
 mod known_commit {
     use super::super::known::{self, Evidence, Lookups};
     use super::super::{PrePushArgs, command_in, node_env_problem};
-    use crate::plan_repo::git_text;
+    use crate::git::git_text;
     use paddock_cli::Exit;
     use std::path::{Path, PathBuf};
 
@@ -1642,7 +1677,7 @@ mod known_commit {
 
     /// A pass of the push gate for `sha`, made the only way a pass is made: through `measure`.
     fn pass_for(r: &Path, sha: &str) -> paddock_cli::Outcome {
-        let subject = crate::pre_push::outcome::subject_of(r, Some(sha));
+        let subject = crate::subject::subject_of(r, Some(sha));
         paddock_cli::measure(
             paddock_cli::CheckId::new("pre-push"),
             subject,
@@ -2048,7 +2083,7 @@ fn a_missing_conformance_install_is_environment_not_ready_never_a_failure_or_pas
 mod base_choice {
     use super::super::known::Lookups;
     use super::super::{PrePushArgs, Pushed, command_in};
-    use crate::plan_repo::git_text;
+    use crate::git::git_text;
     use std::path::{Path, PathBuf};
 
     /// A new ref `w` at `tip` pushed to `remote`: the shape most tests here need.
@@ -2295,7 +2330,7 @@ impl Repo {
     }
 
     fn git(&self, args: &[&str]) -> String {
-        crate::plan_repo::git_text(&self.root, args).unwrap_or_else(|| panic!("git {args:?}"))
+        crate::git::git_text(&self.root, args).unwrap_or_else(|| panic!("git {args:?}"))
     }
 
     /// A commit that changes `file`, on the current branch; its sha.

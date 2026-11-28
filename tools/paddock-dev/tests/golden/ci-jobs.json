@@ -31,10 +31,6 @@
  "test-cache-shadow": [
   "crates"
  ],
- "mutants": [
-  "paddock-dev",
-  "crates"
- ],
  "app": [
   "apps"
  ],

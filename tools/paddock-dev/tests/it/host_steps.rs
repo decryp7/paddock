@@ -571,13 +571,27 @@ fn sccache_stats_prints_the_statistics_and_stops_only_the_jobs_own_server() {
         "the token never reaches sccache"
     );
     assert!(own.stdout.contains("Compile requests 10"), "{own:?}");
+    // No port of the job's own: sccache is never called (a server on the default port is not this job's), and the line says so.
     let default_port = same(&shim, &sccache_stats(None));
-    assert_eq!(
-        default_port.calls, "sccache --show-stats token=",
-        "a server on the default port is left running"
+    assert_eq!(default_port.calls, "", "no call without the job's port");
+    assert!(
+        default_port
+            .stdout
+            .contains("not measured: the job's server did not start (setup-rust set no server port)"),
+        "{default_port:?}"
+    );
+    assert!(!default_port.stdout.contains("Compile requests"), "{default_port:?}");
+    let mut off = sccache_stats(Some("4501"));
+    off.env.push(("PADDOCK_SCCACHE_STATE", "off:start-failed-twice".to_string()));
+    let off = same(&shim, &off);
+    assert_eq!(off.calls, "", "an off state asks nobody, whatever port the environment carries");
+    assert!(
+        off.stdout
+            .contains("not measured: the job's server did not start (start-failed-twice)"),
+        "{off:?}"
     );
     same(&|_| {}, &sccache_stats(None));
-    let broken = same(&|fx| fx.shim("sccache", |a| a.exit(2)), &sccache_stats(None));
+    let broken = same(&|fx| fx.shim("sccache", |a| a.exit(2)), &sccache_stats(Some("4501")));
     assert!(broken.stdout.contains("::notice::sccache statistics are unavailable"), "{broken:?}");
 }
 
@@ -614,8 +628,11 @@ fn build_folder_writes_the_kept_folder_to_the_included_ci_toml_and_target_in_a_c
     let host = same(&|fx| cargo_ws(fx, true), &build_folder("macOS", "spotter-rust", "s1"));
     assert!(
         host.tree.iter().any(|l| l.starts_with("f ws/.cargo/ci.toml")
-            && l.ends_with("[build]\\ntarget-dir = '<ROOT>/home/.paddock-ci/target-spotter-rust-s1'\\n\"")),
-        "cargo reads the folder from the included ci.toml: {:?}",
+            && l.contains("[build]\\ntarget-dir = '<ROOT>/home/.paddock-ci/target-spotter-rust-s1'\\n")
+            && l.ends_with(
+                "[target.'cfg(all())']\\nrustflags = ['--remap-path-prefix=<ROOT>/home/.paddock-ci/target-spotter-rust-s1=/paddock-target']\\n\""
+            )),
+        "cargo reads the folder from the included ci.toml, and the folder is remapped to one fixed name: {:?}",
         host.tree
     );
     // A container, a second slot, a config without the include, a bad name and a host job without a slot.

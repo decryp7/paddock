@@ -2,16 +2,26 @@
 //! `CARGO_TARGET_DIR` (sccache puts every `CARGO_*` variable into its cache key; Paddock lessons, "Test and build speed"). The
 //! port of `conformance/ci/build-folder.sh`.
 //!
-//! Linux containers build in the workspace's `target/` (a new container every run; sccache keeps the compiled crates) and any
-//! old `.cargo/ci.toml` is removed. Host runners (macOS, Windows) build in a folder that outlives the job, outside the checkout:
+//! Linux containers build in the workspace's `target/` (a new container every run; sccache keeps the compiled crates), so their
+//! `ci.toml` holds only the path remap below. Host runners (macOS, Windows) build in a folder that outlives the job, outside the checkout:
 //! the kept folder `target` of the job's slot (`ci isolation path target <name>`: `<ci-home>/target-<name>-<slot>`), so two jobs on
 //! one host never share one. It is written to `<workspace>/.cargo/ci.toml` (git-ignored, included by the workspace's
 //! `.cargo/config.toml` as `include = [{ path = "ci.toml", optional = true }]`), so every cargo command (clippy, nextest, doc
 //! tests, `tauri build`, cargo metadata) uses it with no flag and no variable. `PADDOCK_BUILD_FOLDER` (the folder, for the steps
 //! that collect from it) goes to `$GITHUB_ENV`.
+//!
+//! **The path remap (user decision 142).** A build script's `OUT_DIR` is inside the build folder, and a crate that `include!`s a
+//! generated file (serde_core) embeds that path in its rlib, so the bytes differed by slot and every dependent's sccache key
+//! differed with them (trial 9286: `target-paddock-crate-s3` twice in every serde rlib). `ci.toml` therefore also holds
+//! `--remap-path-prefix=<build folder>=/paddock-target`, so the same crate compiles to the same bytes in any folder. Only the build
+//! folder is remapped, never the sources, so panics and backtraces keep their source paths (docs/benchmarks.md). It is rustc's
+//! stable flag (`--remap-path-prefix`); cargo's `trim-paths` is still unstable (`-Z trim-paths`, cargo 1.100) and would remap the
+//! sources as well. It goes in `[target.'cfg(all())']`, not `[build]`: cargo uses ONE source of rustflags, and a matching
+//! `target.<cfg>` entry (the root config's Windows `+crt-static`) beats `build.rustflags`, while all matching `target.<cfg>` entries
+//! are joined. `--remap-path-prefix` is not a `CARGO_*` variable, and sccache strips its `SCCACHE_BASEDIRS` bases from the argument
+//! (docs/dev-setup.md), so the slot does not enter the key.
 
 use super::Step;
-use crate::safe_remove;
 use clap::Args as ClapArgs;
 use paddock_env::{Os, winpath};
 use std::collections::HashMap;
@@ -29,6 +39,26 @@ pub struct BuildFolderArgs {
 
 /// The short name the CLI uses.
 pub type Args = BuildFolderArgs;
+
+/// The one fixed name the build folder is remapped to (`ci.toml`'s `--remap-path-prefix=<build folder>=REMAP_TARGET`). The readers that
+/// accept a `ci.toml` as "only the build folder" (`input_hash::only_names_build_folder`, the release probe) match this name, and the
+/// twins `conformance/ci/build-folder.sh` and the `dev` wrapper's `only_build_folder` spell it as a literal.
+pub const REMAP_TARGET: &str = "/paddock-target";
+
+/// The cargo table that holds the remap (see the module comment for why not `[build]`).
+pub const REMAP_TABLE: &str = "[target.'cfg(all())']";
+
+/// The text of `ci.toml`: the build folder (`None` in a Linux container, which builds in `target/`) and the remap of the folder.
+pub fn ci_toml_text(target_dir: Option<&str>, build_folder: &str) -> String {
+    let mut text = String::from("# Written by `./dev ci build-folder` for this CI job (git-ignored).\n");
+    if let Some(dir) = target_dir {
+        text.push_str(&format!("[build]\ntarget-dir = '{dir}'\n"));
+    }
+    text.push_str(&format!(
+        "{REMAP_TABLE}\nrustflags = ['--remap-path-prefix={build_folder}={REMAP_TARGET}']\n"
+    ));
+    text
+}
 
 /// Whether the workspace's `.cargo/config.toml` includes the job's `ci.toml` (the script's `grep -Eq`).
 pub fn includes_ci_toml(config: &str) -> bool {
@@ -107,13 +137,10 @@ pub fn run_with(
         );
     }
     let ci_toml = ws.join(".cargo").join("ci.toml");
-    let dir: String;
-    if os == "Linux" {
-        let home_dir = step.var("HOME").map(PathBuf::from);
-        if let Err(e) = safe_remove::remove_under(&ws.join(".cargo"), &ci_toml, home_dir.as_deref()) {
-            return step.fail(format!("cannot remove the old {}: {e}", ci_toml.display()), "remove it by hand.");
-        }
-        dir = format!("{ws_text}/target");
+    let (dir, text) = if os == "Linux" {
+        let dir = format!("{ws_text}/target");
+        let text = ci_toml_text(None, &dir);
+        (dir, text)
     } else {
         let kept = match step.isolation(&["path", "target", &args.name]) {
             Ok(p) => p,
@@ -123,20 +150,21 @@ pub fn run_with(
             }
         };
         // Cargo on Windows wants a native path; forward slashes work in cargo, Node and Git bash alike.
-        dir = if windows { kept.replace('\\', "/") } else { kept };
-        if dir.contains('\'') {
-            return step.fail(
-                format!("the build folder {dir} has a quote in its path"),
-                "use a CI home without a quote in its path.",
-            );
-        }
-        let text = format!("# Written by `./dev ci build-folder` for this CI job (git-ignored).\n[build]\ntarget-dir = '{dir}'\n");
-        if let Err(e) = write_file(&ci_toml, &text) {
-            return step.fail(
-                format!("cannot write {}: {e}", ci_toml.display()),
-                "check the workspace's permissions.",
-            );
-        }
+        let dir = if windows { kept.replace('\\', "/") } else { kept };
+        let text = ci_toml_text(Some(&dir), &dir);
+        (dir, text)
+    };
+    if dir.contains('\'') {
+        return step.fail(
+            format!("the build folder {dir} has a quote in its path"),
+            "use a CI home (or a checkout) without a quote in its path.",
+        );
+    }
+    if let Err(e) = write_file(&ci_toml, &text) {
+        return step.fail(
+            format!("cannot write {}: {e}", ci_toml.display()),
+            "check the workspace's permissions.",
+        );
     }
     if let Err(e) = step.append_to("GITHUB_ENV", &format!("PADDOCK_BUILD_FOLDER={dir}")) {
         return step.fail(e, "run this step in a runner job.");
@@ -220,7 +248,8 @@ mod tests {
         };
         assert_eq!(
             ci.unwrap().split('\n').skip(1).collect::<Vec<_>>().join("\n"),
-            format!("[build]\ntarget-dir = '{kept}'\n")
+            format!("[build]\ntarget-dir = '{kept}'\n[target.'cfg(all())']\nrustflags = ['--remap-path-prefix={kept}=/paddock-target']\n"),
+            "the remap names the slot's own folder and one fixed target, so two slots compile the same bytes"
         );
         assert_eq!(env, format!("PADDOCK_BUILD_FOLDER={kept}\n"));
         assert!(Path::new(&kept).is_dir());
@@ -233,13 +262,17 @@ mod tests {
     }
 
     #[test]
-    fn a_container_builds_in_target_and_an_old_ci_toml_is_removed() {
+    fn a_container_builds_in_target_and_its_ci_toml_holds_only_the_remap() {
         let (d, ws) = fixture(true);
         let (code, out, env, ci) = go(d.path(), &ws, "Linux", "x", "");
         assert_eq!(code, 0, "{out}");
-        assert_eq!(ci, None);
         let canon = winpath::real_for_tools(&ws).unwrap();
         assert_eq!(env, format!("PADDOCK_BUILD_FOLDER={canon}/target\n"));
+        assert_eq!(
+            ci.unwrap().split('\n').skip(1).collect::<Vec<_>>().join("\n"),
+            format!("[target.'cfg(all())']\nrustflags = ['--remap-path-prefix={canon}/target=/paddock-target']\n"),
+            "no target-dir (cargo's default target/), the old file is replaced"
+        );
     }
 
     #[test]
