@@ -105,8 +105,10 @@ fn a_run_with_no_status_file_writes_none() {
 
 #[test]
 fn the_variable_names_the_file_through_the_settings() {
+    let file = paddock_testkit::path::abs(["x", "row.queue.jsonl"]);
+    let named = file.to_string_lossy().to_string();
     let (cfg, w) = paddock_throttle::config::Config::from_env(
-        &|k| (k == status::STATUS_FILE_VAR).then(|| "/x/row.queue.jsonl".to_string()),
+        &|k| (k == status::STATUS_FILE_VAR).then(|| named.clone()),
         &paddock_throttle::places::Host::none(),
     );
     assert_eq!(
