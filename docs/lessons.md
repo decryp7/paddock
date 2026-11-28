@@ -4522,6 +4522,20 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   (`moved`, not growth). C171 reads `git diff -M`, and its waiver may sit above the statement that holds the literal. A moved file's changed content is
   judged as usual: a new offending line still fails, and a new entry is still growth.
 
+## A held-back count with no reason hid a timed-out store lookup (2026-11-28, fix/test-cache-reasons, ER-27)
+- **What happened.** Train aa's run 9329 reused 56 of 61 Linux packages in the shadow report and its landing run 9335 reused 0, on a tree whose
+  `crates/` differed only in `paddock-throttle`. The record steps printed `recorded 0 packages (61 in the log; 14 held back: a trusted record, or no
+  definite answer, ...)` and nothing more. The cause was in two places only: the plan job's one `::notice::` (`reuse is off for Linux-X64 crates: curl:
+  (28) Operation timed out after 5002 milliseconds`, the plan step took 46 s against 3 s in 9329) and, in the record step, nowhere (it printed no
+  shadow line and no notice when its own lookup failed). One request out of 61 timing out on the RustFS store turns the whole call off (ADR 0116 §5), so
+  every package ran and none was replaced. macOS in 9335 was fine (50 matched, 50 held back because a trusted record exists, which is the write-once rule).
+  The `61 in the log` was the candidate count, not what the log held.
+- **Fix.** `test_cache::reasons::Tally` counts the decisions of a lookup by reason; the plan (per class, workspace and filter), a local lookup and the
+  record step print `reused R of T; ran because: no record K, blind B, ... reuse off F (cause)`, the record line says `recorded N packages of T
+  candidates (P passed here; not in this leg's partition ...: Q; failed or not clean: F); held back M: A already trusted, U undecided, B blind or never
+  cached, S store lookup failed (cause)`, and a record step whose lookup failed prints its cause as a notice (and still no shadow line: nothing was
+  measured, ER-33). A count in a log line always carries its reasons.
+
 ## A wait ended on a 401 its own token had not earned (2026-11-28, fix/ci-wait-token, ER-28)
 - **What happened.** On 2026-11-27/28 five `./dev wait --ci-run` waiters (runs 9284, 9285, 9286, 9320, 9321) ended after five failed looks with
   `HTTP 401 invalid username, password or token`, while a fresh `curl` or `./dev ci trial-verdict` with the same `GITEA_TOKEN` worked.
