@@ -141,6 +141,43 @@ pub fn changed_jobs(before: Option<&str>, after: Option<&str>) -> Option<Vec<Str
     Some(names.into_iter().filter(|k| get(&a, k) != get(&b, k)).cloned().collect())
 }
 
+/// A job's text without comment lines and without its artifact-upload steps (`uses: ...upload-artifact@...`): what is left is
+/// what the job builds, runs and tests. Steps are the `      - ` items of the job.
+fn without_uploads(job: &str) -> String {
+    let mut steps: Vec<Vec<&str>> = Vec::new();
+    for l in job.split('\n') {
+        match steps.last_mut() {
+            Some(last) if !l.starts_with("      - ") => last.push(l),
+            _ => steps.push(vec![l]),
+        }
+    }
+    steps
+        .into_iter()
+        .filter(|s| !s.iter().any(|l| !l.trim_start().starts_with('#') && l.contains("upload-artifact@")))
+        .flatten()
+        .filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Whether a ci.yml change leaves what every package builds, runs and tests as it was, so the FLAKY grade reads the packages instead
+/// of every test of a reached project (ER-12). True when the header is the same and every changed job is the `plan` job (it picks
+/// which jobs run, it runs no package's tests) or differs only in comments and artifact-upload steps (a failure report is not a
+/// test). A new or removed job, any other step, `needs`, `runs-on`, `env` or `if` change is not inert, and so is anything that
+/// cannot be read: the grade then touches every test of the project (fail closed).
+pub fn ci_change_is_inert(before: Option<&str>, after: Option<&str>) -> bool {
+    let (Some(b), Some(a)) = (before.and_then(workflow_jobs), after.and_then(workflow_jobs)) else {
+        return false;
+    };
+    if a.header != b.header || a.jobs.len() != b.jobs.len() {
+        return false;
+    }
+    a.jobs.iter().all(|(name, text)| match b.jobs.iter().find(|(n, _)| n == name) {
+        None => false,
+        Some((_, old)) => name == "plan" || without_uploads(old) == without_uploads(text),
+    })
+}
+
 static GITEA_FILE: LazyLock<Regex> = LazyLock::new(|| re(r"^\.gitea/(workflows|actions)/.+"));
 static CONFORMANCE_SCRIPT: LazyLock<Regex> = LazyLock::new(|| re(r"^conformance/(ci|release)/.+"));
 /// The scripts traced to the actions that run them: `conformance/ci`, `conformance/release` and the helpers they import.
