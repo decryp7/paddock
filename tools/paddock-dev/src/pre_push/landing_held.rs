@@ -7,6 +7,18 @@ use clap::Args;
 use paddock_cli::{CliError, Exit, Report};
 use std::path::PathBuf;
 
+/// The one answer to "may `sha` land": the CI half ([`landing_verdict`]) joined with the slow-row record of `root`'s state folder
+/// ([`landing`]). `ci landing-held` and the pre-push guard of pushes to main ([`super::main_guard`]) both read it here (ER-22).
+pub fn landing_of(server: &str, repo: &str, workflow: &str, sha: &str, root: &std::path::Path) -> Landing {
+    let ci = match landing_verdict(server, repo, workflow, sha, root) {
+        verdict::Verdict::Green { .. } | verdict::Verdict::GreenWithFixItems { .. } => Ci::Green,
+        verdict::Verdict::Red { reason, .. } => Ci::Red(reason),
+        verdict::Verdict::NotMeasured(why) => Ci::NotMeasured(why),
+    };
+    let slow: SlowState = read(&crate::git::state_dir(root), sha);
+    landing(&ci, &slow)
+}
+
 /// Arguments of `ci landing-held`.
 #[derive(Args)]
 pub struct LandingHeldArgs {
@@ -34,13 +46,8 @@ pub fn landing_held(a: &LandingHeldArgs) -> Result<Report, CliError> {
     }
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = find_root(&cwd).unwrap_or(cwd);
-    let ci = match landing_verdict(&a.server, &a.repo, &a.workflow, &a.sha, &root) {
-        verdict::Verdict::Green { .. } | verdict::Verdict::GreenWithFixItems { .. } => Ci::Green,
-        verdict::Verdict::Red { reason, .. } => Ci::Red(reason),
-        verdict::Verdict::NotMeasured(why) => Ci::NotMeasured(why),
-    };
-    let slow: SlowState = read(&crate::git::state_dir(&root), &a.sha);
-    let (exit, text) = match landing(&ci, &slow) {
+    let landing = landing_of(&a.server, &a.repo, &a.workflow, &a.sha, &root);
+    let (exit, text) = match landing {
         Landing::Landable => (
             Exit::Ok,
             format!("{} may land: the complete green CI run and the green slow rows hold on it", a.sha),

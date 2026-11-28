@@ -43,6 +43,7 @@ pub mod gates;
 pub mod kept;
 pub mod known;
 pub mod landing_held;
+pub mod main_guard;
 pub mod outcome;
 pub mod overlap;
 pub mod reuse;
@@ -313,6 +314,9 @@ impl known::Lookups for RealLookups {
             crate::ci_runs::verdict::Verdict::NotMeasured(why) => Err(format!("not measured: {why}")),
         }
     }
+    fn landing(&self, sha: &str) -> train_split::Landing {
+        landing_held::landing_of(crate::ci_runs::SERVER, "decryp7/paddock", known::CI_WORKFLOW, sha, &self.root)
+    }
 }
 
 /// The command.
@@ -347,6 +351,9 @@ impl known::Lookups for OnceLookups<'_> {
     fn ci_green(&self, sha: &str) -> Result<u64, String> {
         self.inner.ci_green(sha)
     }
+    fn landing(&self, sha: &str) -> train_split::Landing {
+        self.inner.landing(sha)
+    }
 }
 
 /// [`command`] with the repository, git's pre-push lines and the outside lookups given, and the executor of the gates (`None`: the
@@ -369,6 +376,12 @@ fn command_in(
             "pre-push: the push only creates or deletes refs under refs/paddock/check-ids/ that hold a blob (check-id reservations, no commit); nothing to check."
                 .to_string(),
         ));
+    }
+    // A push to main lands only a landing-held fast-forward: before any gate, known commit or checkout (ER-49, ER-33).
+    if args.refs_from_stdin
+        && let Some((exit, line)) = main_guard::check(root, stdin, look)
+    {
+        return Ok(Report::new(json!({"gates": [], "changed": 0, "main_guard": "refused"}), line).with_exit(exit));
     }
     let look = &OnceLookups {
         inner: look,

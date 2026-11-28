@@ -76,6 +76,9 @@ pub trait Lookups {
     fn ls_remote(&self, remote: &str) -> Option<String>;
     /// The id of the complete green run of [`CI_WORKFLOW`] on the sha, or why there is none.
     fn ci_green(&self, sha: &str) -> Result<u64, String>;
+    /// Whether the sha may land on main (ER-49): `ci landing-held`'s answer ([`super::landing_held::landing_of`]). No default: a
+    /// lookup that cannot say must say `NotHeld`, never be assumed to pass (ER-33).
+    fn landing(&self, sha: &str) -> super::train_split::Landing;
 }
 
 /// Whether this run may use evidence at all: the hook's push of commits, with no override of what is measured.

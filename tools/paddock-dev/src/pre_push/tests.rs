@@ -1602,6 +1602,7 @@ fn a_symlink_into_home_a_relative_path_and_a_tilde_are_refused() {
 
 mod known_commit {
     use super::super::known::{self, Evidence, Lookups};
+    use super::super::train_split::Landing;
     use super::super::{PrePushArgs, command_in, node_env_problem};
     use crate::git::git_text;
     use paddock_cli::Exit;
@@ -1610,6 +1611,7 @@ mod known_commit {
     struct Fake {
         ls: Option<String>,
         ci: Result<u64, String>,
+        landing: Landing,
         asked: std::cell::RefCell<Vec<String>>,
     }
     impl Lookups for Fake {
@@ -1621,11 +1623,16 @@ mod known_commit {
             self.asked.borrow_mut().push(format!("ci {sha}"));
             self.ci.clone()
         }
+        fn landing(&self, sha: &str) -> Landing {
+            self.asked.borrow_mut().push(format!("landing {sha}"));
+            self.landing.clone()
+        }
     }
     fn fake(ls: Option<&str>, ci: Result<u64, &str>) -> Fake {
         Fake {
             ls: ls.map(String::from),
             ci: ci.map_err(String::from),
+            landing: Landing::NotHeld("no landing given to the fake".into()),
             asked: Default::default(),
         }
     }
@@ -1688,7 +1695,7 @@ mod known_commit {
     }
 
     fn push_line(sha: &str) -> String {
-        format!("refs/heads/x {sha} refs/heads/main {}\n", "0".repeat(40))
+        format!("refs/heads/x {sha} refs/heads/feat/x {}\n", "0".repeat(40))
     }
 
     #[test]
@@ -1852,6 +1859,35 @@ mod known_commit {
             log.contains(&two) && log.contains("remote=origin") && log.contains("pass record"),
             "{log}"
         );
+    }
+
+    /// The guard is wired before every gate and every known-commit shortcut: a push to main with a pass record is still refused
+    /// without a landing, and passes (as the known commit) with one; a push to another branch never asks for a landing.
+    #[test]
+    fn a_push_to_main_needs_a_landing_before_the_known_commit_shortcut_applies() {
+        let (_d, r, one, two) = repo();
+        known::write_record(&r, &state(&r), &two, "origin/main", &[], 5, &pass_for(&r, &two)).unwrap();
+        let a = PrePushArgs {
+            root: Some(r.clone()),
+            ..args()
+        };
+        let to_main = format!("refs/heads/x {two} refs/heads/main {one}\n");
+        let run =
+            |l: &Fake, stdin: &str| command_in(&a, &r, stdin, l, crate::local_sccache::Lazy::off(), Some(&super::Fake::default())).unwrap();
+        let mut l = fake(None, Err("x"));
+        let rep = run(&l, &to_main);
+        assert_eq!(rep.exit, Exit::NotMeasured, "{}", rep.text);
+        assert!(
+            rep.text.starts_with("::error::pre-push: refused:") && !rep.text.contains('\n'),
+            "{}",
+            rep.text
+        );
+        let other = run(&l, &push_line(&two));
+        assert_eq!(other.exit, Exit::Ok, "{}", other.text);
+        l.landing = Landing::Landable;
+        let rep = run(&l, &to_main);
+        assert_eq!(rep.exit, Exit::Ok, "{}", rep.text);
+        assert_eq!(rep.data["verdict"], "known_commit");
     }
 
     /// ADR 0089 amendment (rows 3 and 7): the known commit is an outcome that names the commit and tree it stands on, exits 0 and
@@ -2106,6 +2142,9 @@ mod base_choice {
         fn ci_green(&self, _: &str) -> Result<u64, String> {
             Err("no run".into())
         }
+        fn landing(&self, _: &str) -> crate::pre_push::train_split::Landing {
+            crate::pre_push::train_split::Landing::NotHeld("no run".into())
+        }
     }
     /// The remote's branches as `ls-remote` text, from refs/remotes/origin/* of the fixture (the sha each ref points at).
     pub fn live(r: &Path) -> Remote {
@@ -2298,7 +2337,7 @@ mod base_choice {
             cancel_ci_run: None,
             priority: Default::default(),
         };
-        let line = format!("refs/heads/x {two} refs/heads/main {}\n", "0".repeat(40));
+        let line = format!("refs/heads/x {two} refs/heads/feat/x {}\n", "0".repeat(40));
         let got = command_in(
             &args,
             &r,
