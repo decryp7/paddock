@@ -1319,9 +1319,9 @@ mod tests {
         );
         assert_eq!(s3_write_probe_verdict("\n200"), Ok(()));
         assert!(s3_write_probe_verdict("").unwrap_err().contains("no status"));
-        let put = s3_write_probe_config("http://192.0.2.10:15000/b/p/o", ("kid", "ksecret"), Some(Path::new("/x/body")));
+        let put = s3_write_probe_config("http://192.0.2.10:15000/b/p/o", ("kid", "ksecret"), Some(Path::new("probe-body")));
         assert!(
-            put.contains("upload-file = \"/x/body\"") && put.contains("user = \"kid:ksecret\"") && !put.contains("DELETE"),
+            put.contains("upload-file = \"probe-body\"") && put.contains("user = \"kid:ksecret\"") && !put.contains("DELETE"),
             "{put}"
         );
         assert!(s3_write_probe_config("http://h/b/o", ("k", "s"), None).contains("request = \"DELETE\""));
