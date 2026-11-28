@@ -959,7 +959,7 @@ jobs:
           # The launch-and-quit half needs a window server, which the CI Mac (a LaunchDaemon, ADR 0120) does not have.
           SMOKE_LAUNCH: "0"
         run: |
-          app=$(find "$PADDOCK_BUILD_FOLDER/debug/bundle/macos" -maxdepth 1 -name '*.app' | head -n 1)
+          app=$(find "$PADDOCK_BUILD_FOLDER/debug/bundle/macos" -maxdepth 1 -name '*.app'); app=${app%%$'\n'*}
           [ -d "$app" ] || { echo "::error::no debug .app was built"; exit 1; }
           node --test scripts/ci/macos-smoke.test.mjs
           bash scripts/ci/macos-verify-bundle.sh "$app"

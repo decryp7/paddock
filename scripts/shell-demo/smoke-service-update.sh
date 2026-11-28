@@ -44,7 +44,7 @@ wait_for_version() {
 # blocks with their own `state = active`, which once read as a stopped job).
 expect_running() {
   local st; st=$("$agent" status)
-  echo "$st" | grep -q '"condition": "running"' || { echo "::error::the app does not see the agent running"; echo "$st"; return 1; }
+  grep -q '"condition": "running"' <<<"$st" || { echo "::error::the app does not see the agent running"; echo "$st"; return 1; }
 }
 cleanup() {
   [ -x "$agent" ] && "$agent" uninstall || true
@@ -60,7 +60,7 @@ v_new=$(version_of "$new")
 for build in "$old" "$new"; do
   # The report is a header `<name> <version> self-test` then one `ok <check>` line per check: only the header carries the version.
   report=$("$build/Contents/MacOS/shell-demo-agent" --self-test 2>&1) || true
-  a=$(printf '%s\n' "$report" | head -n 1 | awk '{print $2}')
+  a=$(sed -n 1p <<<"$report" | awk '{print $2}')
   [ "$a" = "$(version_of "$build")" ] || {
     echo "::error::$build: the agent reports version '$a' but the app is $(version_of "$build"); rebuild so both carry one version (self-test report follows)"
     printf '%s\n' "$report"
@@ -80,11 +80,11 @@ rm -rf "$dest" && ditto "$new" "$dest"
 "$agent" check
 wait_for_version "$v_new"
 report=$(launchctl print "$target")
-if echo "$report" | grep -q 'last exit code = 78'; then
+if grep -q 'last exit code = 78' <<<"$report"; then
   echo "::error::launchd holds the agent in EX_CONFIG after the update (R03)"
   echo "$report"
   exit 1
 fi
-echo "$report" | grep -q 'state = running' || { echo "::error::the agent is not running"; echo "$report"; exit 1; }
+grep -q 'state = running' <<<"$report" || { echo "::error::the agent is not running"; echo "$report"; exit 1; }
 expect_running
 echo "build N+1 ($v_new) runs after the update; no EX_CONFIG"

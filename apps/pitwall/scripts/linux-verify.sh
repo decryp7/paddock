@@ -37,7 +37,7 @@ fi
 
 if [ -f "$data/discovery.json" ]; then
   ok "discovery file $data/discovery.json"
-  port=$(sed -n 's/.*"port": *\([0-9]*\).*/\1/p' "$data/discovery.json" | head -1)
+  port=$(sed -n 's/.*"port": *\([0-9]*\).*/\1/p' "$data/discovery.json"); port=${port%%$'\n'*}
   key=$(cat "$data/admin.key" 2>/dev/null)
   if [ -n "$port" ] && command -v curl >/dev/null; then
     code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $key" "http://127.0.0.1:$port/mgmt/v1/rpc/overview")
@@ -46,7 +46,7 @@ if [ -f "$data/discovery.json" ]; then
 else
   bad "discovery file" "missing: the server is not running"
 fi
-[ -d "$data/logs" ] && { echo; echo "Logs: $data/logs"; ls -1 "$data/logs" | head -5 | sed 's/^/    /'; }
+[ -d "$data/logs" ] && { echo; echo "Logs: $data/logs"; ls -1 "$data/logs" | sed -n '1,5s/^/    /p'; }
 
 echo
 if [ "$problems" = 0 ]; then

@@ -89,7 +89,8 @@ cleanup() {
   trap - EXIT INT TERM HUP
   pkill -P $$ 2>/dev/null || true # a smoke or poll still running when we were interrupted
   if [ -n "$run_pid" ]; then kill "$run_pid" 2>/dev/null || true; fi
-  if "$tart" list --quiet 2>/dev/null | grep -qx "$vm"; then
+  vms=$("$tart" list --quiet 2>/dev/null || true)
+  if grep -qx "$vm" <<<"$vms"; then
     run_to 120 "$tart" stop "$vm" >/dev/null 2>&1 || true
     run_to 120 "$tart" delete "$vm" >/dev/null 2>&1 || log "WARNING: could not delete the VM $vm; delete it with: tart delete $vm"
   fi

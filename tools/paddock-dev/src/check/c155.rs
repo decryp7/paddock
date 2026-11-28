@@ -34,13 +34,14 @@
 use super::baseline::{self, Growth};
 use super::finding::Finding;
 use super::growth_approval::{self, Standing};
+use paddock_approvals::{OsRemovals, Severity, Verdict, parse_os_removals};
 use super::record::Precondition;
 use super::{Check, CheckOutput, CheckScope, Control, Ctx, Mode};
 use crate::host_tests::{Derived, Exception, Exceptions, resolved_covers};
 use crate::os_placement::{self, Placement, RustcLex};
 use paddock_repo_graph::model::extract::BulkRead;
 use paddock_repo_graph::model::os::{is_test_file, rust_sites, src_module};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 const RULE: u32 = 3;
 
@@ -102,55 +103,6 @@ fn removal_keys(ex: &Exceptions) -> Vec<String> {
 /// The register of the user's approvals of `skip` and `only` entries (os-removal, ER-46).
 pub const APPROVALS: &str = "docs/os-removals.toml";
 
-/// The removal keys the user approved, per contract, from the register's text; `Err` names what is wrong (an unknown key, an approval
-/// that is not the user's, a missing field), so a broken register approves nothing.
-fn approvals(text: &str) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
-    let t: toml::Table = text.parse().map_err(|e| format!("not valid TOML: {e}"))?;
-    if let Some(k) = t.keys().find(|k| !["version", "approved"].contains(&k.as_str())) {
-        return Err(format!("unknown key {k:?} (version, approved)"));
-    }
-    let mut out: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    let list = t.get("approved").and_then(toml::Value::as_array).cloned().unwrap_or_default();
-    for (i, a) in list.iter().enumerate() {
-        let what = format!("approved #{}", i + 1);
-        let a = a.as_table().ok_or_else(|| format!("{what} is not a table"))?;
-        if let Some(k) = a
-            .keys()
-            .find(|k| !["contract", "by", "date", "why", "entries"].contains(&k.as_str()))
-        {
-            return Err(format!("{what} has an unknown key {k:?}"));
-        }
-        let text = |k: &str| {
-            a.get(k)
-                .and_then(toml::Value::as_str)
-                .filter(|v| !v.trim().is_empty())
-                .ok_or_else(|| format!("{what} has no {k}"))
-        };
-        let contract = text("contract")?;
-        let by = text("by")?;
-        text("date")?;
-        text("why")?;
-        if by != "user" {
-            return Err(format!(
-                "{what} is approved by {by:?}: taking an OS away needs the user (ER-46), `by = \"user\"`"
-            ));
-        }
-        let entries = a
-            .get("entries")
-            .and_then(toml::Value::as_array)
-            .ok_or_else(|| format!("{what} has no entries"))?;
-        let set = out.entry(contract.to_string()).or_default();
-        for e in entries {
-            set.insert(
-                e.as_str()
-                    .ok_or_else(|| format!("{what} holds an entry that is not a string"))?
-                    .to_string(),
-            );
-        }
-    }
-    Ok(out)
-}
-
 /// One workspace under check.
 struct Workspace<'a> {
     root: &'a str,
@@ -166,7 +118,7 @@ impl C155 {
         ctx: &Ctx,
         w: &Workspace,
         ex: &Exceptions,
-        approved: &BTreeMap<String, BTreeSet<String>>,
+        register: &OsRemovals,
         out: &mut Vec<Finding>,
         probes: &mut usize,
     ) {
@@ -292,9 +244,8 @@ impl C155 {
         // Taking an OS away needs the user (ER-46): every `skip` and `only` entry the merge base lacks and the user's register does not
         // approve. The merge base's entries come from the one comparison (`baseline::growth`); an approval the merge base already
         // covers, or of an entry the contract no longer has, is stale: the register only shrinks.
-        let approved = approved.get(w.contract).cloned().unwrap_or_default();
         let current = removal_keys(ex);
-        if (current.is_empty() && approved.is_empty()) || ctx.is_in_memory() || !baseline::is_work_tree(ctx.root()) {
+        if (current.is_empty() && !register.records.iter().any(|r| r.contract == w.contract)) || ctx.is_in_memory() || !baseline::is_work_tree(ctx.root()) {
             return;
         }
         let old: std::cell::RefCell<BTreeSet<String>> = Default::default();
@@ -318,29 +269,51 @@ impl C155 {
             Growth::Added { base, .. } => {
                 let old = old.into_inner();
                 let short = &base[..base.len().min(9)];
-                let added = current.iter().filter(|k| !old.contains(*k) && !approved.contains(*k)).count();
-                if added > 0 {
-                    out.push(
+                let current_set: BTreeSet<String> = current.iter().cloned().collect();
+                // What the branch adds: the entries the merge base lacks (one comparison, the caller's: ER-46).
+                let added_set: BTreeSet<String> = current_set.iter().filter(|k| !old.contains(*k)).cloned().collect();
+                let stage = ctx.stage();
+                let mut missing = 0;
+                for kv in paddock_approvals::judge_os_removals(register, w.contract, &current_set, &added_set) {
+                    let Some(severity) = paddock_approvals::severity(stage, &kv.verdict, true) else {
+                        continue;
+                    };
+                    match &kv.verdict {
+                        Verdict::Missing { .. } => missing += 1,
+                        Verdict::Mismatch { why } => {
+                            // Not approved: it still counts among the entries the branch adds without the user's approval.
+                            missing += 1;
+                            out.push(
+                                Finding::error(
+                                    "C155",
+                                    RULE,
+                                    APPROVALS,
+                                    1,
+                                    format!("[os-removal] the approval of `{}` in {APPROVALS} does not count: {why}", kv.key),
+                                    "Remove the entry, or get the user's own approval for the removal (ER-46).",
+                                )
+                                .unwaivable(),
+                            );
+                        }
+                        Verdict::Stale { why } => out.push(growth_approval::at_severity(stale_approval(w.contract, &kv.key, why), severity)),
+                        Verdict::Approved => {}
+                    }
+                }
+                if missing > 0 {
+                    // Every Missing key has the same severity at one stage.
+                    let severity = paddock_approvals::severity(stage, &Verdict::Missing { line_to_add: String::new() }, true).unwrap_or(Severity::Error);
+                    out.push(growth_approval::at_severity(
                         finding(
                             format!(
-                                "[os-removal] {added} `skip` or `only` entr{} not in {} at the merge base {short}: it takes an operating system away from code the derivation puts there",
-                                if added == 1 { "y is" } else { "ies are" },
+                                "[os-removal] {missing} `skip` or `only` entr{} not in {} at the merge base {short}: it takes an operating system away from code the derivation puts there",
+                                if missing == 1 { "y is" } else { "ies are" },
                                 w.contract,
                             ),
                             "Remove the entries, or get the user's approval for the removal (ER-46); `add` needs none.".into(),
                         )
                         .unwaivable(),
-                    );
-                }
-                for k in &approved {
-                    let why = if old.contains(k) {
-                        format!("the merge base {short} already has it in {}", w.contract)
-                    } else if !current.contains(k) {
-                        format!("{} has no such entry", w.contract)
-                    } else {
-                        continue;
-                    };
-                    out.push(stale_approval(w.contract, k, &why));
+                        severity,
+                    ));
                 }
             }
         }
@@ -359,23 +332,15 @@ fn stale_approval(contract: &str, key: &str, why: &str) -> Finding {
     )
 }
 
-/// The register's approvals as one key each (`<contract> <removal key>`), for its own shrink-only comparison.
-fn approval_keys(approved: &BTreeMap<String, BTreeSet<String>>) -> Vec<String> {
-    approved
-        .iter()
-        .flat_map(|(c, keys)| keys.iter().map(move |k| format!("{c} {k}")))
-        .collect()
-}
-
 /// The register is itself a shrink-only list (ER-46, final review P1-2): an approval the merge base's register lacks is growth, one
 /// unwaivable finding, so no agent can approve a removal by writing `by = "user"`. The user's approval of growth is the shared
 /// reader's ([`growth_approval`]: one `[[register_growth]]` entry in docs/gates.toml).
-fn register_growth(ctx: &Ctx, approved: &BTreeMap<String, BTreeSet<String>>) -> Option<Finding> {
-    let current = approval_keys(approved);
+fn register_growth(ctx: &Ctx, register: &OsRemovals) -> Option<Finding> {
+    let current = register.keys();
     if current.is_empty() || ctx.is_in_memory() || !baseline::is_work_tree(ctx.root()) {
         return None;
     }
-    let entries_of = |text: &str| approvals(text).ok().map(|a| approval_keys(&a));
+    let entries_of = |text: &str| parse_os_removals(text).ok().map(|a| a.keys());
     let exact = |k: &String| k.clone();
     match baseline::growth(ctx.root(), &ctx.base_ref(), APPROVALS, &current, &entries_of, &exact, None) {
         Growth::Unmeasured(why) => Some(baseline::unmeasured_finding(
@@ -386,13 +351,13 @@ fn register_growth(ctx: &Ctx, approved: &BTreeMap<String, BTreeSet<String>>) -> 
             "the register of approvals",
             &why,
         )),
-        Growth::Added { added: 0, .. } => None,
+        Growth::Added { added: 0, .. } => growth_approval::stale_finding(ctx, "C155", RULE),
         Growth::Added { base, added, fresh, .. } => {
-            let (detail, ask) = match growth_approval::standing(ctx, "C155", &fresh) {
+            let (detail, ask, severity) = match growth_approval::standing(ctx, "C155", &fresh) {
                 Standing::Approved => return None,
-                Standing::Stands { detail, ask } => (detail, ask),
+                Standing::Stands { detail, ask, severity } => (detail, ask, severity),
             };
-            Some(
+            Some(growth_approval::at_severity(
                 Finding::error(
                     "C155",
                     RULE,
@@ -406,7 +371,8 @@ fn register_growth(ctx: &Ctx, approved: &BTreeMap<String, BTreeSet<String>>) -> 
                     format!("Remove the added approvals. {ask}"),
                 )
                 .unwaivable(),
-            )
+                severity,
+            ))
         }
     }
 }
@@ -480,8 +446,8 @@ impl Check for C155 {
         let files = ctx.tree_files();
         let mut declared = 0;
         // The user's approvals; a register that cannot be read approves nothing and is a finding (fail closed).
-        let approved = match ctx.read(APPROVALS).map(|t| approvals(&t)) {
-            None => BTreeMap::new(),
+        let register = match ctx.read(APPROVALS).map(|t| parse_os_removals(&t)) {
+            None => OsRemovals::default(),
             Some(Ok(a)) => a,
             Some(Err(why)) => {
                 findings.push(
@@ -495,10 +461,10 @@ impl Check for C155 {
                     )
                     .unwaivable(),
                 );
-                BTreeMap::new()
+                OsRemovals::default()
             }
         };
-        findings.extend(register_growth(ctx, &approved));
+        findings.extend(register_growth(ctx, &register));
         let mut seen: BTreeSet<String> = BTreeSet::new();
         for (root, contract) in os_placement::workspaces(&files) {
             let Some(text) = ctx.read(&contract) else { continue };
@@ -540,16 +506,21 @@ impl Check for C155 {
                     contract: &contract,
                 },
                 &ex,
-                &approved,
+                &register,
                 &mut findings,
                 &mut probes,
             );
         }
         // An approval of a contract that declares no hostTests approves nothing any more.
         if !ctx.is_in_memory() {
-            for (contract, keys) in approved.iter().filter(|(c, _)| !seen.contains(*c)) {
-                for k in keys {
-                    findings.push(stale_approval(contract, k, "the contract declares no hostTests"));
+            // An approval is stale by the stage's policy like any other (a warning on a branch, an error at landing).
+            let sev = paddock_approvals::severity(ctx.stage(), &Verdict::Stale { why: String::new() }, false).unwrap_or(Severity::Error);
+            for r in register.records.iter().filter(|r| !seen.contains(&r.contract)) {
+                for k in &r.entries {
+                    findings.push(growth_approval::at_severity(
+                        stale_approval(&r.contract, k, "the contract declares no hostTests"),
+                        sev,
+                    ));
                 }
             }
         }

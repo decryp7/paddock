@@ -51,7 +51,7 @@ runs:
         # One source for the version: the root rust-toolchain.toml (rule 55). A job that names a toolchain (the fuzz jobs' nightly) keeps it.
         if [ -z "$TOOLCHAIN" ]; then
           pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
-          if [ -f "$pin" ]; then TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1); fi
+          if [ -f "$pin" ]; then TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin"); TOOLCHAIN=${TOOLCHAIN%%$'\n'*}; fi
           TOOLCHAIN=${TOOLCHAIN:-stable}
           echo "Rust toolchain $TOOLCHAIN (from rust-toolchain.toml)"
         fi
@@ -69,12 +69,13 @@ runs:
         # installs the pinned one below.
         if [ -f "${PADDOCK_CI_RELEASE_FILE:-/etc/paddock-ci-release}" ] && [ -z "$TARGETS" ]; then
           for name in "$TOOLCHAIN" stable; do
-            if [ "$name" != stable ] && ! rustup toolchain list 2>/dev/null | grep -q "^${name}-"; then continue; fi
+            toolchains=$(rustup toolchain list 2>/dev/null || true)
+            if [ "$name" != stable ] && ! grep -q "^${name}-" <<<"$toolchains"; then continue; fi
             have=$(RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}')
             if [ "$TOOLCHAIN" = stable ] || [ "$have" = "$TOOLCHAIN" ]; then
               installed=$(RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true)
               missing=0
-              for c in $COMPONENTS; do printf '%s\n' "$installed" | grep -q "^$c-" || missing=1; done
+              for c in $COMPONENTS; do grep -q "^$c-" <<<"$installed" || missing=1; done
               if [ "$missing" = 0 ]; then
                 settle "$name"
                 echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"

@@ -1097,7 +1097,6 @@ mod tests {
         let mut warned = String::new();
         let root = tempfile::tempdir().unwrap();
         let mut client = crate::ci_runs::client::Client::new(&mut http, "https://gitea.invalid", "decryp7/paddock", "t");
-        client.backoff_ms = 0;
         let got = green_base_in(&mut client, root.path(), "HEAD", None, &mut |w| warned = w.to_string());
         assert!(got.is_err(), "{got:?}");
         assert!(warned.starts_with("::warning::the CI runs of main could not be read ("), "{warned}");
