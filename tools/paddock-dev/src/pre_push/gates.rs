@@ -262,11 +262,17 @@ fn strs(v: &[&str]) -> Vec<String> {
     v.iter().map(|s| s.to_string()).collect()
 }
 
+/// Whether a Cargo workspace is one the push gate lints and tests: not one with a CI job of its own ([`OWN_JOB`]: a cargo-fuzz
+/// workspace has no nextest `ci` profile). The one definition for `tests <ws>` and `overlap-tests <ws>` (ER-22).
+pub fn is_gate_workspace(ws: &str) -> bool {
+    !OWN_JOB.iter().any(|s| ws.contains(s))
+}
+
 /// The affected Cargo workspaces, in the planner's order.
 pub fn workspaces(plan: &Value) -> Vec<String> {
     plan["packages"]
         .as_object()
-        .map(|o| o.keys().filter(|k| !OWN_JOB.iter().any(|s| k.contains(s))).cloned().collect())
+        .map(|o| o.keys().filter(|k| is_gate_workspace(k)).cloned().collect())
         .unwrap_or_default()
 }
 
@@ -783,9 +789,10 @@ fn tests_gate(id: String, ws: &str, facts: &Facts, filter: &str, next: String) -
 /// The `overlap-tests` rows (ER-21: three times a member green alone broke on the combined tree): `merge sync-member` names the
 /// packages the member and main both changed ([`Facts::overlap`]), and the sync tip runs exactly those packages' tests, one row per
 /// workspace, on this host. No package in common skips the row with the reason; an overlap that could not be told is not measured
-/// (ER-33), never a pass. A developer's push does not ask, so it skips. Report-only until its first green run on a real sync is
-/// recorded in docs/benchmarks.md, "Overlap tests row in sync-member" (ER-41): a failing row is a finding from the first run, as the
-/// tests are CI's own; the time is what is measured.
+/// (ER-33), never a pass. A developer's push does not ask, so it skips. Only workspaces
+/// the push gate tests ([`is_gate_workspace`], the same set as `tests <ws>`) are targets: a cargo-fuzz workspace has no nextest `ci`
+/// profile. Blocking from the start (user, 2026-11-28, in chat): a failing row ends sync-member non-zero; the tests are CI's own
+/// established tests, not a new check. Measured in docs/benchmarks.md, "the overlap-tests row in sync-member".
 fn overlap_tests(facts: &Facts) -> Vec<Planned> {
     use super::overlap::Overlap;
     let id = || "overlap-tests".to_string();
@@ -799,12 +806,13 @@ fn overlap_tests(facts: &Facts) -> Vec<Planned> {
             reason: format!("the packages both the member and main changed could not be told: {why}"),
             next: "run the tests of the packages both sides changed yourself (`./dev plan <fork point> --explain` and the member's plan name them); this is not a finding in your change".into(),
         }],
-        Overlap::Packages(by_ws) if by_ws.is_empty() => vec![Planned::Skip {
+        Overlap::Packages(by_ws) if !by_ws.keys().any(|ws| is_gate_workspace(ws)) => vec![Planned::Skip {
             id: id(),
-            reason: "the member and main changed disjoint packages: nothing both of them touched".into(),
+            reason: "the member and main changed disjoint packages (or only workspaces with a CI job of their own, such as cargo-fuzz): nothing both of them touched that the push gate tests".into(),
         }],
         Overlap::Packages(by_ws) => by_ws
             .iter()
+            .filter(|(ws, _)| is_gate_workspace(ws))
             .map(|(ws, names)| {
                 if let Some(reason) = inactive_app(facts, ws).map(|_| inactive_reason(app_of_workspace(ws).unwrap_or(ws))) {
                     return Planned::Skip { id: format!("overlap-tests {ws}"), reason };

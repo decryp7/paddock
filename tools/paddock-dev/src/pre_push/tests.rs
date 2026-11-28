@@ -4123,3 +4123,29 @@ fn a_push_skips_the_overlap_tests_and_the_row_needs_no_member_gate() {
         ids(&planned)
     );
 }
+
+/// Train ad: the overlap named `crates/paddock-ipc/fuzz` (both the member and main changed it), a cargo-fuzz workspace with no nextest `ci`
+/// profile, and nextest stopped with "profile `ci` not found". The overlap uses the workspace set of `tests <ws>`: a fuzz workspace is
+/// never a target, and the other workspaces of the same overlap still are.
+#[test]
+fn a_fuzz_workspace_in_both_changes_is_never_an_overlap_target() {
+    let by_ws = std::collections::BTreeMap::from([
+        ("crates/paddock-ipc/fuzz".to_string(), ["paddock-ipc-fuzz".to_string()].into()),
+        ("crates".to_string(), ["paddock-ipc".to_string()].into()),
+    ]);
+    let o = super::overlap::Overlap::Packages(by_ws);
+    let planned = plan_gates(&plan(), &change(&["crates/paddock-ipc/src/lib.rs"]), &with_overlap(o));
+    let ids: Vec<&str> = overlap_rows(&planned).iter().map(|p| id_of(p)).collect();
+    assert_eq!(ids, ["overlap-tests crates"], "{ids:?}");
+    // Only a fuzz workspace in common: nothing the gate tests, so a skip with the reason, never a run.
+    let only = super::overlap::Overlap::Packages(std::collections::BTreeMap::from([(
+        "crates/paddock-ipc/fuzz".to_string(),
+        ["paddock-ipc-fuzz".to_string()].into(),
+    )]));
+    let planned = plan_gates(&plan(), &change(&["crates/paddock-ipc/src/lib.rs"]), &with_overlap(only));
+    assert!(
+        matches!(overlap_rows(&planned).as_slice(), [Planned::Skip { id, .. }] if id == "overlap-tests"),
+        "{:?}",
+        ids
+    );
+}
