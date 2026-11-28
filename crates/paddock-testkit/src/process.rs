@@ -111,12 +111,19 @@ const REDIRECTED: &[&str] = &[
     "TMP",
 ];
 
+/// The state-folder settings (test-only rows of the settings register in `paddock-ci-config`: a tool whose state would otherwise live
+/// under the repository's git common dir, shared by every worktree). Each is set to a folder inside the command's private folder, so
+/// a test never takes a lock or writes a record in a place real gates use (ER-14, ER-51); a test that wants its own sets the variable
+/// after. `tools/paddock-dev/tests/it/state_folders.rs` fails when the register declares one this list lacks.
+pub const STATE_FOLDERS: &[&str] = &["PADDOCK_PREPUSH_STATE", "PADDOCK_WAIT_STATE"];
+
 /// Every variable name a fresh [`TestCommand`] can carry: the redirected folders, `PATH`, the fixed values and
 /// [`PASSED_THROUGH`]. A test's own additions come on top of these and are named in the test.
 #[must_use]
 pub fn allowed_names() -> Vec<&'static str> {
     let mut names: Vec<&'static str> = REDIRECTED.to_vec();
     names.push("PATH");
+    names.extend(STATE_FOLDERS.iter().copied());
     names.extend(FIXED.iter().map(|(k, _)| *k));
     // Set by the kit, never read from the machine: this test process's pid (ER-51, paddock_env::lifeline).
     names.push(paddock_env::lifeline::VAR);
@@ -296,6 +303,11 @@ impl TestCommand {
                 let _ = std::fs::create_dir_all(&v);
             }
             cmd.env(k, v);
+        }
+        for name in STATE_FOLDERS {
+            let folder = root.join("state").join(name);
+            let _ = std::fs::create_dir_all(&folder);
+            cmd.env(name, folder);
         }
         for (k, v) in FIXED {
             cmd.env(k, v);
