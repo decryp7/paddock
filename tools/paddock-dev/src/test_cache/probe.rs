@@ -296,7 +296,7 @@ pub fn run(s: &S3Store, token: &str) -> (Vec<String>, Vec<String>) {
         } else {
             p.lines.push(format!("probe 6: cannot write {}", up.display()));
         }
-        let _ = std::fs::remove_dir_all(s.scratch.join("sp ace"));
+        let _ = crate::safe_remove::remove(&s.scratch.join("sp ace"), std::slice::from_ref(&s.scratch));
     }
 
     // (7) the same as (4), one at a time.
