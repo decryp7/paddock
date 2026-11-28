@@ -911,6 +911,12 @@ impl RealExec {
             .any(|a| a == "--run-max")
     }
 
+    /// The queue status file of a row whose `./dev` child may queue for a `throttle` slot ([`Gate::children_queue`]): one per row in the
+    /// run's log folder. A heavy row has none: it holds the slot and its children run inside it (ER-43).
+    fn queue_file(&self, gate: &Gate) -> Option<PathBuf> {
+        (gate.children_queue && !gate.heavy).then(|| self.logs.join(format!("{}.queue.jsonl", log_name(&gate.id))))
+    }
+
     fn call(&self, gate: &Gate, limits: Limits, log: &Path, name: &str) -> ToolCall {
         let own = own_run_limit(gate);
         // A heavy step: its run time is limited by heavy itself (`--run-max`), its wait for a slot separately (`--queue-stall`: no
@@ -977,6 +983,11 @@ impl RealExec {
         }
         for (k, v) in &gate.env {
             call = call.env(k, v);
+        }
+        // The row's children say when they queue for a slot and when they get it, in this file (`paddock_throttle::status`): the
+        // watch tells waiting from stuck by it, and the row's queue seconds are reported apart from its run seconds.
+        if let Some(queue) = self.queue_file(gate) {
+            call = call.env(paddock_throttle::status::STATUS_FILE_VAR, queue.to_string_lossy().to_string());
         }
         // A cargo gate that names its build folder as configuration never also gets it as a variable (the variable would win over
         // the configuration and sccache hashes it), and compiles through the local sccache when there is one.
@@ -1117,6 +1128,11 @@ impl Exec for RealExec {
         };
         let call = self.call(gate, limits, &log, &name);
         let _ = std::fs::File::create(&log);
+        // Fresh for this row: no event of an earlier run of it is read.
+        let queue = self.queue_file(gate);
+        if let Some(q) = &queue {
+            let _ = std::fs::File::create(q);
+        }
         // Our `throttle` writes "holds the lock" to the log when the slot is taken: until then every second is waiting for others,
         // and the row cap counts only from then (`RealExec::slot`). Another heavy prints no such line: nothing is known then.
         let ours = gate.heavy && self.runs_through_our_heavy(limits);
@@ -1169,7 +1185,8 @@ impl Exec for RealExec {
             // Always watched: the row cap is enforced here (so the stacks are written before the tree is ended), and the
             // watchdog, when there is one, judges the step.
             let (log, root, done, stuck, heavy, progress) = (&log, &root, &done, &stuck, gate.heavy, gate.progress);
-            let watcher = s.spawn(move || self.watch_step(watch, log, root, done, stuck, began, ours, heavy, progress));
+            let queue = queue.as_deref();
+            let watcher = s.spawn(move || self.watch_step(watch, log, queue, root, done, stuck, began, ours, heavy, progress));
             let ran = call.run(&self.env, &mut std::io::sink());
             done.store(true, Ordering::SeqCst);
             (ran, watcher.join().ok().flatten())
@@ -1233,6 +1250,17 @@ impl Exec for RealExec {
             });
             t.queued += lock_wait.as_secs_f64();
         }
+        // A row whose children queued: its queue seconds are theirs, not run time (the row is not heavy, so no `throttle` timed it).
+        if timing.is_none()
+            && let Some(s) = queue.as_deref().and_then(paddock_throttle::status::read)
+            && s.events > 0
+        {
+            let queued = s.queued_secs(unix_ms()).min(wall);
+            timing = Some(Timing {
+                queued,
+                ran: wall - queued,
+            });
+        }
         let note = watch.and_then(|mut w| w.finish(timing.map_or(wall, |t| t.ran), ran.success));
         let line = phase_line(
             &gate.id,
@@ -1292,6 +1320,13 @@ fn row_cap_verdict(active_for: Duration, cap: Duration) -> Option<Stuck> {
         reason: format!("the row ran its whole cap of {} s", cap.as_secs()),
         quiet: active_for,
     })
+}
+
+/// Milliseconds since the Unix epoch: the clock the status file's `at_ms` is on.
+fn unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
 }
 
 /// Seconds since the Unix epoch.
@@ -1448,6 +1483,7 @@ impl RealExec {
         &self,
         mut w: Option<Box<dyn StepWatch>>,
         log: &Path,
+        queue: Option<&Path>,
         root: &Mutex<Option<paddock_proc::ProcessId>>,
         done: &AtomicBool,
         stuck: &Mutex<Option<Stuck>>,
@@ -1474,7 +1510,15 @@ impl RealExec {
             let tail = crate::ci_tool::read_tail(log, 4096);
             let last_line = tail.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").to_string();
             let now = Instant::now();
-            let active_for = now.saturating_duration_since(since);
+            // What the row's children say about their queue ([`paddock_throttle::status`]): time queued for a slot is waiting for others,
+            // never run time (the row cap does not count it) and never silence (the watch does not judge it). A file that cannot be
+            // read says nothing: no step is taken to wait (ER-33).
+            let queued = queue.and_then(paddock_throttle::status::read);
+            let queued_for = queued
+                .as_ref()
+                .map_or(Duration::ZERO, |s| Duration::from_secs_f64(s.queued_secs(unix_ms())));
+            let waiting_on_slot = queued.as_ref().is_some_and(|s| s.is_waiting());
+            let active_for = now.saturating_duration_since(since).saturating_sub(queued_for);
             let verdict = if let Some(over) = row_cap_verdict(active_for, self.row_cap) {
                 Some(over)
             } else if !judged {
@@ -1490,7 +1534,11 @@ impl RealExec {
                         units: counter.units().0,
                         compiled: counter.units().1,
                         last_event: counter.last_event(),
-                        waiting_on: counter.waiting_on(),
+                        waiting_on: if waiting_on_slot {
+                            Some("a throttle slot")
+                        } else {
+                            counter.waiting_on()
+                        },
                         cpu: paddock_proc::tree_cpu_time(id),
                         root: id,
                     })
@@ -1711,6 +1759,7 @@ mod tests {
             progress: crate::pre_push::progress::Progress::Lines,
             build_dir: None,
             ci_env: false,
+            children_queue: false,
         })
     }
 
@@ -1791,6 +1840,7 @@ exit $rc
                 progress: crate::pre_push::progress::Progress::Lines,
                 build_dir: None,
                 ci_env: false,
+                children_queue: false,
             }
         }
 
@@ -2599,6 +2649,121 @@ exit $rc
             let g = json_step(d.path(), &[UNIT_LINE, "    Blocking waiting for file lock on build directory"], 8);
             let r = decide(&g, &ex, &test_subject());
             assert_eq!((r.kind(), r.ended_by.clone()), (Kind::Passed, None), "{r:?}");
+        }
+
+        /// The step of a row whose `./dev` child queues for a slot of its own, as the status channel tells it (`paddock_throttle::status`):
+        /// the child says queued at once, waits `queued` seconds, then says admitted and done. `queues` false leaves the channel unused (a
+        /// child that is silent for its whole run, the positive control).
+        fn queueing_row(queued: u64, queues: bool) -> Gate {
+            use paddock_throttle::status::Event;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_millis() as u64);
+            let id = "1-gen".to_string();
+            let line = |e: Event| format!("printf '%s\\n' '{}' >> \"$THROTTLE_STATUS_FILE\"", e.line());
+            let cmd = if queues {
+                format!(
+                    "{}; sleep {queued}; {}; {}",
+                    line(Event::Queued {
+                        id: id.clone(),
+                        agent: "gen".into(),
+                        at_ms: now
+                    }),
+                    line(Event::Admitted {
+                        id: id.clone(),
+                        queued_secs: queued as f64,
+                        at_ms: now + queued * 1000
+                    }),
+                    line(Event::Done {
+                        id,
+                        ran_secs: 0.1,
+                        code: 0,
+                        at_ms: now + queued * 1000 + 100
+                    }),
+                )
+            } else {
+                format!("sleep {queued}")
+            };
+            Gate {
+                heavy: false,
+                children_queue: true,
+                ..gate("goldens", &cmd)
+            }
+        }
+
+        /// The class (queue time counted as run time, ER-21): a row whose child is queued for a slot is waiting, never stuck, even when it
+        /// is silent for longer than the watchdog's gap, and its queue seconds are reported apart from its run seconds. The positive
+        /// control (ER-33) is the same silence with no queue event: stuck. Without the channel the first was stopped as stuck after 313 s
+        /// of "no unit finished", 0.1 s of CPU, while its build took 12 to 23 s.
+        #[test]
+        fn a_row_whose_child_is_queued_for_a_slot_is_waiting_not_stuck_and_its_queue_is_reported_apart() {
+            use crate::pre_push::stall::Mode;
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = real(d.path(), &d.path().join("l"));
+            ex.watchdog = stall_dog(Mode::Enforce, 3, None);
+            let limits = Limits {
+                stall: Duration::from_secs(60),
+            };
+            let done = ex.run(&queueing_row(7, true), limits).unwrap();
+            assert!(
+                done.success && !matches!(done.ending, Ending::Stuck { .. }),
+                "waiting for a slot is not a stall: {:?}",
+                done.how
+            );
+            let t = done.timing.expect("a row whose child queued has its queue and run time apart");
+            assert_eq!(t.queued, 7.0, "{t:?}");
+            assert!(t.ran >= 0.0 && t.ran < 60.0, "{t:?}");
+            // the positive control: the same silence with no queue event is a stall
+            let r = decide(&queueing_row(60, false), &ex, &test_subject());
+            assert_eq!(r.kind(), Kind::NotMeasured, "a silent child is still caught: {r:?}");
+            assert!(r.reason().starts_with("stuck:"), "{}", r.reason());
+        }
+
+        /// The row cap counts run time: a child that queued for longer than the cap and then ran is not cut by it (the control, with no
+        /// queue event, is).
+        #[test]
+        fn the_row_cap_does_not_count_the_time_a_rows_child_queued() {
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = real(d.path(), &d.path().join("l"));
+            ex.row_cap = Duration::from_secs(3);
+            let r = decide(&queueing_row(6, true), &ex, &test_subject());
+            assert_eq!(r.kind(), Kind::Passed, "queue time is not run time: {r:?}");
+            let r = decide(&queueing_row(60, false), &ex, &test_subject());
+            assert_eq!(
+                r.kind(),
+                Kind::NotMeasured,
+                "the control: the same time with no queue is over the cap: {r:?}"
+            );
+        }
+
+        /// Only a row whose child may queue is given the status file, and a heavy row never is (it holds the slot and its children run
+        /// inside it): the variable names a file in the run's log folder, fresh for the row.
+        #[test]
+        fn only_a_row_whose_child_may_queue_gets_a_status_file() {
+            let d = tempfile::tempdir().unwrap();
+            let ex = real(d.path(), &d.path().join("l"));
+            let limits = Limits {
+                stall: Duration::from_secs(60),
+            };
+            let log = d.path().join("g.log");
+            let var = |g: &Gate| {
+                ex.call(g, limits, &log, "pre-push-1-1")
+                    .child_env(&ex.env)
+                    .into_iter()
+                    .find(|(k, _)| k == paddock_throttle::status::STATUS_FILE_VAR)
+                    .map(|(_, v)| v)
+            };
+            let path = var(&queueing_row(1, true)).expect("a row whose child may queue gets the variable");
+            assert!(
+                path.starts_with(&*ex.logs.to_string_lossy()) && path.ends_with(".queue.jsonl"),
+                "{path}"
+            );
+            assert_eq!(var(&gate("fmt a", "true")), None, "a heavy row gets none");
+            let light = Gate {
+                heavy: false,
+                ..gate("gates-register", "true")
+            };
+            assert_eq!(var(&light), None, "a row with no queueing child gets none");
         }
 
         /// A finished step is written to the history, cold or warm by its build folder.

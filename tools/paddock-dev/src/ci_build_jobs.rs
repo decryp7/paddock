@@ -33,7 +33,8 @@
 //! A failure is one `::error::` line with the cause then `Next step:`, exit 1; a warning stays a warning and exit 0.
 
 use crate::ci_isolation::home;
-use crate::ci_tool::{ToolCall, error_line};
+use crate::ci_tool::ToolCall;
+use crate::log_text::error_line;
 use clap::Args;
 use std::collections::HashMap;
 use std::io::Write;

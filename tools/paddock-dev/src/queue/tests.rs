@@ -2108,7 +2108,7 @@ fn ci_yml_is_read_only_and_its_checkouts_keep_no_credentials() {
         top.contains("\npermissions:\n  contents: read\n  actions: read\n"),
         "workflow-level read-only permissions"
     );
-    let checkouts = ci.matches("uses: actions/checkout@v4").count();
+    let checkouts = ci.matches("uses: actions/checkout@").count();
     assert!(checkouts > 0);
     assert_eq!(
         ci.matches("persist-credentials: false").count(),
@@ -2851,7 +2851,7 @@ struct Server {
     lists_run: bool,
 }
 
-impl crate::wait::Http for Server {
+impl crate::http::Http for Server {
     fn get_json(&mut self, url: &str, _token: &str) -> Result<serde_json::Value, String> {
         if url.contains("/branches/") {
             return Ok(serde_json::json!({"commit": {"id": "a".repeat(40)}}));
@@ -2984,6 +2984,6 @@ fn the_queues_merge_message_names_its_member_in_trailers_the_one_reader_reads() 
         Some(format!("Merge feat/pr1 ({}) into train", "a".repeat(9)).as_str())
     );
     let block = m.split_once("\n\n").unwrap().1;
-    let read = crate::merge_check::trailers::merge_member("x", block);
+    let read = crate::trailers::merge_member("x", block);
     assert_eq!((read.branch.as_str(), read.sync_sha.as_deref()), ("feat/pr1", Some(head.as_str())));
 }

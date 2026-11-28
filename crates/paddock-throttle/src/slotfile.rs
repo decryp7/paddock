@@ -69,19 +69,21 @@ mod tests {
     fn a_taken_slot_is_held_and_free_again_when_dropped() {
         let d = tempfile::tempdir().expect("tempdir");
         let p = d.path().join("slot.lock");
-        assert!(!is_held(&p).expect("probe"), "a missing file is free");
+        paddock_testkit::lock::await_free("a missing file is free", || is_held(&p).expect("probe"));
         let a = take(&p).expect("take").expect("free");
-        assert!(is_held(&p).expect("probe"));
+        paddock_testkit::lock::await_held("a taken slot is held", || is_held(&p).expect("probe"));
         assert!(
             take(&p).expect("take").is_none(),
             "a second handle is refused"
         );
         drop(a);
-        assert!(!is_held(&p).expect("probe"));
+        paddock_testkit::lock::await_free("a dropped slot is free", || is_held(&p).expect("probe"));
         let b = take(&p).expect("take");
         assert!(b.is_some());
         b.expect("held").release().expect("release");
-        assert!(!is_held(&p).expect("probe"));
+        paddock_testkit::lock::await_free("a released slot is free", || {
+            is_held(&p).expect("probe")
+        });
     }
 
     #[test]
@@ -89,7 +91,12 @@ mod tests {
         let d = tempfile::tempdir().expect("tempdir");
         let p = d.path().join("slot.lock");
         std::fs::write(&p, b"").expect("file");
-        assert!(!is_held(&p).expect("probe") && !is_held(&p).expect("probe"));
+        paddock_testkit::lock::await_free("the first probe sees a free slot", || {
+            is_held(&p).expect("probe")
+        });
+        paddock_testkit::lock::await_free("the second probe sees a free slot", || {
+            is_held(&p).expect("probe")
+        });
         assert!(
             take(&p).expect("take").is_some(),
             "probing left nothing behind"

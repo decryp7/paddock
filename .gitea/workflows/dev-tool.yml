@@ -30,6 +30,7 @@ on:
       - crates/paddock-repo-graph/**
       - crates/paddock-secrets/**
       - crates/paddock-slots/**
+      - crates/paddock-throttle/**
       - crates/paddock-workspace-hack/**
       - .cargo/config.toml
       - conformance/ci/dev-tool-publish.sh
@@ -66,7 +67,7 @@ jobs:
     outputs:
       run: ${{ steps.decide.outputs.run }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # A train run is dispatched at once and waits here, on Linux, until no older run holds the Mac or Windows runner it
       # needs (./dev ci runner-wait); the queued run is what scheduled runs yield to. Other events: nothing.
       - uses: ./.gitea/actions/runner-wait
@@ -100,7 +101,7 @@ jobs:
       PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Git bash on PATH (Windows)
         if: runner.os == 'Windows'
@@ -143,7 +144,7 @@ jobs:
       PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - uses: ./.gitea/actions/build-jobs
 

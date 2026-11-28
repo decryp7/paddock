@@ -34,10 +34,10 @@ const TABLE: &str =
     "[[layer]]\nname = \"low\"\nmodules = [\"a\", \"lib\"]\n\n[[layer]]\nname = \"high\"\nuses = [\"low\"]\nmodules = [\"b\"]\n";
 const LIB: &str = "pub mod a;\npub mod b;\n";
 
-/// Positive control for the fixture: an upward reference is a warning at its line, never an error (report-only, ER-41), and the same
+/// Positive control for the fixture: an upward reference is an error at its line (the check blocks since 2026-11-28), and the same
 /// reference downward is green.
 #[test]
-fn c178_reports_an_upward_reference_as_a_warning() {
+fn c178_reports_an_upward_reference_as_an_error() {
     let tree = tree_of(&[
         (LAYERS, TABLE),
         ("tools/paddock-dev/src/lib.rs", LIB),
@@ -52,7 +52,7 @@ fn c178_reports_an_upward_reference_as_a_warning() {
         m.contains("`a`") && m.contains("`crate::b`") && m.contains("`high`"),
         "the edge and the layers are named: {m}"
     );
-    assert_eq!((r.errors(), r.warnings()), (0, 1));
+    assert_eq!((r.errors(), r.warnings()), (1, 0));
 }
 
 /// A module the table does not list, and an entry with no module, are reported; a tree with no upward reference is otherwise green.
@@ -163,10 +163,10 @@ fn a_diamond_keeps_its_siblings_apart() {
     assert!(Layers::parse(bad).unwrap_err().contains("not declared above"));
 }
 
-/// This working tree: the check runs over every production file and never fails the run (report-only). The table is complete: no
-/// module of src/ is missing from it and no entry is stale (the back-edge count is the report, recorded in docs/gates.toml).
+/// This working tree: the check runs over every production file and finds nothing: no module refers to a layer its own does not use, no
+/// module of src/ is missing from the table and no entry is stale.
 #[test]
-fn live_c178_the_real_tree_runs_blocks_nothing_and_the_table_is_complete() {
+fn live_c178_the_real_tree_has_no_back_edge_and_the_table_is_complete() {
     let root = repo_root();
     let r = paddock_testkit::guarded("the Rust C178 over the live tree", LIVE_STALL, {
         let root = root.clone();
@@ -175,7 +175,8 @@ fn live_c178_the_real_tree_runs_blocks_nothing_and_the_table_is_complete() {
             run_checks_in(&tree, &options(&root, "paddock"), &registry()).unwrap()
         }
     });
-    assert_eq!(r.errors(), 0, "report-only: {:?}", r.findings);
+    assert_eq!(r.errors(), 0, "{:?}", r.findings);
+    assert!(r.findings.is_empty(), "{:?}", r.findings);
     let table: Vec<_> = r
         .findings
         .iter()

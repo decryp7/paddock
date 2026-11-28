@@ -497,9 +497,9 @@ test('checkout profiles: ci.yml\'s host jobs use the kept clone with a declared 
     assert.match(clone.text, /name: paddock-checkout-\$\{\{ runner\.os \}\}\n/, `${id}: the same kept clone for every job of the slot`);
     const profile = /profile: (\S+)/.exec(clone.text)?.[1];
     assert.ok(profiles.has(profile) || profile === 'full', `${id}: profile ${profile} is declared in checkout-profiles.txt`);
-    const plain = steps.find((st) => /uses: actions\/checkout@v4/.test(st.text) && /if: runner\.os == 'Linux'/.test(st.text));
+    const plain = steps.find((st) => /uses: actions\/checkout@[0-9a-f]{40}( # v[0-9.]+)?/.test(st.text) && /if: runner\.os == 'Linux'/.test(st.text));
     assert.ok(plain, `${id}: Linux keeps the plain checkout`);
-    const co = steps.find((st) => /uses: actions\/checkout@v4/.test(st.text) && /if: runner\.os != 'Linux'/.test(st.text));
+    const co = steps.find((st) => /uses: actions\/checkout@[0-9a-f]{40}( # v[0-9.]+)?/.test(st.text) && /if: runner\.os != 'Linux'/.test(st.text));
     assert.ok(co, `${id}: the hosts check out sparse`);
     const sparse = /sparse-checkout: \|\n((?:\s{12}\S[^\n]*\n)+)/.exec(co.text + '\n');
     assert.ok(sparse, `${id}: a sparse-checkout list`);
@@ -595,7 +595,7 @@ function assertBundleJob(text) {
   assert.match(job, /PADDOCK_DEV_DOWNLOAD: "0"/, 'a release job builds the tool from source (ADR 0022)');
   assert.ok(!/actions\/stable-workspace/.test(job), 'the kept clone replaces stable-workspace');
   assert.ok(!/path: \.paddock|repository: decryp7\/paddock|\.paddock\//.test(job), 'no second checkout of the tree under .paddock: the kit is this commit');
-  const checkouts = steps.filter((s) => /uses: actions\/checkout@v4/.test(s.text));
+  const checkouts = steps.filter((s) => /uses: actions\/checkout@[0-9a-f]{40}( # v[0-9.]+)?/.test(s.text));
   assert.equal(checkouts.length, 2, 'a plain checkout for Linux and a sparse one for the hosts, nothing else');
   const plain = checkouts.find((s) => /if: runner\.os == 'Linux'/.test(s.text));
   assert.ok(plain && !/sparse-checkout/.test(plain.text), 'Linux keeps the plain checkout');
@@ -634,7 +634,7 @@ test('app-release.yml: the bundle job checks out sparse and partial on the hosts
 test('the bundle job check rejects a full actions/checkout of the hosts, a .paddock checkout, stable-workspace and a missing profile', () => {
   const good = read(RELEASE);
   const mutations = {
-    'a full checkout on the hosts': good.replace(/      - uses: actions\/checkout@v4\n        if: runner\.os != 'Linux'\n        with:\n(?:          .*\n|            .*\n)+?(?=\n)/, "      - uses: actions/checkout@v4\n        if: runner.os != 'Linux'\n"),
+    'a full checkout on the hosts': good.replace(/      - uses: actions\/checkout@[0-9a-f]{40}( # v[0-9.]+)?\n        if: runner\.os != 'Linux'\n        with:\n(?:          .*\n|            .*\n)+?(?=\n)/, "      - uses: actions/checkout@v4\n        if: runner.os != 'Linux'\n"),
     'the .paddock checkout back': good.replace('      - uses: ./.gitea/actions/build-jobs', "      - uses: actions/checkout@v4\n        with:\n          repository: decryp7/paddock\n          path: .paddock\n\n      - uses: ./.gitea/actions/build-jobs"),
     'stable-workspace instead of the clone': good.replace('./.gitea/actions/kept-clone', './.gitea/actions/stable-workspace'),
     'the lean profile': good.replace('profile: bundle', 'profile: lean'),

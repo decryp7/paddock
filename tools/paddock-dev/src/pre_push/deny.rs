@@ -92,6 +92,7 @@ mod tests {
             files: files.iter().map(|f| f.to_string()).collect(),
             ranges: vec![],
             base: base.map(String::from),
+            moved: false,
         }
     }
 

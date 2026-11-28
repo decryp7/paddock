@@ -2,7 +2,7 @@
 //! An in-memory Gitea for the unit tests: labels, pull requests and runs by commit, with every request recorded. It answers
 //! the calls of [`super::gitea::Api`] only; anything else is a 404.
 
-use crate::wait::Http;
+use crate::http::Http;
 use serde_json::{Value, json};
 
 /// The fake server's state.

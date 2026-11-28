@@ -10,7 +10,7 @@
 //! - `ci schedule-skip`: whether a scheduled run ends early because a train is in CI ([`schedule_skip`]; the job token in
 //!   `PLAN_TOKEN` or `GITEA_TOKEN`, and it never fails the run).
 //!
-//! The API client ([`client`]) reuses the planner's [`Http`](crate::wait::Http) and [`GiteaRuns`](crate::plan_since::GiteaRuns).
+//! The API client ([`client`]) reuses the planner's [`Http`](crate::http::Http) and [`GiteaRuns`](crate::plan_since::GiteaRuns).
 //! The token is read from `GITEA_TOKEN`, travels in a header only and is printed nowhere.
 
 pub mod cache_audit;
@@ -43,7 +43,8 @@ use client::Client;
 use paddock_cli::{CliError, Exit, Report};
 use std::path::PathBuf;
 
-pub(crate) const SERVER: &str = "https://dev.decryptology.net";
+/// The family's Gitea server.
+pub const SERVER: &str = "https://dev.decryptology.net";
 
 /// Arguments of `ci cache-audit`.
 #[derive(Args)]
@@ -996,56 +997,18 @@ pub fn cancel_cmd(a: &CancelArgs) -> Result<Report, CliError> {
     }
 }
 
-/// Arguments of `ci landing-held`.
-#[derive(Args)]
-pub struct LandingHeldArgs {
-    /// The full 40-hex commit that is to land.
-    #[arg(long)]
-    sha: String,
-    /// The workflow whose complete green run is needed.
-    #[arg(long, default_value = "ci.yml")]
-    workflow: String,
-    /// The repository.
-    #[arg(long, default_value = "decryp7/paddock")]
-    repo: String,
-    /// The Gitea server.
-    #[arg(long, default_value = SERVER)]
-    server: String,
-}
-
-/// `ci landing-held`: ER-49's landing needs BOTH the complete green CI run ([`verdict::verdict_landing_at`]) and the green local slow rows
-/// (`./dev check --pre-push --member-gate --set slow`, [`crate::pre_push::train_split`]) on the same commit. Exit 0 landable, 5 refused
-/// (CI red or a slow row failed), 6 not held (anything unfinished, missing or unread: never a pass, ER-33).
-pub fn landing_held(a: &LandingHeldArgs) -> Result<Report, CliError> {
-    use crate::pre_push::train_split::{Ci, Landing, SlowState, landing, read};
-    if a.sha.len() != 40 || !a.sha.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
-        return Err(CliError::usage(format!("--sha {:?} is not a full 40-hex commit id.", a.sha))
-            .with_hint("Pass the whole sha (`git rev-parse HEAD`)."));
-    }
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let root = find_root(&cwd).unwrap_or(cwd);
-    let ci = match token() {
-        Err(_) => Ci::NotMeasured("GITEA_TOKEN is not set, so the runs cannot be read".into()),
+/// The verdict that lets `commit` land, from `server`'s `repo` (what `pre_push::landing_held` reads for its CI half): the complete green
+/// run of `workflow` on it ([`verdict::verdict_landing_at`]), read with the token in `GITEA_TOKEN`; without one it is NotMeasured,
+/// never green.
+pub fn landing_verdict(server: &str, repo: &str, workflow: &str, sha: &str, root: &std::path::Path) -> verdict::Verdict {
+    match token() {
+        Err(_) => verdict::Verdict::NotMeasured("GITEA_TOKEN is not set, so the runs cannot be read".into()),
         Ok(token) => {
             let mut http = CurlHttp;
-            let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
-            match verdict::verdict_landing_at(&mut client, &a.workflow, &a.sha, &root) {
-                verdict::Verdict::Green { .. } | verdict::Verdict::GreenWithFixItems { .. } => Ci::Green,
-                verdict::Verdict::Red { reason, .. } => Ci::Red(reason),
-                verdict::Verdict::NotMeasured(why) => Ci::NotMeasured(why),
-            }
+            let mut client = Client::new(&mut http, server, repo, &token);
+            verdict::verdict_landing_at(&mut client, workflow, sha, root)
         }
-    };
-    let slow: SlowState = read(&crate::git::state_dir(&root), &a.sha);
-    let (exit, text) = match landing(&ci, &slow) {
-        Landing::Landable => (
-            Exit::Ok,
-            format!("{} may land: the complete green CI run and the green slow rows hold on it", a.sha),
-        ),
-        Landing::Refused(why) => (Exit::Findings, format!("{} may not land: {why}", a.sha)),
-        Landing::NotHeld(why) => (Exit::NotMeasured, format!("{} is not held for landing: {why}", a.sha)),
-    };
-    Ok(Report::new(serde_json::json!({ "sha": a.sha, "landable": exit == Exit::Ok }), text).with_exit(exit))
+    }
 }
 
 /// Cancels run `id` of the family's server (the pre-push slow set calls this when a slow row fails): the line to print, or why not.
@@ -1066,7 +1029,7 @@ fn token_from(value: Option<String>) -> Result<String, CliError> {
 }
 
 /// The folder containing `.git`, from `start` upwards.
-fn find_root(start: &std::path::Path) -> Option<PathBuf> {
+pub(crate) fn find_root(start: &std::path::Path) -> Option<PathBuf> {
     start.ancestors().find(|d| d.join(".git").exists()).map(PathBuf::from)
 }
 

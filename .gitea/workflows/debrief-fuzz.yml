@@ -39,7 +39,7 @@ jobs:
     outputs:
       run: ${{ steps.decide.outputs.run }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - id: train
         uses: ./.gitea/actions/schedule-skip
         with:
@@ -86,14 +86,14 @@ jobs:
           - shard: 6
             targets: [fuzz_dump_minidump, fuzz_dump_umdh, fuzz_dump_wire, fuzz_plugin_package, fuzz_parser_toml, fuzz_project, fuzz_notes_knowledge]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs` through conformance/ci/kit.sh; each runner class's layout is in ci_build_jobs.rs: Linux 6 jobs on 30 cores).
       - uses: ./.gitea/actions/build-jobs
 
       # A dated nightly (RUSTUP_TOOLCHAIN) instead of the moving one: the build, and the cache keyed on it, change
       # only when the pin does, and a broken nightly cannot fail the run. Move it forward now and then.
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
         with:
           toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
 
@@ -146,7 +146,7 @@ jobs:
       # One artifact per target, as before; a shard has seven targets.
       - name: Upload crashes (${{ matrix.targets[0] }})
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
         with:
           name: crashes-${{ matrix.targets[0] }}
           path: apps/debrief/fuzz/artifacts/${{ matrix.targets[0] }}/
@@ -154,7 +154,7 @@ jobs:
 
       - name: Upload crashes (${{ matrix.targets[1] }})
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
         with:
           name: crashes-${{ matrix.targets[1] }}
           path: apps/debrief/fuzz/artifacts/${{ matrix.targets[1] }}/
@@ -162,7 +162,7 @@ jobs:
 
       - name: Upload crashes (${{ matrix.targets[2] }})
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
         with:
           name: crashes-${{ matrix.targets[2] }}
           path: apps/debrief/fuzz/artifacts/${{ matrix.targets[2] }}/
@@ -170,7 +170,7 @@ jobs:
 
       - name: Upload crashes (${{ matrix.targets[3] }})
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
         with:
           name: crashes-${{ matrix.targets[3] }}
           path: apps/debrief/fuzz/artifacts/${{ matrix.targets[3] }}/
@@ -178,7 +178,7 @@ jobs:
 
       - name: Upload crashes (${{ matrix.targets[4] }})
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
         with:
           name: crashes-${{ matrix.targets[4] }}
           path: apps/debrief/fuzz/artifacts/${{ matrix.targets[4] }}/
@@ -186,7 +186,7 @@ jobs:
 
       - name: Upload crashes (${{ matrix.targets[5] }})
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
         with:
           name: crashes-${{ matrix.targets[5] }}
           path: apps/debrief/fuzz/artifacts/${{ matrix.targets[5] }}/
@@ -194,7 +194,7 @@ jobs:
 
       - name: Upload crashes (${{ matrix.targets[6] }})
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
         with:
           name: crashes-${{ matrix.targets[6] }}
           path: apps/debrief/fuzz/artifacts/${{ matrix.targets[6] }}/

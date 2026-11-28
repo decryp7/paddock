@@ -245,7 +245,7 @@ test('P1-1: the check job names actions: read (unnamed scopes are None on Gitea 
 
 test('P1-2: both jobs run only from main, the checker comes from main in its own folder, the tagged tree is never checked out', () => {
   for (const j of [check, push]) assert.match(j, /^    if: github\.ref == 'refs\/heads\/main'$/m);
-  assert.match(check, /uses: actions\/checkout@v4\n        with:\n          ref: main\n          path: trusted\n/);
+  assert.match(check, /uses: actions\/checkout@[0-9a-f]{40}( # v[0-9.]+)?\n        with:\n          ref: main\n          path: trusted\n/);
   assert.equal((code.match(/actions\/checkout/g) ?? []).length, 1, 'one checkout, of main');
   assert.doesNotMatch(code, /ref: \$\{\{\s*inputs\.sha/);
   assert.doesNotMatch(push, /actions\/checkout/);

@@ -51,7 +51,7 @@ jobs:
       # 'true' when the app is not active (docs/ci-active-apps.toml): the verdict says so instead of failing a manual run.
       inactive: ${{ steps.plan.outputs.inactive }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
       # A train run is dispatched at once and waits here, on Linux, until no older run holds the Mac or Windows runner it
@@ -189,7 +189,7 @@ jobs:
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: ./.gitea/actions/release-verdict
         with:
           app: pitwall

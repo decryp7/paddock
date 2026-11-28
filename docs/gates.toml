@@ -1230,14 +1230,6 @@ review_by = 2026-12-11
 approved = "user"
 
 [[report_only]]
-id = "C178"
-reason = "ER-41: report-only until the back-edges are gone (the test-split ADR's WP-4, one refactor branch per batch), then flip the mode to Gate; the check is deleted if the crate split lands (cargo then refuses a crate cycle). It reads tools/paddock-dev/layers.toml (the one module-to-layer table, the crate table of docs/plans/paddock-dev-crate-split.md 9354c6308 with its diamond: core, host, repo, ci, gates, bin, each layer naming the layers it uses) and reports each production `crate::<module>` reference to a layer its own does not use, each module of src/ the table lacks and each stale entry; test code is not read. First real-tree count 2026-11-27 on origin/main 5e5991a31 with the plan's table: 32 references in 19 module pairs (against the ADR's first sketch: 64 references in 31 pairs; the plan counts 35 production items); 0 table gaps. No baseline file (ER-46): the report is the list. Positive control in the check and tests/it/check_c178.rs: an upward use and a macro path go red, a downward path, test code and the lib.rs items stay green; a missing or broken table is not measured"
-owner = "ER-21 class: paddock-dev's modules form one reference cycle (45 of 66 modules, 90% of the lines), so no crate split or per-area test unit is possible"
-since = 2026-11-27
-review_by = 2026-12-11
-approved = "user"
-
-[[report_only]]
 id = "C179"
 reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c179.rs, then flip the mode to Gate. A member crate of a Cargo workspace whose Rust sources hold a read the reads extractor cannot resolve (a manifest folder in a variable, .ancestors(), current_dir, git ls-files, a join with a non-literal: repo_model::code::blind_of, the model's own definition) and that has no [package.metadata.paddock] test-reads makes the test cache refuse it and every crate that depends on it (ADR 0116 section 2, user decision 122); a declared glob that matches no tracked file is a finding too. First count 2026-11-27 on feat/test-cache-declared-reads: 49 crates with 221 blind sites and no declaration; 47 declared the same day, left: tools/paddock-dev (143 sites: it reads the whole tree) and tools/throttle (2: the cargo config folders above a working folder). No baseline file (ER-46): the report is the list. Positive control in the check and tests/it/check_c179.rs: a blind crate and a stale glob go red, a declared crate, an empty declaration, a crate with no blind site and a non-member stay green"
 owner = "ER-21 class: one blind crate (paddock-testkit, a dev-dependency of nearly every crate) kept 121 of 137 test crates Never; ADR 0116 amendment 2026-11-27"
@@ -1252,3 +1244,27 @@ owner = "ER-21 class: producer | grep -q under pipefail (run 9247 check broken i
 since = 2026-11-27
 review_by = 2026-12-11
 approved = "user"
+
+[[report_only]]
+id = "C181"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c181.rs, then flip the mode to Gate. In test code (a tests folder, tests.rs, testutil*.rs, or a #[test] or #[cfg(test)] item) an assert, assert_eq, assert_ne or debug_assert* macro whose checked expression holds a direct lock-state read (a call named is_held, is_held_now, is_held_settled, is_locked or is_free with an argument, or is_err, is_ok, is_some, is_none, unwrap_err or expect_err on a chain that began with try_lock*) outside paddock_testkit::lock::await_free or await_held is one finding at the read: a just-released lock can read held for a moment, so one read after a release judges the wrong state (user, 2026-11-28, in chat). Read with syn (ER-42), lexical by design: a read bound to a name first, a probe under another name and a Mutex try_lock (in-process, no descriptor; written as a lock_is_held helper in Dyno) are not told apart or not seen. First count 2026-11-28 on fix/settled-lock-reads: 31 warnings (4 were Evidence::is_held, a precondition and no lock, now excluded by the argument rule) plus 17 reads behind the is_free helpers of tools/paddock-dev's slots and isolation tests, all converted to the helper the same day; real tree after conversion: 0 warnings. No baseline file (ER-46). Positive control in the check and tests/it/check_c181.rs: direct reads go red, the helper form, a read bound to a name, production code and an argument-less is_held stay green"
+owner = "ER-21 class, seen twice: a just-released flock reads held while another thread spawns (Dyno InstanceLock 2026-10-31; throttle filelock test 2026-11-28); each fix repaired one test"
+since = 2026-11-28
+review_by = 2026-12-12
+approved = "coordinator"
+
+[[report_only]]
+id = "C182"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c182.rs, then flip the mode to Gate. A `uses:` of a remote action or reusable workflow (jobs.<id>.uses, jobs.<id>.steps[].uses, runs.steps[].uses of .gitea/workflows/*.yml, .gitea/actions/**.yml and .gitea/workflow-templates/*.yml, read through paddock-ci-config's YAML reader, ER-42) that is not pinned to a full 40-hex commit SHA is a warning, because a tag or branch moves under the job (ER-26). Local paths (`./...`), `docker://` images and Paddock's own immutable release tags (`decryp7/paddock/<path>@v<semver>`) are exempt. No baseline file (ER-46): the report is the list. Positive control in the check and tests/it/check_c182.rs: a tag, a branch, an abbreviated SHA and a reusable workflow on a tag go red; a SHA with its version comment, local paths, an image, a comment and a run body stay green; a test fails when the check is deleted from the registry, the reservation or conformance.rust"
+owner = "ER-26 and ER-57: the user decided on 2026-11-28 (in chat) to pin every remote action to its commit SHA, with the version as a trailing comment; Renovate (helpers:pinGitHubActionDigests) bumps the pins"
+since = 2026-11-28
+review_by = 2026-12-12
+approved = "coordinator"
+
+[[report_only]]
+id = "C183"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c183.rs, then flip the mode to Gate. A file git's own rename detection (`git diff --name-status -M` from the merge base, through the shared git reader) sees renamed or deleted that a path register still names: the registers are declared once in the check (REGISTERS: CODEOWNERS, docs/repo-graph.toml, generators.toml, known-copies.toml, gates.toml, escape-register.toml, ipc-endpoints.toml, shared-crate-features.toml, paddock.waivers.toml, paddock.conformance.json, conformance/ci/*.txt, every paddock.ci.json, inputs.txt, conformance/shared-enums.json, disk/temp-prefixes.toml; the conformance engine's allow lists and baselines follow a rename on their own and are not read). It reports the register line with moved to <new path> or deleted. User decision 2026-11-28, in chat: during the paddock-dev split, conformance mention lines, conformance/ci/checkout-profiles.txt and paddock.ci.json hostTests kept old paths after moves, twice, and only a full conformance run caught it (one gate round each). No baseline file (ER-46): the report is the list. Positive control in the check and tests/it/check_c183.rs: a fixture git repository with a moved file and a stale register line goes red; registers that follow the move, a re-created path and longer look-alike paths stay green; a tree with no register or no git is not measured. The pre-push row moved-paths runs it only when the push renames or deletes a file"
+owner = "ER-21 class: path-keyed registers kept old paths after files moved (paddock-dev split: conformance mention lines, checkout-profiles.txt, paddock.ci.json hostTests, twice)"
+since = 2026-11-28
+review_by = 2026-12-12
+approved = "coordinator"

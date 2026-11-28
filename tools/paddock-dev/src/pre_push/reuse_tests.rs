@@ -104,6 +104,7 @@ fn gate(id: &str, cwd: &str) -> Gate {
         progress: Progress::Lines,
         build_dir: None,
         ci_env: false,
+        children_queue: false,
     }
 }
 

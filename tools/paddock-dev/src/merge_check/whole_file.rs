@@ -7,9 +7,10 @@
 //! follow their generator, which is flagged itself.
 
 use super::generated::Generated;
-use super::{Finding, Kind, trailers};
+use super::{Finding, Kind};
 use crate::git::AutoMerge;
 use crate::git::short;
+use crate::trailers;
 use std::collections::HashMap;
 
 fn image(path: &str) -> bool {
