@@ -57,6 +57,8 @@ paddock-git = { path = "../../crates/paddock-git" }
 paddock-net = { path = "../../crates/paddock-net", default-features = false }
 paddock-repo-graph = { path = "../../crates/paddock-repo-graph", features = ["git-history", "cargo-metadata", "content"] }
 paddock-slots = { path = "../../crates/paddock-slots" }
+# pre_push: the queue status channel a row's `./dev` child writes when it queues for a slot (`status`, one definition for writer and reader, ER-22).
+paddock-throttle = { path = "../../crates/paddock-throttle" }
 yaml-rust2 = "0.13"
 # disk: the usage index, as cargo's own global cache tracker is SQLite too (cargo clean gc). Bundled: no system library needed; MIT, SQLite is public domain.
 rusqlite = { version = "0.41", features = ["bundled"] }

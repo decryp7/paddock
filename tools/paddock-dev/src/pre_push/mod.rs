@@ -520,6 +520,7 @@ fn command_in(
         node_env_problem(cfg!(windows) && work != root, &|p| std::fs::read_to_string(work.join(p)).ok())
     };
     facts.member_gate = args.member_gate;
+    facts.priority = if real.priority { crate::priority::Priority::Train } else { crate::priority::Priority::Normal };
     facts.kept_targets = kept_targets;
     // The member gate's tests narrow each workspace to the packages the change reaches, exactly as CI's member run does (one copy).
     facts.test_filters = gates::workspaces(&plan)
@@ -1607,6 +1608,7 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>, ex: &dyn
         reached: Default::default(),
         goldens: Ok(Vec::new()),
         overlap: Default::default(),
+        priority: Default::default(),
     }
 }
 
