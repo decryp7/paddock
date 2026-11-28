@@ -42,3 +42,21 @@ test('C128: by item, in both directions: production code after a test module is 
   const helper = `#[cfg(all(unix, test))]\nfn helper() {\n    ${site}\n}\n`;
   assert.deepEqual(lines(`${prod}${helper}${testMod}`, 'crates/a/src/lib.rs'), [6, 11], 'the production site on line 2 is not read');
 });
+
+test('C128: paddock-proc\'s own tests take no "cycle" waiver: the identity helpers live in paddock-proc (test-support)', async () => {
+  // The old shape of the four paddock-proc sites, without its waiver, is flagged (the check goes red when the helpers are not used).
+  const old = 'fn t() {\n    let out = x;\n    ids.push(ProcessId::of(p.parse().unwrap()).unwrap());\n}\n';
+  assert.deepEqual(lines(old, 'crates/paddock-proc/src/guardian/unix/tests.rs'), [3]);
+  assert.deepEqual(lines(old, 'crates/paddock-proc/tests/it/scope.rs'), [3]);
+  // And no file of the crate carries the excuse any more.
+  const { readdirSync, readFileSync, statSync } = await import('node:fs');
+  const { join, dirname } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'crates', 'paddock-proc');
+  const walk = (d) => readdirSync(d).flatMap((n) => {
+    const p = join(d, n);
+    return statSync(p).isDirectory() ? (n === 'target' ? [] : walk(p)) : p.endsWith('.rs') ? [p] : [];
+  });
+  const waived = walk(root).filter((f) => /recorded-pid[^\n]*\(a cycle\)/.test(readFileSync(f, 'utf8')));
+  assert.deepEqual(waived, [], 'use paddock_proc::recorded (descendant_of, printed) instead of a "cannot use paddock-testkit-start" waiver');
+});

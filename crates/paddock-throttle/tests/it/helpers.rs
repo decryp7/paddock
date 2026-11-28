@@ -1,14 +1,18 @@
-//! A fake world: a clock that only moves when told to, a process table made by hand, a load made by hand; the files are real
-//! (in a temp folder), so the on-disk layout is what is tested.
+//! A fake world: a clock that only moves when told to, a process table made by hand, a load made by hand. The files are real
+//! (in a temp folder) in [`Rig::new`], so the on-disk layout is what is tested; [`Rig::mem`] keeps the lock folder in memory (the
+//! [`MemStore`] behind the [`Store`] port) for a test whose point is a queue, admission or priority rule and that polls many times:
+//! on a Windows runner every poll of a real folder costs file-system calls (ADR 0103's size classes; docs/benchmarks.md,
+//! "2026-11-28, the throttle tests off the real folder").
 #![allow(dead_code)]
 
 use paddock_throttle::clock::{Clock, FakeClock};
 use paddock_throttle::config::Config;
+use paddock_throttle::fsinfo::FsKind;
 use paddock_throttle::gate::FakeLoad;
 use paddock_throttle::lock::{Acquirer, Poll, Request, Throttle};
 use paddock_throttle::log::Logger;
 use paddock_throttle::procs::FakeProcs;
-use paddock_throttle::store::{SlotLock, Stat, Store};
+use paddock_throttle::store::{RealStore, SlotLock, Stat, Store};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -18,21 +22,32 @@ pub struct Rig {
     pub clock: Arc<FakeClock>,
     pub procs: Arc<FakeProcs>,
     pub load: Arc<FakeLoad>,
+    /// The lock folder's operations: the real folder, or [`MemStore`] in [`Rig::mem`].
+    pub store: Arc<dyn Store>,
+    in_memory: bool,
 }
 
 /// Plants holders in a lock folder (see [`Rig::plant_slot`]).
 #[derive(Clone)]
 pub struct Planter {
     root: PathBuf,
+    store: Arc<dyn Store>,
 }
 
 impl Planter {
-    pub fn plant_slot(&self, n: u32, owner: &str) -> paddock_throttle::slotfile::Held {
-        let held =
-            paddock_throttle::slotfile::take(&self.root.join(format!("throttle-slot{n}.lock")))
-                .expect("lock file")
-                .expect("free");
-        std::fs::write(self.root.join(format!("throttle-slot{n}.info")), owner).expect("info");
+    /// Takes the slot lock like another process would and writes its info record; the lock is kept while the handle lives.
+    pub fn plant_slot(&self, n: u32, owner: &str) -> Box<dyn SlotLock> {
+        let held = self
+            .store
+            .take(&self.root.join(format!("throttle-slot{n}.lock")))
+            .expect("lock file")
+            .expect("free");
+        self.store
+            .write(
+                &self.root.join(format!("throttle-slot{n}.info")),
+                owner.as_bytes(),
+            )
+            .expect("info");
         held
     }
 }
@@ -49,16 +64,36 @@ impl Agent {
 }
 
 impl Rig {
+    /// A rig on the real lock folder (a temp folder).
     pub fn new() -> Rig {
+        Rig::build(false)
+    }
+
+    /// A rig whose lock folder is in memory: the same rules through the [`Store`] port, no file-system call per poll. Anything a test
+    /// reads from the folder goes through [`Rig::store`] (the `held`, `count`, `owner_line` and log readers do); a file the run writes
+    /// beside the store (its history, its captured output) is still real, in the temp folder.
+    pub fn mem() -> Rig {
+        Rig::build(true)
+    }
+
+    fn build(in_memory: bool) -> Rig {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(1_800_000_000);
+        let clock = Arc::new(FakeClock::at_secs(now));
+        let store: Arc<dyn Store> = if in_memory {
+            Arc::new(MemStore::new(clock.clone()))
+        } else {
+            Arc::new(RealStore)
+        };
         Rig {
             dir: tempfile::tempdir().expect("tempdir"),
-            clock: Arc::new(FakeClock::at_secs(now)),
+            clock,
             procs: Arc::new(FakeProcs::new()),
             load: Arc::new(FakeLoad::new(1.0)),
+            store,
+            in_memory,
         }
     }
 
@@ -103,10 +138,11 @@ impl Rig {
             format!("run-{pid}"),
             pid,
             self.clock.clone(),
-            Some(self.root().join(format!("log-{pid}.clef"))),
+            // The in-memory folder keeps no troubleshooting log on disk either.
+            (!self.in_memory).then(|| self.root().join(format!("log-{pid}.clef"))),
             false,
         ));
-        let h = Throttle::new(
+        let mut h = Throttle::new(
             cfg,
             self.clock.clone(),
             self.procs.clone(),
@@ -119,7 +155,28 @@ impl Rig {
                 }
             }),
         );
+        h.store = self.store.clone();
+        if self.in_memory {
+            // There is no folder to ask the OS about (on Windows that is a path resolve and a drive query per agent).
+            h.fs_kind = Arc::new(|_| FsKind::Local);
+        }
         Agent { h, said }
+    }
+
+    /// The text of a file of the lock folder (empty when there is none).
+    fn text(&self, name: &str) -> String {
+        self.store
+            .read_to_string(&self.root().join(name))
+            .unwrap_or_default()
+    }
+
+    /// The names of the files directly in the lock folder.
+    fn names(&self) -> Vec<String> {
+        self.store
+            .list(self.root())
+            .iter()
+            .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .collect()
     }
 
     /// The info record of slot 1: there while a holder holds the slot, gone after a clean release.
@@ -129,42 +186,35 @@ impl Rig {
 
     /// How many slots with this file name prefix (`throttle-slot`, `throttle-cheap`, `throttle-`) have a holder's record now.
     pub fn held(&self, prefix: &str) -> usize {
-        std::fs::read_dir(self.root())
-            .map(|r| {
-                r.filter_map(Result::ok)
-                    .map(|e| e.file_name().to_string_lossy().into_owned())
-                    .filter(|n| n.starts_with(prefix) && n.ends_with(".info"))
-                    .count()
-            })
-            .unwrap_or(0)
+        self.names()
+            .iter()
+            .filter(|n| n.starts_with(prefix) && n.ends_with(".info"))
+            .count()
     }
 
     pub fn breaks_log(&self) -> String {
-        std::fs::read_to_string(self.root().join("pitcrew-lock-breaks.log")).unwrap_or_default()
+        self.text("pitcrew-lock-breaks.log")
     }
 
     pub fn activity_log(&self) -> String {
-        std::fs::read_to_string(self.root().join("pitcrew-lock-activity.log")).unwrap_or_default()
+        self.text("pitcrew-lock-activity.log")
     }
 
     /// Entries of the root whose name starts with `prefix`.
     pub fn count(&self, prefix: &str) -> usize {
-        std::fs::read_dir(self.root())
-            .map(|r| {
-                r.filter_map(Result::ok)
-                    .filter(|e| e.file_name().to_string_lossy().starts_with(prefix))
-                    .count()
-            })
-            .unwrap_or(0)
+        self.names()
+            .iter()
+            .filter(|n| n.starts_with(prefix))
+            .count()
     }
 
     /// Makes slot 1 held by "somebody else" with this info record: the kernel lock is taken here and kept while the returned handle lives.
-    pub fn plant_holder(&self, owner: &str) -> paddock_throttle::slotfile::Held {
+    pub fn plant_holder(&self, owner: &str) -> Box<dyn SlotLock> {
         self.plant_slot(1, owner)
     }
 
     /// The same for slot `n` (1-based).
-    pub fn plant_slot(&self, n: u32, owner: &str) -> paddock_throttle::slotfile::Held {
+    pub fn plant_slot(&self, n: u32, owner: &str) -> Box<dyn SlotLock> {
         self.clone_paths().plant_slot(n, owner)
     }
 
@@ -172,12 +222,12 @@ impl Rig {
     pub fn clone_paths(&self) -> Planter {
         Planter {
             root: self.root().to_path_buf(),
+            store: self.store.clone(),
         }
     }
 
     pub fn owner_line(&self, n: usize) -> String {
-        std::fs::read_to_string(self.lock_dir())
-            .unwrap_or_default()
+        self.text("throttle-slot1.info")
             .lines()
             .nth(n)
             .unwrap_or("")

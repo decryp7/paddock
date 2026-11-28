@@ -4501,6 +4501,26 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   fails, if the ban is removed or stops resolving the path. Callers checked across `crates/`, `apps/` and `tools/`: only `paddock-proc` itself
   (`usage.rs`, `tests/it/orphan.rs`) implements or calls the trait; Debrief's, Dyno's and Pitcrew's `ProcessSource` are their own ports.
 
+## Three FLAKY tests of runs 9225, 9237 and 9238: identity read after the event, a limit over setup, a handle that keeps a process readable (2026-11-27, test/proc-state-waits-flakes-v2)
+- **What happened.** (1) `guardian::unix::tests::an_owner_killed_the_moment_its_guarded_spawn_returns_leaves_no_child` was FLAKY on macOS (9225, 9238):
+  "children []" in 0.03 s. The owner printed the child's bare pid and the test turned it into a `ProcessId` after the guardian had already ended
+  the child, so `ProcessId::of` found nothing. (2) `session::tests::a_child_that_does_not_answer_is_ended_at_the_deadline` was FLAKY on Windows
+  (9238): the 300 ms read limit also bounded the warm-up, and a slow start of a test binary met it. (3) `stable_workspace::tests::a_hung_phase_...`
+  failed both tries on Linux (9237): the slot-folder phase does real work on disk and shared the hang's 1 s limit.
+- **First hypotheses and what refuted them.** The owner dies before it prints: `println!` flushes per line and a pipe keeps what was written. The
+  guardian leaves the child: the retry passes and child and folder are gone. A reused pid: no start time was read. For (2) the quiet read ending
+  early: the panic is at the warm-up unwrap. For (3) the hang fake failing: the error line named the earlier phase.
+- **Confirmed by** a run with the cause forced and a run without it: reading the owner's report only after the guardian finished fails 1 of 1 on
+  the old reader and passes 300 of 300 (20 CPU burners, macOS) with the identity printed by the owner; the old hung-phase shape with a 0 s limit
+  fails with the CI message and the new shape passes 100 of 100. (2) has no macOS reproduction; its evidence is the trial's Windows leg.
+- **Two sub-cases of the class** (ADR 0124: a test reads live process state at one instant, after the event that can change it). (a) The target is
+  named late: a pid looked up after the code under test acted; the identity must come from the holder while it lives (the owner prints pid and start
+  time). (b) On Windows an ended process stays readable, and its state is `Unknown`, never `Exited`, while any handle to it is open (the test's own
+  `Child` included): trial 9253's statewait test waited its 40 s bound until the handle was dropped.
+- **Fix.** The three test shapes above, and a clock mark on every phase of the hung-phase run (ADR 0103). The mechanism that makes (a), (b) and the
+  limit-over-setup case impossible is proposed on `test/proc-identity-ban`: a Clippy ban on `ProcessId::of` in test code, a `wait_ended` that drops
+  the handle first, and the existing `no-clock-mark` check extended to every phase. Open until it lands.
+
 ## Per-member trials on a moving train cost more than they proved; one trial of the tip does (2026-11-27, docs/batched-member-trials, user decision)
 - **What happened.** On train y each member's own CI trial ran on a train that kept moving: the trials went red on other members' defects, proved
   little about the member, and took about 30 minutes each. Train z (2026-11-27) merged 8 members in about 40 minutes with the fast static rows per
@@ -4521,6 +4541,38 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   the files' current paths, so a rewritten entry is not growth. C135 and C104 pass a `rekey`; C53's liveness baseline already followed a move by hash
   (`moved`, not growth). C171 reads `git diff -M`, and its waiver may sit above the statement that holds the literal. A moved file's changed content is
   judged as usual: a new offending line still fails, and a new entry is still growth.
+
+## A test that starts the push gate takes its locks in its own state folder (2026-11-28, fix/prepush-test-hang, ER-14, ER-51)
+- **What happened.** `pre_push::tree_everything_that_runs_green_is_exit_0` timed out at 900 s with almost no CPU in a local member gate (train aa member 6)
+  and passed in 8.5 s on the retry. The test starts the real `./dev check --pre-push` in the repository's own tree, and the run keeps its state (logs,
+  step history, one lock per build folder) in `<git common dir>/paddock-pre-push`: the folder every worktree of the repository shares. Its clippy row
+  took the build-folder lock of `<worktree>/crates/target`, the same key the member gate's own clippy row holds for the whole step, so the test waited
+  for the real gate (a live holder inside its row cap is progress, so the wait is bounded only by the 30 min stall limit).
+- **Evidence.** Holding that lock from another process made the test run 237 s instead of 14 s and end when the holder let go; the new test below was red
+  before the fix. With the state folder given by the test, the same held lock leaves the test at about 10 s.
+- **Fix (ER-44).** `PADDOCK_PREPUSH_STATE` names the state folder of a run (test-only in the settings register); `dev_heavy` in
+  `tools/paddock-dev/tests/it/pre_push.rs` gives every run one under the test's own folder, which fixes all the `tree_` tests that run a gate row at once.
+  `tree_a_run_takes_its_build_folder_lock_in_the_state_folder_it_was_given` fails if the variable is ignored.
+- **The class (ER-21), closed in the same change.** Tool state under the git common dir (`<common>/paddock-pre-push`, `<common>/paddock/waits`) is
+  shared by every worktree. Each such folder has a test-only `*_STATE` row in the settings register (`PADDOCK_PREPUSH_STATE`, read by `pre_push::state_dir`, which
+  the test cache and the slow-row records use too; `PADDOCK_WAIT_STATE`, read by `wait_lock::dir_for`), and `paddock_testkit::process::STATE_FOLDERS` makes every
+  `TestCommand` set all of them inside its private folder. `tests/it/state_folders.rs` fails when the register declares a `*_STATE` setting the harness does not
+  set (shown red by dropping one). The owner map, the hook copies and the repository exclude file also live in the common dir, but only worktree, hook and disk
+  commands touch them and their tests run in repositories they make. No test started `ci test-cache` or `landing-held` in the checkout.
+
+## A held-back count with no reason hid a timed-out store lookup (2026-11-28, fix/test-cache-reasons, ER-27)
+- **What happened.** Train aa's run 9329 reused 56 of 61 Linux packages in the shadow report and its landing run 9335 reused 0, on a tree whose
+  `crates/` differed only in `paddock-throttle`. The record steps printed `recorded 0 packages (61 in the log; 14 held back: a trusted record, or no
+  definite answer, ...)` and nothing more. The cause was in two places only: the plan job's one `::notice::` (`reuse is off for Linux-X64 crates: curl:
+  (28) Operation timed out after 5002 milliseconds`, the plan step took 46 s against 3 s in 9329) and, in the record step, nowhere (it printed no
+  shadow line and no notice when its own lookup failed). One request out of 61 timing out on the RustFS store turns the whole call off (ADR 0116 §5), so
+  every package ran and none was replaced. macOS in 9335 was fine (50 matched, 50 held back because a trusted record exists, which is the write-once rule).
+  The `61 in the log` was the candidate count, not what the log held.
+- **Fix.** `test_cache::reasons::Tally` counts the decisions of a lookup by reason; the plan (per class, workspace and filter), a local lookup and the
+  record step print `reused R of T; ran because: no record K, blind B, ... reuse off F (cause)`, the record line says `recorded N packages of T
+  candidates (P passed here; not in this leg's partition ...: Q; failed or not clean: F); held back M: A already trusted, U undecided, B blind or never
+  cached, S store lookup failed (cause)`, and a record step whose lookup failed prints its cause as a notice (and still no shadow line: nothing was
+  measured, ER-33). A count in a log line always carries its reasons.
 
 ## A wait ended on a 401 its own token had not earned (2026-11-28, fix/ci-wait-token, ER-28)
 - **What happened.** On 2026-11-27/28 five `./dev wait --ci-run` waiters (runs 9284, 9285, 9286, 9320, 9321) ended after five failed looks with
