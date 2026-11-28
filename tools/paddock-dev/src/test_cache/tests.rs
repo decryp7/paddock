@@ -2027,43 +2027,58 @@ fn the_s3_write_retries_a_timed_out_put_once_and_loses_only_the_record_that_stil
     let is_bad = |b: &Block| b.0.contains(&slug);
     // The retry answers: one try for four, one more for the timed-out one alone, all four stored.
     let mut calls: Vec<usize> = Vec::new();
-    let got = s3.put_with(&recs, &mut |bs: &[Block]| {
-        calls.push(bs.len());
-        let first = calls.len() == 1;
-        Ok((
-            bs.iter()
-                .map(|b| (if is_bad(b) && first { 0 } else { 200 }, b.1.display().to_string()))
-                .collect(),
-            Some("curl failed: curl: (28) Operation timed out after 5015 milliseconds".to_string()),
-        ))
-    });
+    let got = s3.put_with(
+        &recs,
+        &mut |bs: &[Block]| {
+            calls.push(bs.len());
+            let first = calls.len() == 1;
+            Ok((
+                bs.iter()
+                    .map(|b| (if is_bad(b) && first { 0 } else { 200 }, b.1.display().to_string()))
+                    .collect(),
+                Some("curl failed: curl: (28) Operation timed out after 5015 milliseconds".to_string()),
+            ))
+        },
+        &[std::time::Duration::ZERO],
+        &|_| {},
+    );
     assert_eq!(calls, [4, 1]);
     assert!(got.iter().all(|r| r.is_ok()), "{got:?}");
     // It never answers: three are stored, the fourth is lost with its cause, after one retry only.
     let mut calls = 0;
-    let got = s3.put_with(&recs, &mut |bs: &[Block]| {
-        calls += 1;
-        Ok((
-            bs.iter()
-                .map(|b| (if is_bad(b) { 0 } else { 200 }, b.1.display().to_string()))
-                .collect(),
-            Some("curl failed: curl: (28) Operation timed out after 5015 milliseconds".to_string()),
-        ))
-    });
+    let got = s3.put_with(
+        &recs,
+        &mut |bs: &[Block]| {
+            calls += 1;
+            Ok((
+                bs.iter()
+                    .map(|b| (if is_bad(b) { 0 } else { 200 }, b.1.display().to_string()))
+                    .collect(),
+                Some("curl failed: curl: (28) Operation timed out after 5015 milliseconds".to_string()),
+            ))
+        },
+        &[std::time::Duration::ZERO],
+        &|_| {},
+    );
     assert_eq!(calls, 2);
     assert_eq!(got.iter().filter(|r| r.is_ok()).count(), 3, "{got:?}");
     assert!(matches!(&got[1], Err(e) if e.0.contains("(28)")), "{got:?}");
     // A refusal is that record's error and is not retried.
     let mut calls = 0;
-    let got = s3.put_with(&recs, &mut |bs: &[Block]| {
-        calls += 1;
-        Ok((
-            bs.iter()
-                .map(|b| (if is_bad(b) { 403 } else { 200 }, b.1.display().to_string()))
-                .collect(),
-            None,
-        ))
-    });
+    let got = s3.put_with(
+        &recs,
+        &mut |bs: &[Block]| {
+            calls += 1;
+            Ok((
+                bs.iter()
+                    .map(|b| (if is_bad(b) { 403 } else { 200 }, b.1.display().to_string()))
+                    .collect(),
+                None,
+            ))
+        },
+        &[std::time::Duration::ZERO],
+        &|_| {},
+    );
     assert_eq!(calls, 1);
     assert!(matches!(&got[1], Err(e) if e.0.contains("403")), "{got:?}");
     assert_eq!(got.iter().filter(|r| r.is_ok()).count(), 3);
@@ -2121,4 +2136,58 @@ fn the_probe_reads_curls_lines_and_prints_one_line_per_scenario() {
         encode_key("v2/selfcheck/t/esc ape\\back.json"),
         "v2/selfcheck/t/esc%20ape%5Cback.json"
     );
+}
+
+/// RustFS answers 503 (SlowDown) to PUTs in flight together: a write that got 503 is tried again after a wait, up to the schedule's three
+/// retries and only for the requests that still failed; a record that answers on the way is stored and one that never does is lost with the 503.
+#[test]
+fn the_s3_write_backs_off_and_retries_a_503_and_loses_only_the_record_that_never_answers() {
+    use super::s3::{Block, S3Store, WRITE_RETRY_WAITS};
+    let d = tempfile::tempdir().unwrap();
+    let env: HashMap<String, String> = [
+        ("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE"),
+        ("AWS_SECRET_ACCESS_KEY", "s3cr3t-value"),
+        ("PADDOCK_SCCACHE_ENV_FILE", d.path().join("absent.env").to_str().unwrap()),
+        ("PADDOCK_SCCACHE_S3_ENDPOINT", "127.0.0.1:9"),
+    ]
+    .iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect();
+    let s3 = S3Store::from_env(&env, d.path().join("scratch")).unwrap();
+    let class = RunnerClass::here();
+    let recs: Vec<Record> = ["a", "b", "c"].iter().map(|n| rec(&cand(n, "h"), &class, NOW)).collect();
+    let slug = |i: usize| recs[i].target.replace(':', "_");
+    // b answers 503 on the first two tries, then 200; c never answers anything but 503.
+    let (mut round, mut sizes) = (0, Vec::new());
+    let waits = std::cell::RefCell::new(Vec::new());
+    let got = s3.put_with(
+        &recs,
+        &mut |bs: &[Block]| {
+            round += 1;
+            sizes.push(bs.len());
+            Ok((
+                bs.iter()
+                    .map(|b| {
+                        let code = if b.0.contains(&slug(2)) || (b.0.contains(&slug(1)) && round <= 2) {
+                            503
+                        } else {
+                            200
+                        };
+                        (code, b.1.display().to_string())
+                    })
+                    .collect(),
+                None,
+            ))
+        },
+        &WRITE_RETRY_WAITS,
+        &|w| waits.borrow_mut().push(w),
+    );
+    assert_eq!(
+        sizes,
+        [3, 2, 2, 1],
+        "all three, then b and c, then b (answers) and c again, then c alone"
+    );
+    assert_eq!(*waits.borrow(), WRITE_RETRY_WAITS, "a growing wait before each retry");
+    assert!(got[0].is_ok() && got[1].is_ok(), "{got:?}");
+    assert!(matches!(&got[2], Err(e) if e.0.contains("503")), "{got:?}");
 }
