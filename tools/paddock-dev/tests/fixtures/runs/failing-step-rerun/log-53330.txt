@@ -1,0 +1,25 @@
+2026-11-27T15:20:43.8994820Z Job: crate
+2026-11-27T15:21:08.7957160Z [32;1m    Starting[0m [1m4731[0m tests across [1m98[0m binaries ([1m96[0m tests [33;1mskipped[0m)
+2026-11-27T15:23:31.2058800Z [32;1m     Summary[0m [ 142.410s] [1m4731[0m tests run: [1m4731[0m [32;1mpassed[0m, [1m96[0m [33;1mskipped[0m
+2026-11-27T15:23:31.8756230Z [32;1m    Starting[0m [1m149[0m tests across [1m4[0m binaries
+2026-11-27T15:23:35.6898350Z [32;1m     Summary[0m [   3.814s] [1m149[0m tests run: [1m149[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-27T15:23:36.5604570Z [32;1m    Starting[0m [1m199[0m tests across [1m7[0m binaries
+2026-11-27T15:23:38.6467670Z [32;1m     Summary[0m [   2.086s] [1m199[0m tests run: [1m199[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-27T15:23:39.1538380Z [32;1m    Starting[0m [1m119[0m tests across [1m2[0m binaries
+2026-11-27T15:23:41.0935730Z [32;1m     Summary[0m [   1.940s] [1m119[0m tests run: [1m119[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-27T15:23:41.5489540Z [32;1m    Starting[0m [1m124[0m tests across [1m2[0m binaries
+2026-11-27T15:23:41.8873640Z [32;1m     Summary[0m [   0.338s] [1m124[0m tests run: [1m124[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-27T15:23:42.6710770Z Success - Post ./.gitea/actions/job-isolation
+2026-11-27T15:23:42.6713980Z Success - Post ./.gitea/actions/sccache-stats
+2026-11-27T15:23:42.6718430Z Success - Post Chrome for Testing (macOS, Windows)
+2026-11-27T15:23:42.6721750Z Success - Post ./.gitea/actions/host-tools
+2026-11-27T15:23:42.6727620Z Success - Post ./dev tool cache
+2026-11-27T15:23:42.6729500Z Success - Post ./.gitea/actions/setup-rust
+2026-11-27T15:23:42.6732560Z Success - Post ./.gitea/actions/build-folder
+2026-11-27T15:23:42.6735300Z Success - Post ./.gitea/actions/kept-clone
+2026-11-27T15:23:42.6737610Z Success - Post ./.gitea/actions/job-isolation
+2026-11-27T15:23:42.6750970Z Success - Post ./dev tool cache
+2026-11-27T15:23:42.6756970Z Success - Post ./.gitea/actions/build-jobs
+2026-11-27T15:23:43.1397140Z Success - Post actions/checkout@v4
+2026-11-27T15:23:43.1407910Z Cleaning up container for job crate (macos-latest)
+2026-11-27T15:23:43.1605250Z Job succeeded

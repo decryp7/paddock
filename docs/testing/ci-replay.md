@@ -11,7 +11,7 @@ test feeds them invented runs. A replay feeds them what the server really answer
 - `./dev ci record-fixture <run>... --name <shape>` records finished runs into `tools/paddock-dev/tests/fixtures/runs/<shape>/`: each
   run (`run-<id>.json`), its jobs (`jobs-<id>.json`, first page), the trimmed log of every job that ran (`log-<job>.txt`: the plan job's
   `plan scope:` and `plan verdict:` lines, the nextest and Playwright result lines), each earlier attempt of a rerun
-  (`attempt-<run>-<n>.json`), the parents of a trial's merge commit (`commit-<sha>.json`) and the list (`runs-1.json`). Names, e-mail
+  (`attempt-<run>-<n>.json`; the log of each failed job of an attempt too, which the verdict reads to tell a lost report from a failure, user decision 137), the parents of a trial's merge commit (`commit-<sha>.json`) and the list (`runs-1.json`). Names, e-mail
   addresses, avatars, runner names and home folders are replaced on capture (conformance C110). It is read-only on the server and needs
   `GITEA_TOKEN`. `--out <dir>` records elsewhere.
 - `tools/paddock-dev/src/ci_runs/replay.rs` serves a shape as the server (`testutil::Fake`) and asks each reader: the verdict on the
@@ -55,5 +55,7 @@ expected map lists the e2e legs a train skips), so the reader refuses it as "dec
 | `green-full-v3` | 9180 | a full green train run, v3, clean shadow | green |
 | `push-reused-v3` | 9180, 9181 | the push over it | skip, reusing 9180 |
 | `member-trial-v3` | 9179 | a member's trial, v3, narrowed | green: its own scope line ran |
+| `lost-report-rerun` | 9388 | train ad: the `ui` job's first attempt failed with every step success (the runner's report was lost), rerun, the run ended success | landing green with one `report lost` notice (decision 137); the full-run bases say landing run, as before |
+| `failing-step-rerun` | 9280 | a trial whose `crates` job failed on attempt 1 with failing steps (`Orphan guardian as a user`, `Dependency policy`), rerun green | trial red: green only after a retry, the first attempt had failing steps; no full run |
 | `plan-record-artifact` | 9272 | a trial's plan job whose v4 upload `plan-record` the REST API lists; the zip download answers 302 to `/zip/raw` | read back to the run's record (`ARTIFACT_SHAPES`) |
 | `flaky-noncargo-reach` | 9329 | train aa before its fix: a FLAKY paddock-throttle test while ci.yml's plan job and upload steps made the plan reach crates | landing green with one fix item (`FixItems`, nothing touched); the FLAKY grade on the planner's `packageGraded` reach is the test `a_flaky_test_on_train_aas_real_plan...`; the recorded plan is `plan-9329.json` |

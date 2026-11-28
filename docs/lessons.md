@@ -4648,3 +4648,13 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   `planner-golden`, `ci-host-golden`) and the push gate's `goldens` row runs `./dev gen check --only <the goldens the change reaches>`, planned from the
   same registry and model (no second mapping, ER-22); a stale golden prints its entry's bless command. A test fails when a file holding a golden test is
   marked by no golden entry, with controls (ER-33). Cost: docs/benchmarks.md, "the golden row in the push gate".
+
+## A lost final report made a green run read as red (2026-11-28, fix/verdict-proven-lost-report, run 9388)
+- **What happened.** Train ad's run 9388 ended success, but its `ui` job (54599) was marked failed on attempt 1 although all 18 of its steps ended `success`
+  and its log ran to the container clean-up: the runner's final report was lost. The job was rerun (attempt 2, green) and the verdict and landing readers
+  refused the run, because any failed job of an earlier attempt made it red (ER-15's "in-place retry").
+- **Fix (user decision 137, 2026-11-28).** `verdict::read_earlier` accepts an earlier attempt's failed job only when that attempt proves a lost report: its
+  own step records list steps and all ended `success`, and its own log has no failure line and ends with the clean-up. It is read, never assumed. One
+  `::notice::` line names each accepted job; a failing, cancelled, skipped or missing step, a failure line, a log that stops early, or an unreadable
+  log (not measured, never a pass: ER-33) still blocks. Replay shapes `lost-report-rerun` (9388) and `failing-step-rerun` (9280). Gitea's raw log has no
+  per-step result line for a main step (only `Success - Post ...`), so the step results come from the job's step records.

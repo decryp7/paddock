@@ -1,0 +1,6 @@
+2026-11-27T15:28:52.5155972Z Job: tools
+2026-11-27T15:33:59.9798144Z Success - Post ./.gitea/actions/sccache-stats
+2026-11-27T15:34:00.0015421Z Success - Post ./dev tool cache
+2026-11-27T15:34:00.0183138Z Success - Post ./.gitea/actions/setup-rust
+2026-11-27T15:34:00.1803082Z Success - Post actions/checkout@v4
+2026-11-27T15:34:00.8325342Z Cleaning up container for job tools and shared scripts

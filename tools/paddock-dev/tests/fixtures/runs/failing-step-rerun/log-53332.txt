@@ -1,0 +1,5 @@
+2026-11-27T15:30:19.8300672Z Job: gitleaks
+2026-11-27T15:30:49.1223347Z Success - Post ./.gitea/actions/gitleaks
+2026-11-27T15:30:49.3435471Z Success - Post actions/checkout@v4
+2026-11-27T15:30:49.3535848Z Cleaning up container for job gitleaks (secret scan)
+2026-11-27T15:30:50.2007809Z Job succeeded
