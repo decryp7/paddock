@@ -2276,7 +2276,7 @@ mod tests {
     #[test]
     fn every_lockfile_of_the_repository_has_a_cc_inside_the_documented_range() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let listed = crate::plan_repo::git_text(&root, &["ls-files", "*Cargo.lock"]).expect("git lists the lockfiles");
+        let listed = crate::git::git_text(&root, &["ls-files", "*Cargo.lock"]).expect("git lists the lockfiles");
         let locks: Vec<&str> = listed.lines().collect();
         assert!(locks.len() > 5, "the lockfiles were not found: {locks:?}");
         for l in locks {

@@ -1,8 +1,8 @@
-//! Targets, runner classes and the key (ADR 0116 §1, §2). The key is the one key function of local reuse ([`crate::pre_push::reuse::digest`],
+//! Targets, runner classes and the key (ADR 0116 §1, §2). The key is the one key function of local reuse ([`crate::input_hash::digest`],
 //! ADR 0042 §5, rule 55) over the graph's per-node input hash, plus what the cache adds: the schema, the epoch, the runner class, the
 //! nextest profile.
 
-use crate::pre_push::reuse::digest;
+use crate::input_hash::digest;
 
 /// Bumped when the key or the record changes: an older record is then never read.
 pub const SCHEMA: u32 = 2;

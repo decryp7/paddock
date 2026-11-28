@@ -488,12 +488,7 @@ fn tree_the_paddock_dev_host_legs_leave_out_the_os_independent_areas_and_linux_r
         "repo_model::replay::",
     ];
     // Code that holds OS behaviour itself, or that only a Mac runs, stays where it is.
-    let os_specific = [
-        "merge_check::git::",
-        "ci_runs::dispatch_guards::",
-        "local_sccache::",
-        "pre_push::exec::",
-    ];
+    let os_specific = ["git::", "ci_runs::dispatch_guards::", "local_sccache::", "pre_push::exec::"];
     for os in ["windows-latest", "macos-latest"] {
         let on = h.module_prefixes(os);
         for m in independent {

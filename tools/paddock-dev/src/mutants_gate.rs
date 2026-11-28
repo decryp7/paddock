@@ -655,9 +655,9 @@ pub fn parse_shard(text: &str) -> Result<(u32, u32), String> {
 /// `mutants gate --base <rev> [--shard k/n]`.
 pub fn command_gate(root: Option<PathBuf>, base: &str, shard: Option<&str>) -> Result<Report, CliError> {
     let shard = shard.map(parse_shard).transpose().map_err(CliError::usage)?;
-    let root = crate::gates::command::repo_root(root.as_deref())?;
+    let root = crate::repo_root::repo_root(root.as_deref())?;
     let started = std::time::Instant::now();
-    let head = crate::plan_repo::git_text(&root, &["rev-parse", "HEAD"])
+    let head = crate::git::git_text(&root, &["rev-parse", "HEAD"])
         .map(|t| t.trim().to_string())
         .filter(|t| !t.is_empty())
         .ok_or_else(|| CliError::failure(format!("{} has no HEAD commit", root.display())))?;

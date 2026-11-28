@@ -404,7 +404,7 @@ impl Base for GitBase {
 }
 
 fn root_of(given: Option<PathBuf>) -> Result<PathBuf, CliError> {
-    crate::gates::command::repo_root(given.as_deref())
+    crate::repo_root::repo_root(given.as_deref())
 }
 
 /// `audit nightly` and `audit compare`.

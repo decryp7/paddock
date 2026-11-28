@@ -2647,7 +2647,7 @@ fn the_planner_child_runs_in_the_trusted_checkout_without_the_token() {
 #[test]
 fn the_merge_checks_git_children_have_hooks_off_and_no_token() {
     let root = tempfile::tempdir().unwrap();
-    let g = crate::merge_check::git::Git::new(root.path());
+    let g = crate::git::Git::new(root.path());
     let parent: Vec<String> = ["GITEA_TOKEN", "QUEUE_BOT_TOKEN", "SOME_SECRET"]
         .iter()
         .map(|s| s.to_string())
@@ -2904,7 +2904,7 @@ fn adapter_root(register: Option<&str>) -> tempfile::TempDir {
     .unwrap();
     if let Some(text) = register {
         std::fs::create_dir_all(tmp.path().join("docs")).unwrap();
-        std::fs::write(tmp.path().join(crate::ci_runs::dispatch_guards::REGISTER), text).unwrap();
+        std::fs::write(tmp.path().join(crate::registers::DISPATCH_GUARDS), text).unwrap();
     }
     tmp
 }

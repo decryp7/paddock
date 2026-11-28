@@ -1,6 +1,6 @@
 //! The test-result cache (ADR 0116, accepted 2026-11-25): a test target whose inputs did not change reuses its pass.
 //!
-//! One definition of reuse (ER-22, rule 55): the key is [`crate::pre_push::reuse::digest`] over the repository graph's per-node input
+//! One definition of reuse (ER-22, rule 55): the key is [`crate::input_hash::digest`] over the repository graph's per-node input
 //! hash ([`crate::repo_model::hash`], ADR 0117), the local store sits beside the gate rows' records in the git common dir, and the
 //! per-target pass is read with the one nextest reader ([`crate::nextest_log`]). What the cache adds is in the parts below:
 //! - [`config`]: `docs/test-cache.toml` (epoch, age rule, never-cached list, the shadow switch);

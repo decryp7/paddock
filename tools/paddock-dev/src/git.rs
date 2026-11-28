@@ -1,10 +1,11 @@
-//! The git reader of the merge check: every call is bounded, and a failure names the command and git's own words (ER-27), so a
-//! caller can turn it into "not measured" (ADR 0089) instead of an empty answer.
+//! Running git for the rest of paddock-dev (core layer). [`Git`] is the bounded reader of the merge check: a failure names the
+//! command and git's own words (ER-27), so a caller can turn it into "not measured" (ADR 0089) instead of an empty answer;
+//! [`git_text`] is the planner's lighter one (no answer on any failure) and [`state_dir`] finds the folder of a checkout's gate logs.
 
 use paddock_proc::{Limits, run_bounded};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 const TIMEOUT: Duration = Duration::from_secs(120);
@@ -358,6 +359,22 @@ fn git_command(root: &Path, args: &[&str], parent: &[String]) -> std::process::C
         .args(args);
     crate::child_env::scrub(&mut cmd, parent);
     cmd
+}
+
+/// Runs `git -C root args`, returning standard output when git succeeded.
+pub fn git_text(root: &Path, args: &[&str]) -> Option<String> {
+    let mut cmd = crate::git_env::git();
+    cmd.arg("-C").arg(root).args(args);
+    let out = run_bounded(cmd, Limits::new(TIMEOUT).max_output(MAX_OUTPUT)).ok()?;
+    out.success().then(|| out.stdout_text())
+}
+
+/// The folder for this checkout's gate logs and override log: `<git common dir>/paddock-pre-push`.
+pub fn state_dir(root: &Path) -> PathBuf {
+    git_text(root, &["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .map(|t| PathBuf::from(t.trim()))
+        .unwrap_or_else(|| root.join(".git"))
+        .join("paddock-pre-push")
 }
 
 /// The first nine characters of a revision name or hash, for messages.

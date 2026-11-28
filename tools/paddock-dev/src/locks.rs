@@ -294,7 +294,7 @@ pub fn sync(root: Option<PathBuf>) -> Result<Report, CliError> {
 }
 
 fn root_of(given: Option<PathBuf>) -> Result<PathBuf, CliError> {
-    crate::gates::command::repo_root(given.as_deref())
+    crate::repo_root::repo_root(given.as_deref())
 }
 
 /// [`sync`] with the runner and root given.

@@ -20,7 +20,7 @@
 //! `--no-trial "<reason>"` skips it and logs the reason, like `--old-base-anyway`.
 
 use super::gates::GateRun;
-use super::git::{Git, short};
+use crate::git::{Git, short};
 use crate::queue::real::{Child, GitTrain};
 use paddock_cli::Exit;
 use paddock_proc::{Limits, command, run_bounded};

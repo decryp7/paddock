@@ -10,7 +10,7 @@ use crate::heavy_tool::throttle_command_for;
 use crate::throttle::{QUEUE_STALL, on_path};
 use super::gates::{self, Gate, LinuxTarget};
 use super::linux_inputs::{ImageProbe, PROBE_NEXT, WsCrates, ci_version, image_probe, left_out};
-use super::outcome::subject_of;
+use crate::subject::subject_of;
 use super::{render, repo_root};
 use crate::plan::{Request, plan_with_graph};
 use paddock_cli::{CliError, Report};

@@ -48,8 +48,9 @@
 
 use super::exec::Row;
 use super::gates::Gate;
+use crate::git::git_text;
 use crate::input_hash::is_hashed_var;
-use crate::plan_repo::git_text;
+use crate::input_hash::{digest, hex};
 use paddock_repo_graph::Graph;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -243,21 +244,6 @@ pub fn cargo_inputs(graph: &Graph, workspaces: &[String]) -> Result<BTreeSet<Str
         todo.extend(node.deps.iter().filter(|d| graph.contains(d)).cloned());
     }
     Ok(out)
-}
-
-/// SHA-256 over length-prefixed fields, as lower-case hex: two field lists differ in the key whenever they differ in any field or in
-/// where the fields split.
-pub fn digest(fields: &[String]) -> String {
-    let mut h = Sha256::new();
-    for f in fields {
-        h.update((f.len() as u64).to_le_bytes());
-        h.update(f.as_bytes());
-    }
-    hex(&h.finalize())
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// When and in which run a reused row was green.

@@ -11,10 +11,8 @@
 //!   integrator's by hand, records here with `./dev ci fix-items --workflow <file> --sha <sha>` on the landed commit.
 
 use super::green::FixItem;
+use crate::registers::LESSONS;
 use std::path::Path;
-
-/// The fix-item home: the lessons file of the repository.
-pub const LESSONS: &str = "docs/lessons.md";
 
 /// One line a comment gives for each item: workflow, run, job (with its id), test and the job's page.
 pub fn lines(workflow: &str, run: u64, items: &[FixItem]) -> Vec<String> {

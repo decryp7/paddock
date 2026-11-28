@@ -436,7 +436,7 @@ pub fn annotation(f: &Finding, mode: Mode) -> String {
 
 /// `locks guard [--write]`.
 pub fn command_guard(root: Option<PathBuf>, write: bool) -> Result<Report, CliError> {
-    let root = crate::gates::command::repo_root(root.as_deref())?;
+    let root = crate::repo_root::repo_root(root.as_deref())?;
     run(&crate::locks::Real, &RealMetadata, &root, write, MODE)
 }
 

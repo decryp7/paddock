@@ -40,7 +40,7 @@ impl Scratch {
         s
     }
     fn git(&self, args: &[&str]) -> String {
-        crate::plan_repo::git_text(&self.root, args).unwrap_or_else(|| panic!("git {args:?}"))
+        crate::git::git_text(&self.root, args).unwrap_or_else(|| panic!("git {args:?}"))
     }
     fn write(&self, file: &str, text: &str) {
         let p = self.root.join(file);
@@ -550,12 +550,6 @@ fn a_record_is_read_only_for_its_own_key_row_and_verdict() {
 }
 
 #[test]
-fn the_key_depends_on_where_fields_split() {
-    assert_ne!(digest(&["ab".into(), "c".into()]), digest(&["a".into(), "bc".into()]));
-    assert_eq!(digest(&["a".into()]), digest(&["a".into()]));
-}
-
-#[test]
 fn the_green_time_is_rfc_3339_utc() {
     let g = Reused {
         at: 1_795_536_000,
@@ -614,7 +608,7 @@ impl Scratch {
 }
 
 fn git_in(root: &Path, args: &[&str]) -> String {
-    crate::plan_repo::git_text(root, args).unwrap_or_else(|| panic!("git {args:?} in {}", root.display()))
+    crate::git::git_text(root, args).unwrap_or_else(|| panic!("git {args:?} in {}", root.display()))
 }
 
 fn commit_in(root: &Path, file: &str, text: &str) {
@@ -690,7 +684,7 @@ fn a_conflict_resolution_or_a_train_fix_runs_the_rows_it_changes() {
     run(&[tests_row("app")], &ex, Some(&s.reuse_in(&d, "tool-1")));
     ex.take();
     assert!(
-        crate::plan_repo::git_text(&t, &["merge", "-q", "--no-ff", "-m", "merge d", "member-d"]).is_none(),
+        crate::git::git_text(&t, &["merge", "-q", "--no-ff", "-m", "merge d", "member-d"]).is_none(),
         "it conflicts"
     );
     commit_in(&t, "app/src/lib.rs", "pub fn a() {}\npub fn d() {}\n");

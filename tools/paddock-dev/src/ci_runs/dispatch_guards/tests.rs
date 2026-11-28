@@ -150,9 +150,9 @@ fn the_register_switches_a_guard_to_blocking_once_and_the_repositorys_starts_rep
         mode_of(Ok("[first_green]\n\"green-main\" = \"x\"\n"), Guard::GreenMain),
         Mode::ReportOnly(_)
     ));
-    let real = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(REGISTER)).unwrap();
+    let real = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(DISPATCH_GUARDS)).unwrap();
     for g in [Guard::FailedFirst, Guard::GreenMain] {
-        assert!(recorded(&real, g).is_ok(), "{REGISTER} reads");
+        assert!(recorded(&real, g).is_ok(), "{DISPATCH_GUARDS} reads");
     }
 }
 

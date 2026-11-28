@@ -40,7 +40,6 @@ pub(crate) mod diff;
 mod gates;
 mod generated;
 mod generator_step;
-pub(crate) mod git;
 mod hakari;
 mod hunks;
 mod lost_tests;
@@ -56,7 +55,7 @@ pub mod trailers;
 pub mod trial_dispatch;
 mod whole_file;
 
-use git::{AutoMerge, Git, short};
+use crate::git::{AutoMerge, Git, short};
 use paddock_cli::outcome::{Sha, TreeId};
 use paddock_cli::{CheckId, CliError, Exit, Outcome, Reason, Report, Subject, ToolVersion, UnixSeconds, Unmeasured, measure};
 use serde_json::json;
@@ -247,7 +246,7 @@ fn run(git: &Git, merge: &Merge) -> Result<Vec<Finding>, String> {
         if !git.has_commit(p)? {
             return Err(format!(
                 "the parent {} is not in this clone (a shallow clone? run `git fetch --unshallow`)",
-                git::short(p)
+                crate::git::short(p)
             ));
         }
     }
@@ -574,7 +573,7 @@ fn check(req: &Request) -> Result<Checked, CliError> {
         return Err(CliError::usage("--no-trial needs a reason.")
             .with_hint("Say why, for example --no-trial \"docs-only member, no job of its own to run\"."));
     }
-    let root = crate::gates::command::repo_root(req.root.as_deref())?;
+    let root = crate::repo_root::repo_root(req.root.as_deref())?;
     let git = Git::new(&root);
     let merge = resolve(&git, req)?;
     let analysis = analyze(&git, &merge);
