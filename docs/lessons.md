@@ -4623,5 +4623,6 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   (red: `Some(20ms)`), a frame written in pieces, and a browser-closed connection.
 - **Proof so far.** One Windows CI trial; one run cannot show a rate near 1 in 400, so the entry stays open: if `Closed` shows again, the new log line
   is the first thing to read.
-- **Copies (rule 55, `browser-driver`).** `apps/debrief/crates/chromium-driver/src/cdp.rs` has the same 20 ms poll and is not changed here (Debrief
-  1.2 is to adopt the canonical, `known-copies.toml`). Spotter's `cdp.rs` polls a non-blocking socket, so it has no receive timeout. The commit body names the Debrief copy.
+- **Copies (rule 55, `browser-driver`).** Debrief's `chromium-driver/src/cdp.rs` got the same fix in the same change (red: `Some(20ms)`). The fake
+  DevTools servers of `paddock-chromium` and Debrief poll a non-blocking socket after the handshake instead of a 10 ms receive timeout (red: the
+  `the_fake_waits_for_a_late_handshake_and_then_ticks` test expected no timeout and saw `Some(10ms)`). Spotter's `cdp.rs` already polled a non-blocking socket.
