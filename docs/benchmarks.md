@@ -86,7 +86,7 @@ uses it, results in
 
 ### 2026-11-28, the overlap-tests row in sync-member (feat/sync-member-overlap-tests)
 
-- **Commit:** this branch (41b29b1a1), base a3d3d98ee. Proposed: coordinator.
+- **Commit:** this branch (41b29b1a1), base a3d3d98ee. Rule 100 amendment accepted (user, 2026-11-28, in chat).
 - **Machine:** Mac mini, macOS 27.2, debug build through sccache, 1-minute load 12 to 15 (other agents).
 - **Command:** `./dev check --pre-push --priority train --only goldens,overlap-tests --overlap-since <fork> --base origin/main` on a real sync tip: `origin/fix/flaky-touched-grading` (80 commits behind main, 5 files of paddock-dev changed) with `origin/main` merged in (clean merge, 42 paddock-dev files changed on main); `merge sync-member origin/main` ran all seven rows on it and passed.
 - **Numbers:** the overlap was `paddock-dev` in workspace `tools/paddock-dev`: `overlap-tests tools/paddock-dev` 170.9 s run, 73.7 s queued (the `ci test-cache run` of that one package, shadow mode, so no pass was reused); `goldens` skipped (no golden input changed), 0 s. The rustfmt, Clippy and conformance rows of the same sync took the times of the existing static rows.
