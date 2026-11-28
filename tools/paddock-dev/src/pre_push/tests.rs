@@ -3537,6 +3537,32 @@ mod only_selection {
         assert_eq!(select_rows(rows(), &[]).unwrap().len(), 3, "no selector keeps every row");
     }
 
+    /// A docs-only sync tip plans no `clippy` row (nothing reaches a Cargo workspace): the bare kind `clippy` is a known per-workspace row, so
+    /// it becomes a skip with the reason and the other selected rows still run (train ac: it was "not measured" and the integrator
+    /// had to pass `--no-static`). A typo, a whole name of an unplanned workspace and an empty plan stay errors.
+    #[test]
+    fn a_known_row_kind_that_nothing_reaches_is_a_skip_with_a_reason_and_the_others_still_run() {
+        let got = select_rows(rows(), &["fmt".into(), "tests".into(), "overlap-tests".into()]).unwrap();
+        let ids: Vec<String> = got
+            .iter()
+            .map(|r| match r {
+                Planned::Skip { id, .. } => id.clone(),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(ids, ["fmt", "tests", "overlap-tests"]);
+        let reason = match &got[1] {
+            Planned::Skip { reason, .. } => reason.clone(),
+            _ => unreachable!(),
+        };
+        assert!(reason.contains("no `tests` row") && reason.contains("nothing"), "{reason}");
+        assert!(select_rows(rows(), &["clipy".into()]).is_err(), "a typo is still an error");
+        assert!(
+            select_rows(rows(), &["clippy nosuch".into()]).is_err(),
+            "a whole name that matches nothing is still an error"
+        );
+    }
+
     #[test]
     fn a_selection_that_matches_no_row_is_an_error_naming_it_and_the_valid_rows_never_an_empty_pass() {
         let e = select_rows(rows(), &["no such gate".into()]).unwrap_err();

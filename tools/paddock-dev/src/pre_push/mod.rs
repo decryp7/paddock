@@ -1241,7 +1241,7 @@ fn row_id(p: &gates::Planned) -> &str {
 }
 
 /// `--only`: keep the rows the selectors name (a whole row name such as `clippy crates`, or its first word without a trailing comma).
-/// No selector keeps every row. A selector that names no row is an error, whichever others do: it lists every such selector and the valid
+/// No selector keeps every row. A bare known row kind that nothing reaches is a skip with the reason; any other selector that names no row is an error, whichever others do: it lists every such selector and the valid
 /// row names, so a typo never turns into a smaller run that reads as "passed, safe to push" (ER-33).
 fn select_rows(planned: Vec<gates::Planned>, only: &[String]) -> Result<Vec<gates::Planned>, CliError> {
     if only.is_empty() {
@@ -1255,7 +1255,25 @@ fn select_rows(planned: Vec<gates::Planned>, only: &[String]) -> Result<Vec<gate
         let (full, first) = names(p);
         *w == full || *w == first
     };
-    let unmatched: Vec<&String> = only.iter().filter(|w| !planned.iter().any(|p| hit(w, p))).collect();
+    // A bare selector that names a known row kind (a fixed row or the first word of a per-workspace one) but matches no planned row is a
+    // row nothing reaches (a docs-only change plans no `clippy` row): a skip with the reason, never an error. A plan with no rows at
+    // all is a broken plan, and a typo or a whole name that matches nothing is still an error.
+    let kinds: Vec<String> = gates::ROW_SET
+        .iter()
+        .map(|s| s.to_string())
+        .chain(gates::PER_WORKSPACE_PREFIXES.iter().map(|p| p.trim().to_string()))
+        .collect();
+    let (unmatched, absent): (Vec<&String>, Vec<&String>) = only
+        .iter()
+        .filter(|w| !planned.iter().any(|p| hit(w, p)))
+        .partition(|w| planned.is_empty() || !kinds.contains(w));
+    let skips: Vec<gates::Planned> = absent
+        .iter()
+        .map(|w| gates::Planned::Skip {
+            id: (*w).clone(),
+            reason: format!("this change plans no `{w}` row: nothing it touches reaches one"),
+        })
+        .collect();
     if !unmatched.is_empty() {
         let mut valid: Vec<&str> = planned.iter().map(row_id).collect();
         valid.sort_unstable();
@@ -1269,7 +1287,9 @@ fn select_rows(planned: Vec<gates::Planned>, only: &[String]) -> Result<Vec<gate
             valid.join("; ")
         )));
     }
-    Ok(planned.into_iter().filter(|p| only.iter().any(|w| hit(w, p))).collect())
+    let mut kept: Vec<gates::Planned> = planned.into_iter().filter(|p| only.iter().any(|w| hit(w, p))).collect();
+    kept.extend(skips);
+    Ok(kept)
 }
 
 fn dry_run(planned: &[gates::Planned]) -> Report {
