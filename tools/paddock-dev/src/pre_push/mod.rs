@@ -43,6 +43,7 @@ pub mod gates;
 pub mod kept;
 pub mod known;
 pub mod outcome;
+pub mod overlap;
 pub mod reuse;
 pub mod row_timings;
 pub mod train_split;
@@ -121,6 +122,10 @@ pub struct PrePushArgs {
     /// Run every row even when an earlier green run with the same key is on record ([`reuse`]; `PADDOCK_NO_REUSE=1` is the same switch).
     #[arg(long)]
     pub no_reuse: bool,
+    /// Set by `./dev merge sync-member`: the commit the member forked from main. With `--base` the train, the `overlap-tests` row runs the
+    /// tests of the packages that both the member's change (`--base`..HEAD) and main's (this commit..`--base`) reach ([`overlap`]).
+    #[arg(long)]
+    pub overlap_since: Option<String>,
 }
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(120);
@@ -546,6 +551,24 @@ fn command_in(
         })
         .collect();
     facts.goldens = crate::generators::golden_due_in(&work, &history, &graph, &change.files);
+    facts.overlap = match (&args.overlap_since, &change.base) {
+        (None, _) => overlap::Overlap::NotAsked,
+        (Some(_), None) => overlap::Overlap::Unknown("the change has no base to measure main's side from".into()),
+        (Some(since), Some(base)) => {
+            let main_side = Request {
+                files: Vec::new(),
+                all: false,
+                explain: false,
+                root: None,
+                base: Some(since.clone()),
+                head: base.clone(),
+            };
+            match crate::plan::plan_on_graph(&work, &history, &main_side, &graph) {
+                Ok(main_plan) => overlap::of_plans(&plan, &main_plan),
+                Err(e) => overlap::Overlap::Unknown(format!("main's side ({since}..{base}) could not be planned: {e}")),
+            }
+        }
+    };
     let mut planned = gates::plan_gates(&plan, &change, &facts);
     planned = select_rows(planned, &args.only)?;
     planned = train_split::select(planned, args.set);
@@ -1580,6 +1603,7 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>, ex: &dyn
         nextest_config,
         reached: Default::default(),
         goldens: Ok(Vec::new()),
+        overlap: Default::default(),
     }
 }
 
