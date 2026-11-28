@@ -32,6 +32,14 @@
    "app:x",
    "crates"
   ],
+  "gradePackages": {
+   "apps/x/app/src-tauri": [
+    "x"
+   ],
+   "crates": [
+    "fx-b"
+   ]
+  },
   "why": {
    "app:x": [
     "cargo apps/x/app/src-tauri reaches crates/b"
