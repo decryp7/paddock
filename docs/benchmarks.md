@@ -3265,23 +3265,40 @@ the union of every merge's; `--heavy-generators` runs them per merge. Fast gener
 Not measured: the final gen check on a whole train (it runs what the per-merge steps ran before, once).
 
 
-## Mutation testing of the diff in the member gate (2026-11-27, feat/member-gate-mutants, base 7da64dedb)
+## Mutation testing of the diff: first on the Mac, then as a CI job (2026-11-27, feat/member-gate-mutants, base 7da64dedb)
 
-ER-12, ER-36, user decision 127, a Mac with 14 cores at a 15-minute load of 10 to 17. The `mutants` row runs cargo-mutants 27.1.0 `--in-diff` (nextest `ci`
-profile, `--in-place` in a scratch checkout of the committed head) over the Rust functions changed in `tools/paddock-dev` and `crates/`
-(`./dev mutants gate --base <merge base>`, `mutants_gate.rs`). **Measured** on the members of train y, each run at the member's merged commit against its
-first parent, report-only: (a) `refactor/test-cache-outcome-type` (1229b913b, `tools/paddock-dev/src/test_cache`): 20 mutants listed. The unmutated
-build took 51 s and the package's tests 170 s; each mutant took 8 s of build and about 150 s of tests (about 2.7 minutes). The run was cut by the first
-run limit (3300 s) after 20 verdicts: 16 caught, 2 MISSED, 2 unviable, 0 timeouts. Missed: `test_cache/cmd.rs:333` `replace == with != in run` and
-`cmd.rs:369` `replace match guard nightly with true in run`. (b) `test/proc-state-waits` (7f00c206c, `crates`): 18 listed, 9 run (the cap's slice), 115 s
-in all: 4 caught, 2 MISSED, 3 unviable, 0 timeouts. Missed: `paddock-proc/src/statewait.rs:49` `replace * with / in wait_state` and
-`paddock-chromium/src/launch/tests.rs:247` `replace started_in_the_background_end with ()`. (c) `fix/gate-row-stall` (33d79dc62, `pre_push/budget.rs` and
-`exec.rs`): 23 listed, 12 run, 3162 s (queued 359 s before): 12 caught, 0 MISSED, 0 timeouts. **Choices:** the per-mutant hang detector is 900 s (six
-times the longest measured test run, a hang detector and no speed limit); the cap is 12 mutants, one slice `--shard 0/ceil(n/12)` of consecutive mutants
-(the rest is counted "not measured", never a pass), because 12 mutants in `tools/paddock-dev` took 53 minutes against the 60-minute row cap of a push step;
-`crates` mutants are cheap (13 s). **Why in place:** cargo-mutants' default copy of one workspace folder cannot run `tools/paddock-dev`'s tests: they read the
-repository around it and its dev-dependencies' `../../crates` paths are not rewritten (the baseline failed in 6 s). Limits: three diffs, one run each,
-a busy machine (queue time excluded); the findings were read from the run's own output and not yet judged one by one for true positives.
+ER-12, ER-36, user decision 127. cargo-mutants 27.1.0 `--in-diff` (nextest `ci` profile, `--in-place` in a scratch checkout of the committed head) over
+the Rust functions changed in `tools/paddock-dev` and `crates/` (`./dev mutants gate --base <rev> [--shard k/n]`, `mutants_gate.rs`). It first ran
+as a member-gate row on the Mac; the user moved it to ci.yml's `mutants` job (Linux, trains and dispatch, report-only).
+
+**CI trial, run 9349** (ci.yml on `trial/feat/member-gate-mutants`, eight shards `0/8` to `7/8`, the whole diff of this branch against origin/main as
+the base, one run, a busy Linux runner pool): the paddock-dev diff has 106 mutants (14 per shard, 8 in the last). Every shard first builds the tool's
+tree and runs the unmutated tests (about 9 minutes: the build and a test run of about 6 minutes), then each mutant takes about 11 to 12 minutes (its
+rebuild and the package's full test run; sccache did not start in the shards, "the sccache server did not start"). The run limit of 3300 s ended every
+shard after 4 to 6 mutants: 3321 to 3363 s per shard, 38 of 106 mutants measured in all, the rest reported "not measured". Per shard (mutants tested:
+caught / MISSED / unviable): 0/8 6: 3/1/2; 1/8 4: 1/3/0; 2/8 4: 0/4/0; 3/8 4: 3/1/0; 4/8 4: 4/0/0; 5/8 4: 3/1/0; 6/8 6: 5/0/1; 7/8 6: 1/4/1.
+Timeouts 0. **17 MISSED**, each a warning naming its function and mutation, all in the new module itself: `Outcomes::count` (`-> 1`), `Real::mutants`
+(`Ok(Default::default())`, `<<` to `>>`), `Real::diff` (`Ok(String::new())`), `exit_code` (`Some(-1)`, the match arm), `tail` (`String::new()`,
+`"xyzzy"`), `baseline_failures` (`||` to `&&`), `measure` (`<` to `<=`), `command_gate` (two `delete !`), `scratch_tmp` and `remove_scratch` (`-> ()`):
+the code that starts programs and cleans up has no test that reaches it, which is what the job is for.
+Earlier trials of the same branch found each cause of a red baseline in the checkout, one per run (9285: no dev-targets folder in CI; 9331 and 9334: the
+offline `cargo metadata` tests need throttle's dependencies fetched first, as the paddock-dev job does; 9340: `graph_train_replay_has_no_unlisted_narrowing`
+needs the whole git history, so the checkout is a shared clone and not an archive; 9342: a hardlinked clone fails across devices). Run 9326 (four
+shards) saw 25 mutants per shard and the cap of 12 refused them, which led to eight shards and a cap of 16.
+**Choices:** shard count 8 (static: a planned count needs a planner output and a job-model change), at most 16 mutants per shard, the per-mutant hang
+detector 900 s, the run limit 3300 s. At about 12 minutes a mutant on Linux a shard measures 4 to 6, so a full read of a diff of 100 mutants needs about
+20 shards; today the job is a sample, which is acceptable only while it is report-only.
+
+**Earlier Mac measurement** (member-gate row, train y's members, each run at the member's merged commit against its first parent; a Mac at a 15-minute
+load of 10 to 17): (a) `refactor/test-cache-outcome-type` (1229b913b, `tools/paddock-dev/src/test_cache`): 20 mutants. The unmutated build took 51 s
+and the package's tests 170 s; each mutant took 8 s of build and about 150 s of tests (about 2.7 minutes). The run was cut by the first run limit (3300 s)
+after 20 verdicts: 16 caught, 2 MISSED, 2 unviable, 0 timeouts. Missed: `test_cache/cmd.rs:333` `replace == with != in run` and `cmd.rs:369` `replace
+match guard nightly with true in run`. (b) `test/proc-state-waits` (7f00c206c, `crates`): 18 listed, 9 run, 115 s and 122 s in two runs: 4 caught, 2 MISSED,
+3 unviable. Missed: `paddock-proc/src/statewait.rs:49` `replace * with / in wait_state` and `paddock-chromium/src/launch/tests.rs:247` `replace
+started_in_the_background_end with ()`. (c) `fix/gate-row-stall` (33d79dc62, `pre_push/budget.rs` and `exec.rs`): 23 listed, 12 run, 3162 s (queued 359 s
+before): 12 caught, 0 MISSED, 0 timeouts. cargo-mutants' default copy of one workspace folder cannot run `tools/paddock-dev`'s tests (they read the
+repository around it and its dev-dependencies' `../../crates` paths are not rewritten; the baseline failed in 6 s), which is why the mutants run in place
+in a checkout. Limits: three Mac diffs and one CI run, each once; the findings were read from the runs' output and not judged one by one for true positives.
 
 ## Push gate hang limits of the long rows (2026-11-27, fix/gate-row-stall)
 
