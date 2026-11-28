@@ -1251,3 +1251,4 @@ reason = "ER-41: report-only until its first green run on the real tree, recorde
 owner = "ER-21 class, seen twice: a just-released flock reads held while another thread spawns (Dyno InstanceLock 2026-10-31; throttle filelock test 2026-11-28); each fix repaired one test"
 since = 2026-11-28
 review_by = 2026-12-12
+approved = "coordinator"
