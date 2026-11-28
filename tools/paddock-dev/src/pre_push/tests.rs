@@ -44,6 +44,7 @@ fn facts() -> Facts {
         reached: Default::default(),
         goldens: Ok(Vec::new()),
         overlap: Default::default(),
+        priority: Default::default(),
     }
 }
 
@@ -363,6 +364,73 @@ fn a_change_to_a_file_a_golden_reads_plans_the_golden_row_and_any_other_change_s
             .iter()
             .any(|p| matches!(p, Planned::NotMeasured { id, .. } if id == "goldens")),
         "{planned:?}"
+    );
+}
+
+/// The goldens row starts `./dev gen check`, whose builds take a `throttle` slot of their own. A member gate for a train gave its other
+/// rows the train lane and left this child at normal priority, so every train row overtook it (the row took 424 to 589 s of which the
+/// build was 12 to 23 s): the row passes the run's priority to the child (`--priority train`), and a normal run passes nothing.
+#[test]
+fn a_member_gate_with_train_priority_plans_the_golden_row_with_the_train_flag_and_a_normal_one_does_not() {
+    use crate::priority::Priority;
+    let file = "tools/paddock-dev/src/ci_run/mod.rs";
+    let reg = real_registry();
+    for (priority, want) in [(Priority::Train, true), (Priority::Normal, false)] {
+        let mut f = facts();
+        f.priority = priority;
+        f.goldens = Ok(reg.golden_due(&[file.to_string()], &BTreeSet::new()));
+        let planned = plan_gates(&plan(), &change(&[file]), &f);
+        let row = run_gates(&planned)
+            .into_iter()
+            .find(|g| g.id == "goldens")
+            .expect("the goldens row");
+        let has = row.args.windows(2).any(|w| w == ["--priority", "train"]);
+        assert_eq!(has, want, "{priority:?}: {:?}", row.args);
+    }
+}
+
+/// The class (queue time counted as run time, ER-21): every row whose `./dev` child takes a `throttle` slot of its own
+/// ([`gates::SLOT_TAKING_DEV_COMMANDS`]) passes the run's priority on and is marked for the queue status channel, whatever row it is;
+/// no other row carries the mark. And such a row is never heavy itself (ER-43): a row that held a slot while its child waited for
+/// another would wait for the capacity its own work needs.
+#[test]
+fn every_row_whose_dev_child_takes_a_slot_passes_the_priority_on_and_none_holds_a_slot_itself() {
+    use crate::priority::Priority;
+    let mut f = facts();
+    f.priority = Priority::Train;
+    f.goldens = Ok(vec!["ci-run-golden".into()]);
+    let c = Change {
+        files: vec![
+            "crates/paddock-proc/src/lib.rs".into(),
+            "crates/paddock-proc/Cargo.toml".into(),
+            "apps/dyno/crates/dyno-core/src/a.rs".into(),
+        ],
+        ranges: vec!["abc..HEAD".into()],
+        base: Some("origin/main".into()),
+        moved: false,
+    };
+    let planned = plan_gates(&plan(), &c, &f);
+    let dev = f.dev_exe.clone().expect("a dev program");
+    let mut slot_takers = Vec::new();
+    for g in run_gates(&planned) {
+        let takes = g.program == dev
+            && super::gates::SLOT_TAKING_DEV_COMMANDS
+                .iter()
+                .any(|cmd| g.args.len() >= cmd.len() && g.args.iter().zip(cmd.iter()).all(|(a, b)| a == b));
+        assert_eq!(
+            g.children_queue, takes,
+            "{}: the mark must be exactly the slot-taking dev children: {:?}",
+            g.id, g.args
+        );
+        if takes {
+            slot_takers.push(g.id.clone());
+            assert!(g.args.windows(2).any(|w| w == ["--priority", "train"]), "{}: {:?}", g.id, g.args);
+            assert!(!g.heavy, "{} holds a slot while its child queues for another (ER-43)", g.id);
+        }
+    }
+    assert!(
+        slot_takers.contains(&"goldens".to_string()),
+        "the control: the goldens row is one: {slot_takers:?}"
     );
 }
 
@@ -2860,6 +2928,7 @@ fn heavy_gate(id: &str, rank: u8) -> Planned {
         progress: crate::pre_push::progress::Progress::Lines,
         build_dir: None,
         ci_env: false,
+        children_queue: false,
     })
 }
 

@@ -476,7 +476,7 @@ pub(crate) fn angular(ctx: &mut Ctx) {
 /// The folder `ci.toml` remaps: the one `[target.'cfg(all())'] rustflags = ['--remap-path-prefix=<folder>=/paddock-target']` that
 /// build-folder writes (`ci_host::build_folder::ci_toml_text`); `None` when the file has no `target` table or it holds anything else.
 fn remap_folder(ci: &toml::Table) -> Option<&str> {
-    use crate::ci_host::build_folder::REMAP_TARGET;
+    use crate::cargo_target::REMAP_TARGET;
     let table = ci.get("target")?.as_table()?;
     let only = table.get("cfg(all())").filter(|_| table.len() == 1)?.as_table()?;
     let flags = only.get("rustflags").filter(|_| only.len() == 1)?.as_array()?;

@@ -7,6 +7,14 @@
 
 use std::path::Path;
 
+/// The one fixed name the build folder is remapped to (`ci.toml`'s `--remap-path-prefix=<build folder>=REMAP_TARGET`). The readers that
+/// accept a `ci.toml` as "only the build folder" (`input_hash::only_names_build_folder`, the release probe) match this name, and the
+/// twins `conformance/ci/build-folder.sh` and the `dev` wrapper's `only_build_folder` spell it as a literal.
+pub const REMAP_TARGET: &str = "/paddock-target";
+
+/// The cargo table that holds the remap (see the module comment for why not `[build]`).
+pub const REMAP_TABLE: &str = "[target.'cfg(all())']";
+
 /// The value of `--config`: `build.target-dir='<dir>'` (a TOML literal string, so Windows backslashes need no escape; a folder
 /// name with a quote in it becomes a basic string with the escapes TOML needs).
 pub fn config_value(dir: &str) -> String {

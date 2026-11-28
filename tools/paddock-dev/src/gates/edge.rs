@@ -171,13 +171,13 @@ fn merge_base(root: &Path, base: &str) -> String {
 
 /// The `--format` that gives a commit's trailers as git's own parser reads them (ER-42: the one reader, `merge_check::trailers`).
 fn trailers_format() -> String {
-    format!("--format={}", crate::merge_check::trailers::TRAILERS_FORMAT)
+    format!("--format={}", crate::trailers::TRAILERS_FORMAT)
 }
 
 /// The same for the branch's commits together, each led by its sha: the output is empty only when there is no commit, so a branch whose
 /// commits carry no trailer still gets its version (and its date moves are found without a trailer).
 fn head_format() -> String {
-    format!("--format=%H%n{}", crate::merge_check::trailers::TRAILERS_FORMAT)
+    format!("--format=%H%n{}", crate::trailers::TRAILERS_FORMAT)
 }
 
 /// The history of `docs/gates.toml` that date moves are judged against (§3.1), oldest first: every commit of the register along the

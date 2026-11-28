@@ -122,19 +122,19 @@ mod real {
                 .expect("spawn sh"),
             label: "child that outlives the handle".into(),
         };
-        assert!(paddock_throttle::slotfile::is_held(&lock).unwrap());
+        paddock_testkit::lock::await_held("the handle holds the lock", || paddock_throttle::slotfile::is_held(&lock).unwrap());
         // Drop and take again while the spawner runs, until it has overlapped enough.
         drop(held);
         while spawned.load(Ordering::SeqCst) < MIN_SPAWNS {
-            wait_until("the lock is free again", || !paddock_throttle::slotfile::is_held(&lock).unwrap());
+            paddock_testkit::lock::await_free("the lock is free again", || paddock_throttle::slotfile::is_held(&lock).unwrap());
             let again = paddock_throttle::slotfile::take(&lock).unwrap();
             drop(again);
         }
         stop.store(true, Ordering::SeqCst);
         spawner.join().unwrap();
         assert!(child.child.try_wait().unwrap().is_none(), "the child is still running");
-        wait_until("the lock went with the handle, not with the child", || {
-            !paddock_throttle::slotfile::is_held(&lock).unwrap()
+        paddock_testkit::lock::await_free("the lock went with the handle, not with the child", || {
+            paddock_throttle::slotfile::is_held(&lock).unwrap()
         });
         w.release();
         assert!(child.finish().success());
@@ -165,11 +165,11 @@ mod real {
         };
         drop(file);
         assert!(child.child.try_wait().unwrap().is_none(), "the child is still running");
-        assert!(paddock_throttle::slotfile::is_held(&lock).unwrap(), "the child holds the lock");
+        paddock_testkit::lock::await_held("the child holds the lock", || paddock_throttle::slotfile::is_held(&lock).unwrap());
         w.release();
         assert!(child.finish().success());
-        wait_until("the child's end frees the lock", || {
-            !paddock_throttle::slotfile::is_held(&lock).unwrap()
+        paddock_testkit::lock::await_free("the child's end frees the lock", || {
+            paddock_throttle::slotfile::is_held(&lock).unwrap()
         });
     }
 }

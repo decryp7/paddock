@@ -7,7 +7,7 @@
 //! says it too. The read-only triage never cancels ([`super::triage`] asserts it); cancelling is this command alone, so the train flow
 //! uses it when a slow local row fails while CI runs beside it (ER-53).
 
-use crate::wait::Http;
+use crate::http::Http;
 use serde_json::Value;
 
 /// What `ci cancel` did.

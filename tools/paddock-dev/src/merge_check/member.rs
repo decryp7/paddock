@@ -4,7 +4,7 @@
 //! `--write-reverted`) parsed the member out of those subjects: three fix rounds. Now this makes the merge itself:
 //!
 //! - `git merge --no-ff` of the member's commit, with the fixed subject `Merge <member> into <train>` and trailers
-//!   ([`super::trailers`]): `Paddock-Member`, `Paddock-Sync-Ref` (a sync ref `sync/<member>/<sha>` was given), `Paddock-Sync-Sha`
+//!   ([`crate::trailers`]): `Paddock-Member`, `Paddock-Sync-Ref` (a sync ref `sync/<member>/<sha>` was given), `Paddock-Sync-Sha`
 //!   (the full sha), the `Reverted:` lines `merge check --write-reverted` ties to a re-land, and for each `--reland <revert>` a
 //!   `Paddock-Reland: <revert>` and a `Reverted:` line for each file the revert changed (a re-land of the member's own reverted
 //!   merge is found from the history; `--reland` names any other);
@@ -14,9 +14,10 @@
 //!
 //! It refuses a dirty tree, a merge already in progress and a detached HEAD before it changes anything.
 
+use super::Request;
 use super::reverted_base::resolve;
-use super::{Request, trailers};
 use crate::git::{Git, short};
+use crate::trailers;
 use paddock_cli::{CliError, Report};
 use paddock_proc::{Limits, run_bounded};
 use serde_json::json;

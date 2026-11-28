@@ -15,9 +15,9 @@ use crate::ci_runs::client::Client;
 use crate::ci_runs::triage::{self, Status, Test};
 use crate::ci_runs::verdict::{self, Verdict};
 use crate::ci_runs::{dispatch, dispatch_guards, time};
+use crate::http::Http;
 use crate::pr::gitea::{Api, Pull, approved_at};
 use crate::pr::labels::{self, LabelSpec};
-use crate::wait::Http;
 use paddock_cli::{CliError, Report};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -447,9 +447,9 @@ pub fn run_planner(trusted: &Path, main: &str, head: &str) -> Result<serde_json:
 pub use crate::child_env::scrub;
 
 /// The message of the queue's merge of a pull request: the subject it always had, then the trailers every tool-made train merge carries
-/// ([`crate::merge_check::trailers`]). Written here and checked against in [`GitTrain`]'s verification, from this one place.
+/// ([`crate::trailers`]). Written here and checked against in [`GitTrain`]'s verification, from this one place.
 pub fn merge_message(branch: &str, head: &str) -> String {
-    use crate::merge_check::trailers;
+    use crate::trailers;
     trailers::with_block(
         &format!("Merge {branch} ({}) into train", head.get(..9).unwrap_or(head)),
         &trailers::member_lines(&trailers::named(branch), head, &[]),

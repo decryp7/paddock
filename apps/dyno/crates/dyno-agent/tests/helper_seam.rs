@@ -408,7 +408,7 @@ fn a_stop_does_not_wait_for_a_counters_read_in_progress() {
     gate.open();
     stopper.join().unwrap();
     assert!(stopped, "the stop waited for the counters read in progress");
-    assert!(!dyno_agent::instance::is_held(&rig.dirs), "the agent lock was not released");
+    paddock_testkit::lock::await_free("the agent lock is released", || dyno_agent::instance::is_held(&rig.dirs));
     paddock_testkit::wait_until("the read left behind to end and let go of the agent's state", || {
         std::sync::Arc::strong_count(&shared) == 1
     });
@@ -457,7 +457,7 @@ fn a_stop_does_not_wait_for_a_helper_wake_call_in_progress() {
     gate.open();
     stopper.join().unwrap();
     assert!(stopped, "the stop waited for the helper wake call in progress");
-    assert!(!dyno_agent::instance::is_held(&rig.dirs), "the agent lock was not released");
+    paddock_testkit::lock::await_free("the agent lock is released", || dyno_agent::instance::is_held(&rig.dirs));
     paddock_testkit::wait_until("the wake thread left behind to end and let go of the agent's state", || {
         std::sync::Arc::strong_count(&shared) == 1
     });
