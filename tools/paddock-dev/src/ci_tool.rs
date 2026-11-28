@@ -15,14 +15,14 @@
 //! [`ToolCall::run`] logs one `run:` line before (the masked command line and the names, never the values, of the variables it
 //! sets) and one `ran:` line after (how it ended: the exit code, with the NTSTATUS in hex on Windows, the signal on Unix, or the
 //! timeout; and the duration). The caller decides what a failure means and prints exactly one `::error::` line for it with
-//! [`error_line`]: the cause, then `Next step:`.
+//! [`crate::log_text::error_line`]: the cause, then `Next step:`.
 
+use crate::log_text::describe_status;
 use paddock_proc::{KEPT_ENV, Limits, Outcome, RunError, Sink, command, run_bounded_noting, run_waited_noting};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::ExitStatus;
 use std::time::{Duration, Instant};
 
 /// Variables every program keeps besides `paddock_proc::KEPT_ENV`: what Windows programs need to start and find their own
@@ -378,32 +378,6 @@ pub fn read_tail(path: &Path, max: u64) -> String {
     }
 }
 
-/// `exit <n>` (with the NTSTATUS in hex for a Windows crash code) or `signal <n>`.
-pub fn describe_status(s: ExitStatus) -> String {
-    if let Some(code) = s.code() {
-        return describe_code(code);
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::ExitStatusExt;
-        if let Some(sig) = s.signal() {
-            return format!("signal {sig}");
-        }
-    }
-    "ended without an exit code".to_string()
-}
-
-/// An exit code for a person: Windows reports a crash as an NTSTATUS (0xC0000005 is an access violation, 0xC0000409 a fast
-/// fail), which reads as a huge or negative number in decimal.
-pub fn describe_code(code: i32) -> String {
-    let unsigned = code as u32;
-    if unsigned >= 0xC000_0000 {
-        format!("exit {unsigned} (0x{unsigned:08X}, an NTSTATUS crash code)")
-    } else {
-        format!("exit {code}")
-    }
-}
-
 /// How many `::error` lines before the last `n` lines [`tail`] keeps.
 const KEPT_ERRORS: usize = 10;
 
@@ -431,11 +405,6 @@ pub fn mask(text: &str, secrets: &[String]) -> String {
         out = out.replace(s.as_str(), "***");
     }
     out
-}
-
-/// The one `::error::` line of a failure: the cause, then the next step.
-pub fn error_line(cause: &str, next: &str) -> String {
-    format!("::error::{cause} Next step: {next}")
 }
 
 /// `arg` as one `sh` word: as it is when plain, else in single quotes with a `'` written `'\''`.
@@ -482,16 +451,6 @@ mod tests {
     }
 
     #[test]
-    fn windows_crash_codes_are_named_in_hex() {
-        assert_eq!(describe_code(1), "exit 1");
-        assert_eq!(describe_code(127), "exit 127");
-        assert_eq!(
-            describe_code(-1_073_741_819),
-            "exit 3221225477 (0xC0000005, an NTSTATUS crash code)"
-        );
-    }
-
-    #[test]
     fn the_tail_is_the_last_lines_indented() {
         assert_eq!(tail("a\nb\nc\n", 2), "  b\n  c\n");
         assert_eq!(tail("", 5), "");
@@ -506,11 +465,6 @@ mod tests {
         let t = tail(&many, 1);
         assert_eq!(t.lines().count(), 1 + KEPT_ERRORS + 1 - 1, "{t}");
         assert!(t.contains("::error::e29") && !t.contains("::error::e5\n"), "{t}");
-    }
-
-    #[test]
-    fn an_error_line_has_the_cause_and_the_next_step() {
-        assert_eq!(error_line("x failed.", "do y."), "::error::x failed. Next step: do y.");
     }
 
     fn parent(pairs: &[(&str, &str)]) -> HashMap<String, String> {

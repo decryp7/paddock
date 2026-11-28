@@ -36,7 +36,6 @@
 //! shared process runner closes standard input).
 
 mod backwards;
-pub(crate) mod diff;
 mod gates;
 mod generated;
 mod generator_step;
@@ -51,7 +50,6 @@ mod stale_base;
 mod static_rows;
 pub mod sync_member;
 mod testnames;
-pub mod trailers;
 pub mod trial_dispatch;
 mod whole_file;
 
@@ -120,7 +118,7 @@ pub struct Merge {
     pub tree: String,
     /// The merge commit's message (empty when checking a branch before merging).
     pub message: String,
-    /// The trailer block git read from the message ([`trailers::TRAILERS_FORMAT`]): empty for a branch checked before merging.
+    /// The trailer block git read from the message ([`crate::trailers::TRAILERS_FORMAT`]): empty for a branch checked before merging.
     pub trailers: String,
     /// A name for output.
     pub label: String,
@@ -157,7 +155,7 @@ impl Merge {
         self
     }
 
-    /// The merge commit's trailer block (git's reading of the message, [`trailers::TRAILERS_FORMAT`]).
+    /// The merge commit's trailer block (git's reading of the message, [`crate::trailers::TRAILERS_FORMAT`]).
     pub fn with_trailers(mut self, trailers: impl Into<String>) -> Self {
         self.trailers = trailers.into();
         self
@@ -194,7 +192,7 @@ pub struct Ctx<'a> {
     message: &'a str,
     generated: &'a generated::Generated,
     /// The diff from each parent to the result, in parent order.
-    diffs: &'a [Vec<diff::FileDiff>],
+    diffs: &'a [Vec<crate::git_diff::FileDiff>],
     /// Git's own merge of the two parents, and the result's files.
     auto: &'a AutoMerge,
     result_blobs: &'a std::collections::HashMap<String, String>,
@@ -318,11 +316,11 @@ fn hakari_program() -> String {
     std::env::var("PADDOCK_MERGE_CHECK_CARGO").unwrap_or_else(|_| "cargo".into())
 }
 
-fn diff_of(git: &Git, from: &str, to: &str) -> Result<Vec<diff::FileDiff>, String> {
+fn diff_of(git: &Git, from: &str, to: &str) -> Result<Vec<crate::git_diff::FileDiff>, String> {
     let mut args = vec!["diff"];
-    args.extend(diff::DIFF_FLAGS);
+    args.extend(crate::git_diff::DIFF_FLAGS);
     args.extend([from, to]);
-    diff::parse(&git.text(&args)?)
+    crate::git_diff::parse(&git.text(&args)?)
 }
 
 /// Command line of `./dev merge check`.
@@ -440,7 +438,7 @@ fn resolve(git: &Git, req: &Request) -> Result<Merge, CliError> {
                 .to_string();
             // The message and git's reading of its trailers, in one call.
             let shown = git
-                .text(&["show", "-s", &format!("--format=%B%x00{}", trailers::TRAILERS_FORMAT), c])
+                .text(&["show", "-s", &format!("--format=%B%x00{}", crate::trailers::TRAILERS_FORMAT), c])
                 .map_err(|e| gap(e.to_string()))?;
             let (message, trailer_block) = shown.split_once('\0').unwrap_or((shown.as_str(), ""));
             let (message, trailer_block) = (message.to_string(), trailer_block.to_string());
@@ -718,15 +716,15 @@ fn trial_step(root: &std::path::Path, merge: &Merge, no_trial: Option<&str>, rea
     };
     // The trial of this head is of the ref sync-member pushed for it, `sync/<member>/<short sha of the second parent>`. Its name comes
     // from the first source that has it: the merge's `Paddock-Sync-Ref` trailer (else, for a merge made by hand, `synced as <ref>` in
-    // its subject: both are [`trailers::merge_member`]'s), a sync ref of origin that points at the member's head, the second parent's
+    // its subject: both are [`crate::trailers::merge_member`]'s), a sync ref of origin that points at the member's head, the second parent's
     // own subject (`Merge <train> into sync/<member>`), then the member the trailers (or the subject) name.
     let short_member = short(member);
     let subject = merge.message.lines().next().unwrap_or("");
-    let said = trailers::merge_member(subject, &merge.trailers);
+    let said = crate::trailers::merge_member(subject, &merge.trailers);
     let named_in_message = said
         .sync_ref
         .clone()
-        .filter(|r| trial_dispatch::split_sync_ref(r).is_some_and(|(_, sha)| member.starts_with(sha)));
+        .filter(|r| crate::trailers::split_sync_ref(r).is_some_and(|(_, sha)| member.starts_with(sha)));
     let pointing = || -> Option<String> {
         let out = Git::new(root)
             .text(&[
@@ -740,13 +738,13 @@ fn trial_step(root: &std::path::Path, merge: &Merge, no_trial: Option<&str>, rea
             .ok()?;
         out.lines()
             .filter_map(|l| l.strip_prefix("refs/remotes/origin/").or_else(|| l.strip_prefix("refs/heads/")))
-            .find(|r| trial_dispatch::split_sync_ref(r).is_some_and(|(_, sha)| member.starts_with(sha)))
+            .find(|r| crate::trailers::split_sync_ref(r).is_some_and(|(_, sha)| member.starts_with(sha)))
             .map(str::to_string)
     };
     let from_parent = || -> Option<String> {
         let sub = Git::new(root).text(&["show", "-s", "--format=%s", member]).ok()?;
         let m = sub.trim().rsplit_once(" into sync/")?.1.trim();
-        (!m.is_empty() && !m.contains(char::is_whitespace)).then(|| trial_dispatch::sync_ref(m, member))
+        (!m.is_empty() && !m.contains(char::is_whitespace)).then(|| crate::trailers::sync_ref(m, member))
     };
     let from_message = || -> Option<String> {
         let named = [merge.member_name.clone(), said.branch.clone()]
@@ -755,10 +753,10 @@ fn trial_step(root: &std::path::Path, merge: &Merge, no_trial: Option<&str>, rea
         let branch = named.strip_prefix("origin/").unwrap_or(&named);
         // (a member merged as its sync ref, `sync/<member>/<short sha>`, already is that name).
         Some(
-            if trial_dispatch::split_sync_ref(branch).is_some_and(|(_, sha)| member.starts_with(sha)) {
+            if crate::trailers::split_sync_ref(branch).is_some_and(|(_, sha)| member.starts_with(sha)) {
                 branch.to_string()
             } else {
-                trial_dispatch::sync_ref(branch, member)
+                crate::trailers::sync_ref(branch, member)
             },
         )
     };

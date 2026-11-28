@@ -20,8 +20,9 @@
 //! `--no-trial "<reason>"` skips it and logs the reason, like `--old-base-anyway`.
 
 use super::gates::GateRun;
-use crate::git::{Git, short};
+use crate::git::Git;
 use crate::queue::real::{Child, GitTrain};
+use crate::trailers::split_sync_ref;
 use paddock_cli::Exit;
 use paddock_proc::{Limits, command, run_bounded};
 use serde_json::json;
@@ -181,19 +182,6 @@ pub fn not_run(why: &str) -> Step {
     }
 }
 
-/// The scratch ref the sync tip is pushed to for the trial: `sync/<member>/<short sha of the synced commit>`. A new commit is a new
-/// ref, so no push replaces one. `merge check --gates` finds the trial by the same name ([`super::member_trial`]).
-pub fn sync_ref(member: &str, synced_sha: &str) -> String {
-    format!("sync/{member}/{}", short(synced_sha))
-}
-
-/// `sync/<member>/<short sha>` as `(member, short sha)`: a last component of exactly nine hex digits (what [`sync_ref`] writes). An
-/// old flat `sync/<member>` (no sha) is `None`.
-pub fn split_sync_ref(reference: &str) -> Option<(&str, &str)> {
-    let (member, sha) = reference.strip_prefix("sync/")?.rsplit_once('/')?;
-    (sha.len() == 9 && sha.bytes().all(|b| b.is_ascii_hexdigit()) && !member.is_empty()).then_some((member, sha))
-}
-
 /// The member a branch name stands for: without a remote prefix, and for a sync branch (`sync/<member>`, `sync/<member>/<sha>`) the
 /// member it carries. The integrator works on `sync/<member>`; the train's merge subjects name `<member>`.
 pub fn member_key(name: &str) -> &str {
@@ -280,6 +268,7 @@ pub fn interpret(answer: Result<GateRun, String>, member: &str, train: &str) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::trailers::sync_ref;
 
     fn ran(code: i32, text: &str) -> Result<GateRun, String> {
         Ok(GateRun {
@@ -416,11 +405,7 @@ mod tests {
     }
 
     #[test]
-    fn a_sync_ref_splits_into_member_and_sha_and_a_flat_one_does_not() {
-        assert_eq!(split_sync_ref("sync/feat/x/012345678"), Some(("feat/x", "012345678")));
-        assert_eq!(split_sync_ref("sync/feat/x"), None);
-        assert_eq!(split_sync_ref("sync/feat/0123456789"), None);
-        assert_eq!(split_sync_ref("feat/x/012345678"), None);
+    fn a_member_key_drops_the_remote_and_the_sync_prefix_and_sha() {
         for (name, key) in [
             ("feat/x", "feat/x"),
             ("origin/feat/x", "feat/x"),

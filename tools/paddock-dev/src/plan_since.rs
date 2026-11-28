@@ -24,11 +24,11 @@
 //!
 //! The pure core is here ([`nextest_failures`], [`classify`], [`SincePlan`]); [`GiteaRuns`] reads a run through the Gitea API.
 
+use crate::http::Http;
 use crate::job_outcome::JobOutcome;
 use crate::log_text::plain;
 use crate::plan_gitea::workflow_jobs;
 use crate::run_scope::ExpectedMap;
-use crate::wait::Http;
 use paddock_ci_config::jobs::PROJECT_OUTPUTS;
 use regex::Regex;
 use serde_json::{Map, Value, json};

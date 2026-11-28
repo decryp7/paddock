@@ -13,9 +13,10 @@
 //! renamed, the name it had before) is skipped: that is a modify/delete conflict, resolved on
 //! purpose. A file git merged cleanly, and the result is exactly its merge, is skipped. Generated files ([`super::generated`]) are skipped: they are regenerated, not merged.
 
-use super::diff::{DIFF_FLAGS, FileDiff, parse, trivial};
-use super::{Ctx, Finding, Kind, trailers};
+use super::{Ctx, Finding, Kind};
 use crate::git::short;
+use crate::git_diff::{DIFF_FLAGS, FileDiff, parse, trivial};
+use crate::trailers;
 use std::collections::{HashMap, HashSet};
 
 const MIN_LINES: usize = 2;

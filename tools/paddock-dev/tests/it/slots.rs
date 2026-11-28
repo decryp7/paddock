@@ -114,7 +114,7 @@ fn acquire_status_and_release() {
     assert_eq!(v["slots"][0]["owner"].as_str().map(|o| o.ends_with("job")), Some(true));
     let (code, v, _) = release(&root, "s1", &token);
     assert_eq!((code, v["released"].clone()), (0, true.into()));
-    assert!(is_free(&root, 1));
+    paddock_testkit::lock::await_free("the slot is free", || !is_free(&root, 1));
     assert!(job.exists(), "release does not touch the job folder");
     let (code, v, _) = release(&root, "bogus", "t");
     assert_eq!((code, v["kind"].clone()), (2, "usage".into()));
@@ -141,7 +141,7 @@ fn the_slot_frees_when_the_job_folder_is_removed() {
     let (root, job) = (d.path().join("ci"), d.path().join("job"));
     std::fs::create_dir(&job).unwrap();
     assert_eq!(acquire(&root, &job, "1").0, 0);
-    assert!(!is_free(&root, 1));
+    paddock_testkit::lock::await_held("the slot is held", || !is_free(&root, 1));
     std::fs::remove_dir(&job).unwrap();
     wait_until_free(&root, 1);
 }
@@ -156,7 +156,7 @@ fn a_killed_holder_frees_its_slot_at_once() {
     let pid = u32::try_from(v["holder_pid"].as_u64().unwrap()).unwrap();
     // The holder's identity, taken from the printed pid: started after the stamp, so a pid handed on is never killed (rule 53).
     let holder = paddock_testkit_start::recorded::printed(pid, spawned).expect_running("the slot holder");
-    assert!(!is_free(&root, 1));
+    paddock_testkit::lock::await_held("the slot is held", || !is_free(&root, 1));
     assert_eq!(paddock_proc::end(holder), paddock_proc::Ending::Ended);
     wait_until_free(&root, 1);
     assert!(job.exists());
@@ -191,7 +191,7 @@ fn a_holder_lets_go_when_its_lifeline_process_ends() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    assert!(!is_free(&root, 1), "the holder holds the slot while its lifeline runs");
+    paddock_testkit::lock::await_held("the holder holds the slot while its lifeline runs", || !is_free(&root, 1));
     life.kill().unwrap();
     let _ = life.wait();
     wait_until_free(&root, 1);
@@ -265,13 +265,13 @@ fn eight_parallel_acquires_get_eight_distinct_slots() {
     got.dedup();
     assert_eq!(got.len(), N, "eight distinct slots: {results:?}");
     for n in 1..=N as u32 {
-        assert!(!is_free(&root, n), "s{n} is held by its job's holder");
+        paddock_testkit::lock::await_held(&format!("s{n} is held by its job's holder"), || !is_free(&root, n));
     }
     for r in &results {
         assert_eq!(release(&root, r.1["slot"].as_str().unwrap(), r.1["token"].as_str().unwrap()).0, 0);
     }
     for n in 1..=N as u32 {
-        assert!(is_free(&root, n));
+        paddock_testkit::lock::await_free("the slot is free", || !is_free(&root, n));
     }
 }
 
@@ -300,7 +300,7 @@ fn idle_run_runs_only_on_an_idle_slot_and_holds_it_until_the_command_ends() {
         said.contains("s1 busy\n") && said.contains("s1 idle: ran"),
         "the command saw its slot locked: {said}"
     );
-    assert!(is_free(&root, 1), "the lock goes with the command");
+    paddock_testkit::lock::await_free("the lock goes with the command", || !is_free(&root, 1));
     // Held by a job: skipped, the command never runs.
     let (slot, token) = take(&root, &job, "1");
     let out = idle_run(&root, "s1", &[bin, "ci", "slot", "status", "--max", "1", "--root", r]);
@@ -344,11 +344,11 @@ fn the_holder_does_not_keep_an_inherited_pipe_open() {
         .recv_timeout(Duration::from_secs(60))
         .expect("the pipe stayed open: the holder kept an inherited descriptor");
     assert_eq!(code, Some(0));
-    assert!(!is_free(&root, 1), "the holder is still running");
+    paddock_testkit::lock::await_held("the holder is still running", || !is_free(&root, 1));
     // The step's output went to /dev/null, so the holder's own record gives the token to release with.
     let token = FsLocks::new(&root).read_owner(SlotId::new(1).unwrap()).unwrap().token;
     assert_eq!(release(&root, "s1", &token).0, 0);
-    assert!(is_free(&root, 1));
+    paddock_testkit::lock::await_free("the slot is free", || !is_free(&root, 1));
 }
 
 /// Windows hands a child every inheritable handle of its parent, and Unix runs the same shape of check through the descriptor
@@ -387,7 +387,7 @@ fn the_step_output_pipe_closes_when_acquire_ends_even_though_the_holder_lives_on
         .expect("the step's pipe stayed open: the holder inherited it");
     assert_eq!(code, Some(0));
     let token = said.split_whitespace().nth(1).unwrap().to_string();
-    assert!(!is_free(&root, 1), "the holder is still running");
+    paddock_testkit::lock::await_held("the holder is still running", || !is_free(&root, 1));
     release(&root, "s1", &token);
 }
 
@@ -426,7 +426,7 @@ fn the_holder_does_not_keep_a_pipe_that_acquire_inherited_as_a_plain_handle() {
     // shows at once.
     // conformance: expiry-under-test — the window is the runner's 10 s wait for a step's pipe (gitea/runner treekill.go), plus margin
     let closed = rx.recv_timeout(Duration::from_secs(15));
-    assert!(!is_free(&root, 1), "the holder is still running");
+    paddock_testkit::lock::await_held("the holder is still running", || !is_free(&root, 1));
     // Release before the verdict, so a failure leaves no holder behind.
     let token = v["token"].as_str().unwrap().to_string();
     assert_eq!(release(&root, "s1", &token).0, 0);
@@ -447,9 +447,9 @@ fn a_release_with_the_wrong_token_leaves_the_slot_with_its_holder() {
         code, 0,
         "a slot that is not yours is not yours to release, and that is not an error"
     );
-    assert!(!is_free(&root, 1), "the holder keeps it");
+    paddock_testkit::lock::await_held("the holder keeps it", || !is_free(&root, 1));
     assert_eq!(release(&root, &slot, &token).0, 0);
-    assert!(is_free(&root, 1));
+    paddock_testkit::lock::await_free("the slot is free", || !is_free(&root, 1));
 }
 
 #[test]
@@ -476,7 +476,7 @@ fn a_program_inside_the_job_folder_cannot_hold_a_slot() {
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stdout).contains("inside the job folder"));
-    assert!(is_free(&root, 1), "no holder was started");
+    paddock_testkit::lock::await_free("no holder was started", || !is_free(&root, 1));
 }
 
 /// Sets the flag when it goes out of scope, so a panic in the test body still stops the prober (a flag set only on the success path
@@ -573,7 +573,7 @@ fn a_holder_lets_go_at_its_lifetime_cap_while_the_job_folder_still_exists() {
         "1",
     ]);
     assert_eq!(code, 0, "{err}");
-    assert!(!is_free(&root, 1), "held at first");
+    paddock_testkit::lock::await_held("held at first", || !is_free(&root, 1));
     wait_until_free(&root, 1);
     assert!(job.exists(), "the job folder was never removed");
 }
