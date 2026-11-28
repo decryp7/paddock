@@ -84,6 +84,27 @@ uses it, results in
 
 ## Results of shared tooling
 
+### 2026-11-28, the Windows legs of ci.yml: first run of a tree against a re-run (fix/windows-leg-time)
+
+- **Question:** the Windows legs of train runs looked about 2x slower since train af: run 9396 had `crate (windows-latest)` 368 s and `paddock-dev (windows-latest)` 371 s, runs 9403 and 9412 had 637 to 687 s.
+- **Machine:** the Windows runner (16 cores, 32,700 MB, capacity 3, `CARGO_BUILD_JOBS=5`), gitea runner v6.0.1 in every run below. Not a new measurement: the step times are the Gitea API's (`/actions/jobs/<id>`, `steps[].started_at` and `completed_at`, 1 s resolution) and the cargo and nextest lines of the job logs.
+- **Runs:** a first run of a tree against a second run of the same commit: 9395 then 9396 (both `c5cd28247`, train ae), 9388 then 9389 (both `0cb699637`, train ad); first runs 9381 (ac), 9403 (af), 9412 (ag).
+- **Numbers (seconds; crate leg / paddock-dev leg):**
+
+  | Run (commit) | Run of the tree | Job | `build-jobs` step | Clippy step | Tests step (build + run) |
+  |---|---|---|---|---|---|
+  | 9381 (8f843fd81) | first | 655 / 623 | 171 / 169 | 46 / 53 | 319 / 325 |
+  | 9388 (0cb699637) | first | 965 / 805 | not read | not read | not read |
+  | 9389 (0cb699637) | second | 328 / 332 | 3 / 3 | 2 / 2 | 217 / 249 |
+  | 9395 (c5cd28247) | first | 429 / 532 | 133 / 134 | 4 / 43 | 169 / 272 |
+  | 9396 (c5cd28247) | second | 368 / 371 | 3 / 3 | 4 / 1 | 247 / 283 |
+  | 9403 (9d812f1ba) | first | 647 / 637 | 146 / 148 | 42 / 63 | 335 / 347 |
+  | 9412 (76d63f857) | first | 677 / 687 | 160 / 161 | 39 / 53 | 359 / 392 |
+
+  Inside the Tests step, 9396 against 9412: the test profile build 1.6 s against 92 s (crate) and 0.8 s against 115 s (paddock-dev); the nextest run 241.5 s against 260.7 s (crate, 4,519 against 4,533 tests) and 278.7 s against 274.9 s (paddock-dev, 835 against 878 tests); 9403 ran 217.5 s and 230.6 s.
+- **Reading:** nothing grew. Run 9396 was the second run of commit `c5cd28247` (9395 ran it 20 minutes earlier), so its kept build folders were warm and the `./dev` binary of its hash was built: the 368 s baseline is a re-run, not a first run. Every first run of a tree that changes paddock-dev's inputs pays two costs, before af as after it. (1) The `build-jobs` step builds `./dev` from source, because no binary of a train's hash is published (`::notice::./dev: paddock-dev <hash> is not published for x86_64-pc-windows-msvc (HTTP 404 ...)`, then `built paddock-dev <hash> in 143 s (not downloaded)` in 9412, 128 s in 9403); one leg builds and the other waits on the build lock (`another run is building paddock-dev <hash> on this host`), so both legs lose 130 to 170 s. (2) Cargo compiles the changed crates and their dependents in the kept build folders: 38 to 60 s of Clippy and 90 to 115 s of test profile build. sccache's 0 hits with 11 to 48 misses are those first compiles of changed sources; its 100 to 291 non-cacheable calls are links and build-script runs, not compiles. The test run itself moved by at most 20 s (8%), with 0.3% more tests.
+- **Not measured:** which crates the Windows self-build of `./dev` recompiles (it runs with `--quiet`); a Windows self-build through sccache (the launcher's `selfbuild_cache` needs the `/sccache` mount and `flock`, which the Windows host lacks; the 2026-11-27 entry "the tool's own build through sccache" measured Linux and macOS only); runs after gitea runner v6.1.0 reached the Windows host (15:11Z).
+
 ### 2026-11-28, the in-test fixture build and the parent's configuration (fix/in-test-build-flags)
 
 - **Commit:** base 9d812f1ba (origin/main), this branch. Question from the test build cost class entry below: the in-test `cargo build` does not get the parent's `--config` rustflags.
