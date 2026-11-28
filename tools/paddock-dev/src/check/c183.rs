@@ -201,6 +201,10 @@ impl Check for C183 {
         Mode::ReportOnly
     }
 
+    fn origin(&self) -> super::Origin {
+        super::Origin::BornInRust
+    }
+
     fn control(&self) -> Control {
         // One register of each kind that names a moved file (line 2 and 3), a deleted file and its look-alikes, a re-created file, and a
         // file that is no register.

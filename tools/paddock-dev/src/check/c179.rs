@@ -195,6 +195,10 @@ impl Check for C179 {
         Mode::ReportOnly
     }
 
+    fn origin(&self) -> super::Origin {
+        super::Origin::BornInRust
+    }
+
     fn control(&self) -> Control {
         let manifest =
             |extra: &str| -> &'static str { Box::leak(format!("[package]\nname = \"x\"\nversion = \"0.1.0\"\n{extra}").into_boxed_str()) };

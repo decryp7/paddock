@@ -138,6 +138,10 @@ impl Check for C145 {
         Mode::Gate
     }
 
+    fn origin(&self) -> super::Origin {
+        super::Origin::BornInRust
+    }
+
     fn control(&self) -> Control {
         Control {
             files: vec![

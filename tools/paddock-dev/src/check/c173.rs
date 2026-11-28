@@ -165,6 +165,10 @@ impl Check for C173 {
         Mode::Gate
     }
 
+    fn origin(&self) -> super::Origin {
+        super::Origin::BornInRust
+    }
+
     fn allow_list(&self) -> Option<&'static allow_list::Spec> {
         Some(&SPEC)
     }

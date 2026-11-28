@@ -23,55 +23,20 @@ pub mod growth_approval;
 pub mod inline_waiver;
 pub mod jsre;
 pub mod lex;
+pub mod lists;
 pub mod mask;
 pub mod outcome;
 pub mod record;
 pub mod report;
+pub mod scan;
 pub mod tree;
 pub mod util;
 pub mod waivers;
 
-/// Registers checks: one line per check, `module::Type`. It declares the module and adds the check to [`registry`], in the order of
-/// `conformance/src/checks/index.mjs`. Nothing else names a check: the host, `--only`, `list` and the parity tests read the registry.
-macro_rules! register_checks {
-    ($($module:ident :: $check:ident),+ $(,)?) => {
-        $(pub mod $module;)+
-
-        /// The checks the host has, in the order of `conformance/src/checks/index.mjs`.
-        pub fn registry() -> Vec<Box<dyn Check>> {
-            vec![$(Box::new($module::$check)),+]
-        }
-
-        /// `(check id, source file)` of every registered check, for `list --json`.
-        pub fn sources() -> Vec<(&'static str, &'static str)> {
-            vec![$(($module::$check.id(), concat!("tools/paddock-dev/src/check/", stringify!($module), ".rs"))),+]
-        }
-    };
-}
-
-register_checks! {
-    c39::C39,
-    c53::C53,
-    c120::C120,
-    c123::C123,
-    c131::C131,
-    c139::C139,
-    c141::C141,
-    c145::C145,
-    c154::C154,
-    c155::C155,
-    c173::C173,
-    c174::C174,
-    c175::C175,
-    c176::C176,
-    c177::C177,
-    c178::C178,
-    c179::C179,
-    c180::C180,
-    c181::C181,
-    c182::C182,
-    c183::C183,
-}
+// The registry and the `pub mod c<n>;` lines are written by build.rs from the file names `src/check/c<n>.rs` (user decision, 2026-11-28:
+// each check declares itself once, in its own `impl Check`, and the lists are generated, ER-40). A new check is one new file whose unit
+// struct `C<n>` implements [`Check`]; nothing here names it. The registry is in id order (the order of `conformance/src/checks/index.mjs`).
+include!(concat!(env!("OUT_DIR"), "/check_registry.rs"));
 
 use config::Config;
 use finding::{Finding, Severity, Waived};
@@ -327,6 +292,12 @@ pub trait Check {
     fn needs(&self) -> Needs {
         Needs::All
     }
+    /// Whether the check was ported from the JavaScript host or written in Rust from the start. A [`Origin::BornInRust`] check has no
+    /// JavaScript answers to be held to (`tests/it/check_engine.rs` asks for its own `tests/it/check_c<n>.rs` instead), and may have no
+    /// JavaScript module.
+    fn origin(&self) -> Origin {
+        Origin::Ported
+    }
     /// The allow list the check reads through [`allow_list::read`] (`allowList` of the JavaScript check), if any: the same `Spec` its
     /// `run` passes to the reader, so the error-path parity tests (`tests/it/check_allow_list.rs`) run for every check that names one.
     fn allow_list(&self) -> Option<&'static allow_list::Spec> {
@@ -371,6 +342,25 @@ impl Mode {
         match self {
             Mode::Gate => "gate",
             Mode::ReportOnly => "report-only",
+        }
+    }
+}
+
+/// Where a check came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Origin {
+    /// Ported from the JavaScript host: parity tests hold it to the JavaScript answers.
+    Ported,
+    /// Written in Rust from the start (`conformance/README.md` lists it as such).
+    BornInRust,
+}
+
+impl Origin {
+    /// The name in the README's list of Rust checks.
+    pub fn name(self) -> &'static str {
+        match self {
+            Origin::Ported => "ported",
+            Origin::BornInRust => "born in Rust",
         }
     }
 }

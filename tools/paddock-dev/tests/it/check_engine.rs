@@ -412,36 +412,14 @@ fn a_new_check_gets_inline_waivers_from_the_engine_without_any_waiver_code() {
     assert!(check::report::format_text(&r).contains("waived CX1 a.txt:3  a TODO (until inline: tracked in the backlog)"));
 }
 
-/// The Rust check modules on disk (`src/check/c<n>.rs`; helpers such as `c53_liveness.rs` are not checks), as `c<n>`.
+/// The Rust check modules on disk (`src/check/c<n>.rs`; helpers such as `c53_liveness.rs` are not checks), as `c<n>`, in id order.
 fn rust_check_modules() -> Vec<String> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/check");
-    let mut out: Vec<String> = std::fs::read_dir(&dir)
+    check::scan::numbered(&dir, "c")
         .unwrap()
-        .filter_map(|e| e.ok()?.file_name().into_string().ok())
-        .filter_map(|f| f.strip_suffix(".rs").map(str::to_string))
-        .filter(|m| {
-            m.strip_prefix('c')
-                .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
-        })
-        .collect();
-    out.sort();
-    out
-}
-
-/// The `register_checks!` lines for these ids, as a mismatch prints them.
-fn macro_lines(ids: &[String]) -> String {
-    ids.iter()
-        .map(|id| format!("    {}::{id},", id.to_lowercase()))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// What `register_checks!` must hold: every `src/check/c<n>.rs` module, in id order (the order of `conformance/src/checks/index.mjs`
-/// while the JavaScript host had the checks).
-fn expected_registry(modules: &[String]) -> Vec<String> {
-    let mut mine: Vec<(u32, String)> = modules.iter().map(|m| (m[1..].parse().unwrap(), m.to_uppercase())).collect();
-    mine.sort();
-    mine.into_iter().map(|(_, id)| id).collect()
+        .into_iter()
+        .map(|n| format!("c{n}"))
+        .collect()
 }
 
 /// The ids `conformance.rust` of `conformance/paddock.ci.json` names, through the one accessor of that contract.
@@ -462,19 +440,15 @@ fn js_list() -> Vec<Value> {
     serde_json::from_slice(&js.stdout).unwrap()
 }
 
+/// The registry is written by build.rs from the files `src/check/c<n>.rs` (nothing names a check by hand): it holds exactly those, in id
+/// order, and `sources()` agrees with it.
 #[test]
 fn the_registry_is_one_list_in_id_order_and_names_every_check_module() {
     let reg = check::registry();
     let ids: Vec<String> = reg.iter().map(|c| c.id().to_string()).collect();
     assert_eq!(check::sources().iter().map(|(id, _)| id.to_string()).collect::<Vec<_>>(), ids);
-    // The macro stays hand-written (Rust has no glob of modules): it is checked against the module files, and a mismatch prints the
-    // whole block to paste (ER-42).
-    let want = expected_registry(&rust_check_modules());
-    assert!(
-        ids == want,
-        "register_checks! in tools/paddock-dev/src/check/mod.rs must name every src/check/c<n>.rs in id order; replace its lines with\n{}",
-        macro_lines(&want)
-    );
+    let want: Vec<String> = rust_check_modules().iter().map(|m| m.to_uppercase()).collect();
+    assert_eq!(ids, want, "the registry must be every src/check/c<n>.rs in id order");
     for entry in check::conformance::list_checks(&reg).as_array().unwrap() {
         assert!(entry["file"].as_str().unwrap().ends_with(".rs"));
     }
@@ -507,26 +481,11 @@ fn the_contracts_rust_list_is_the_registry_less_what_the_javascript_host_still_l
     }
 }
 
-#[test]
-fn a_new_rust_check_file_is_named_in_the_registry_message() {
-    let modules: Vec<String> = ["c120", "c39", "c53", "c999", "c1000"].map(String::from).to_vec();
-    let want = expected_registry(&modules);
-    assert_eq!(want, ["C39", "C53", "C120", "C999", "C1000"]);
-    assert_eq!(
-        macro_lines(&want[3..]),
-        "    c999::C999,\n    c1000::C1000,",
-        "the message gives the exact lines"
-    );
-}
-
 /// Every check the Rust host has and the JavaScript host does not has recorded JS answers to be held to: at least one file in
 /// `tests/fixtures/check/recorded`, `units` or the `expected.json` of C39 and C53, named after it (a check with none was ported without
-/// a parity proof). A check written in Rust from the start has no JavaScript answers to be held to: it is named in [`BORN_IN_RUST`]
-/// (with its own fixtures in `tests/it/check_c<n>.rs`), and a check that is listed there and also has a JS module is an error.
-const BORN_IN_RUST: [&str; 12] = [
-    "C145", "C173", "C174", "C175", "C176", "C177", "C178", "C179", "C180", "C181", "C182", "C183",
-];
-
+/// a parity proof). A check written in Rust from the start has no JavaScript answers to be held to: it declares `Origin::BornInRust`
+/// in its own `impl Check` (with its own fixtures in `tests/it/check_c<n>.rs`), and a check that says so and also has a JS module is an
+/// error (`check_lists.rs`).
 #[test]
 fn every_rust_only_check_has_recorded_js_answers() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/check");
@@ -539,12 +498,12 @@ fn every_rust_only_check_has_recorded_js_answers() {
         let id = c.id();
         if js.iter().any(|j| j["id"] == id) {
             assert!(
-                !BORN_IN_RUST.contains(&id),
-                "{id} has a JS module, so it was not born in Rust: take it off BORN_IN_RUST"
+                c.origin() != check::Origin::BornInRust,
+                "{id} has a JS module, so it was not born in Rust: drop `fn origin` from its impl"
             );
             continue;
         }
-        if BORN_IN_RUST.contains(&id) {
+        if c.origin() == check::Origin::BornInRust {
             assert!(
                 dir.join("../../it").join(format!("check_{}.rs", id.to_lowercase())).is_file(),
                 "{id} is born in Rust and has no tests/it/check_{}.rs",

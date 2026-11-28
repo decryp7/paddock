@@ -7,26 +7,14 @@ mod build_jobs_golden;
 mod cargo_target_lint;
 mod check;
 mod check_allow_list;
-mod check_c120;
-mod check_c123;
-mod check_c131;
-mod check_c139;
-mod check_c145;
-mod check_c173;
-mod check_c174;
-mod check_c175;
-mod check_c176;
-mod check_c177;
-mod check_c178;
-mod check_c179;
-mod check_c180;
-mod check_c181;
-mod check_c182;
-mod check_c183;
+// `mod check_c<n>;` for every tests/it/check_c<n>.rs: written by build.rs from the file names (user decision 2026-11-28, ER-40), so a new
+// check's test file needs no line here.
+include!(concat!(env!("OUT_DIR"), "/check_test_mods.rs"));
 mod check_engine;
 mod check_growth_approval;
 mod check_ids;
 mod check_lex;
+mod check_lists;
 mod check_renames;
 mod check_units;
 mod check_util;
@@ -86,7 +74,8 @@ pub(crate) fn full_tree(root: &std::path::Path) -> std::path::PathBuf {
 }
 
 /// The `mod` lines above are hand-written (Rust has no glob of modules), so a test file under `tests/it/` that they do not name is
-/// never compiled and its tests never run: every `tests/it/<name>.rs` and `tests/it/<name>/mod.rs` must have its line (ER-42).
+/// never compiled and its tests never run: every `tests/it/<name>.rs` and `tests/it/<name>/mod.rs` must have its line (ER-42). The
+/// one exception is a check's own `check_c<n>.rs`, whose line build.rs writes (the `include!` above), so it cannot be missing.
 #[test]
 #[allow(clippy::unwrap_used)]
 fn every_test_file_in_tests_it_is_a_module_of_main() {
@@ -104,7 +93,10 @@ fn every_test_file_in_tests_it_is_a_module_of_main() {
                 None if e.path().join("mod.rs").is_file() => name,
                 None => return None,
             };
-            (!declared.contains(&module.as_str())).then_some(module)
+            let generated = module
+                .strip_prefix("check_c")
+                .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+            (!generated && !declared.contains(&module.as_str())).then_some(module)
         })
         .collect();
     missing.sort();

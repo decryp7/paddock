@@ -174,6 +174,10 @@ impl Check for C174 {
         Mode::ReportOnly
     }
 
+    fn origin(&self) -> super::Origin {
+        super::Origin::BornInRust
+    }
+
     fn control(&self) -> Control {
         macro_rules! six {
             ($l:literal) => {

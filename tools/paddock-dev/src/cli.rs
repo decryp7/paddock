@@ -191,6 +191,17 @@ enum CheckCommand {
         #[arg(long)]
         root: Option<PathBuf>,
     },
+    /// The lists that name the Rust host's checks, written from the checks' own `impl Check` (user decision 2026-11-28, ER-40):
+    /// `conformance.rust` of conformance/paddock.ci.json and the table of Rust checks in conformance/README.md. `--check` changes
+    /// nothing and exits 1 with the difference when one is stale (`./dev gen check`, entry `rust-check-lists`).
+    Lists {
+        /// Only check; rewrite nothing (refused otherwise when CI=true).
+        #[arg(long)]
+        check: bool,
+        /// The repository root (default: the folder containing .git, found from the current folder).
+        #[arg(long)]
+        root: Option<PathBuf>,
+    },
     /// C102 (ADR 0072): every listen site is in docs/ipc-endpoints.toml with an ending test or a reason, and the ratchet of
     /// connection endings is well formed. With `--tag`, also refuses a release tag that a ratchet entry blocks.
     IpcEndpoints {
@@ -1022,6 +1033,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Check {
             command: CheckCommand::NewId { reserve, root },
         } => check_ids::command(root, reserve),
+        Command::Check {
+            command: CheckCommand::Lists { check: only_check, root },
+        } => check::lists::command(root, only_check),
         Command::Check {
             command: CheckCommand::IpcEndpoints { tag, root },
         } => ipc_endpoints::command(root, tag),

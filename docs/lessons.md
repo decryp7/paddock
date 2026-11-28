@@ -4691,3 +4691,15 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   as JSON lines (`paddock_throttle::status`, one definition for writer and reader, no text parsing, ER-42). The watchdog judges a queued child
   as waiting, the row cap and the table leave the queue out of run time, and a wait is not quiet time in the stall report. Such a row is never
   heavy itself (a test asserts it, ER-43). Cost and numbers: docs/benchmarks.md, "Gate rows whose child queues".
+
+## Every new check edited the same six lists, and parallel branches conflicted on them (2026-11-28, feat/generated-check-lists)
+- **What happened.** A Rust check was named by hand in six places: `register_checks!` in `check/mod.rs`, a `mod check_c<n>;` line in `tests/it/main.rs`,
+  `BORN_IN_RUST` in `check_engine.rs`, `conformance.rust` of `conformance/paddock.ci.json`, the id list in the README and the file itself. Train ag's
+  C181, C182 and C183 each added a line at the end of the same lists and conflicted twice (user, 2026-11-28, in chat). The JavaScript checks had
+  already been fixed this way (`paddock-check-lists.mjs`); the Rust host still had hand lists, and a test that printed the block to paste.
+- **Fix.** A check declares itself once, in its `impl Check` (`origin()` is new: ported or born in Rust). `build.rs` writes the registry and the test
+  module lines into `OUT_DIR` from the file names (`check::scan`, shared by the build script and the tests), so no committed list exists to conflict on or
+  go stale; `./dev check lists` writes `conformance.rust` and the README's table of Rust checks from the registry, and `./dev gen check` (entry
+  `rust-check-lists`, ER-40) flags a stale one. A new check is one `c<n>.rs`, its `tests/it/check_c<n>.rs` and its `docs/gates.toml` entry (kept by hand:
+  it holds approvals). The class is "a list that must equal the files is kept by hand" (ER-42): the JavaScript lists, the CI golden and the
+  `mod` lines of other test binaries are the earlier instances. Cost: docs/benchmarks.md, "The Rust check lists".

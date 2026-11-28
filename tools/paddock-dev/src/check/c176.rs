@@ -155,6 +155,10 @@ impl Check for C176 {
         Mode::ReportOnly
     }
 
+    fn origin(&self) -> super::Origin {
+        super::Origin::BornInRust
+    }
+
     fn control(&self) -> Control {
         Control {
             files: vec![

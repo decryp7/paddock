@@ -3617,3 +3617,22 @@ conformance run does (user, 2026-11-28, in chat: two gate rounds in the paddock-
   ...-moved.mjs`; the file was moved back after the run. The fixture-repository tests in `tests/it/check_c183.rs` hold the same shape.
 - **Not measured:** a cold build of `./dev`, a quiet machine, and the row on a push that deletes hundreds of files (one `git diff` of the same size
   as the push's own file list).
+
+## The Rust check lists (2026-11-28, feat/generated-check-lists)
+
+Question: what do the generated check lists cost (user, 2026-11-28, in chat: each check declares itself once; the lists are generated and checked by `./dev gen check`)?
+
+- **Machine:** the shared Mac mini (arm64), other agents running (1-minute load about 12); `/usr/bin/time -p`, three runs each; the `./dev` binary warm.
+- **Commands:** `./dev check lists --check` (the `rust-check-lists` entry of docs/generators.toml: read the registry, the JavaScript module names, the contract and
+  the README, compare) and, for comparison, the JavaScript generator `node conformance/bin/paddock-check-lists.mjs --check` and `./dev --version`.
+
+  | What | Wall s |
+  |---|---:|
+  | `./dev check lists --check`, 21 checks, 3 runs | 0.61, 0.63, 0.64 |
+  | `./dev --version` (the wrapper alone), 3 runs | 0.98, 1.23, 1.17 |
+  | `node conformance/bin/paddock-check-lists.mjs --check`, 59 modules, 3 runs | 0.07, 0.05, 0.05 |
+
+- **Result:** the generation inside the process is under 1 ms (`ms` in the command's own line); what a run costs is starting `./dev`. The registry and the test module
+  lines are written by `build.rs` in one directory listing each (file names only); a cold build of the tool runs it once, and cargo reruns it only when
+  `src/check` or `tests/it` change.
+- **Not measured:** a cold build of `./dev` with and without the script, and a Windows or Linux run.
