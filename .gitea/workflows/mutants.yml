@@ -8,9 +8,10 @@
 #
 # What it does:
 #   plan    the base (the push's `before`, else the `base` input, else the commit's first parent), then `./dev mutants plan`: how many
-#           mutants the diff has, and from that how many slices (one more for each SHARD_TARGET mutants up to MAX_SHARDS, then as many as
-#           keep each within MAX_PER_SHARD); the run starts at most MAX_SHARDS of them and names the rest NOT MEASURED.
-#   shards  one leg per started slice, ONE AT A TIME (`max-parallel: 1`), each `./dev mutants gate --shard k/n`; each prints one
+#           mutants the diff has; at most MAX_PER_LANDING (60) of them are chosen, round-robin over the changed functions (user decision
+#           2026-11-28), the rest NOT MEASURED; the chosen are split in slices (one more for each SHARD_TARGET mutants up to MAX_SHARDS, then as
+#           many as keep each within MAX_PER_SHARD). Every shard makes the same choice from its own listing of the same diff.
+#   shards  one leg per started slice, TWO AT A TIME (`max-parallel: 2`, user decision 2026-11-28), each `./dev mutants gate --shard k/n`; each prints one
 #           `mutants shard result:` line. A mutant's tests stop at the first failure and its build is incremental (mutants_gate.rs,
 #           NEXTEST_EXTRA and MUTANTS_ENV; docs/benchmarks.md, "Mutation testing: the per-mutant cost").
 #   record  per shard, measured, in part or NOT MEASURED (`./dev mutants record`: the result lines, read through the Actions API).
@@ -20,8 +21,11 @@
 #      running, the part ends at once, measures nothing and says so (`::notice::skipped: train ...`). Nothing WAITS, so no job of this
 #      workflow sits on a slot while a train needs it (a waiting job is a held slot: runner-wait's own note). The skipped diff is named in
 #      the record line: dispatch this workflow again with `base` set to it.
-#   2. At most one shard runs at a time, so this workflow never holds more than one of the three slots, and a train that starts during
-#      a shard finds two free and waits for none longer than that shard (SHARD_TARGET mutants, about 35 minutes expected, `timeout-minutes` below).
+#   2. At most two shards run at once (Gitea Actions has no "parallel only when idle": each shard's own check above is what makes the
+#      second one yield, since it runs that check when it starts), so this workflow holds at most two of the three slots: a train queued
+#      meanwhile starts on the third at once, the shards still waiting end at their check, and a train job that needs a second slot waits
+#      for at most one shard (SHARD_TARGET mutants, about 35 minutes expected, `timeout-minutes` below). No job of this workflow waits on a
+#      slot (ER-43).
 #   3. A newer landing queues behind a running run (`concurrency`, no cancel: cancelling would lose the older diff).
 # A run that cannot read the Actions runs proceeds (fail open, with a warning), as the scheduled runs do.
 
@@ -62,6 +66,7 @@ jobs:
       run: ${{ steps.plan.outputs.run }}
       shards: ${{ steps.plan.outputs.shards }}
       count: ${{ steps.plan.outputs.count }}
+      selected: ${{ steps.plan.outputs.selected }}
       slices: ${{ steps.plan.outputs.slices }}
       base: ${{ steps.base.outputs.base }}
     env:
@@ -125,11 +130,12 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
-    # One shard at a time: at most one of the three Linux slots, so a train always finds two. A shard is at most SHARD_TARGET mutants.
+    # Two shards at once (user decision 2026-11-28): at most two of the three Linux slots, so a train always finds one, and each shard
+    # yields at its start while a train is queued or running. A shard is about SHARD_TARGET mutants, at most MAX_PER_SHARD.
     timeout-minutes: 75
     strategy:
       fail-fast: false
-      max-parallel: 1
+      max-parallel: 2
       matrix:
         shard: ${{ fromJSON(needs.plan.outputs.shards) }}
     env:
@@ -233,6 +239,7 @@ jobs:
           HEAD_SHA: ${{ github.sha }}
           BASE: ${{ needs.plan.outputs.base }}
           COUNT: ${{ needs.plan.outputs.count }}
+          SELECTED: ${{ needs.plan.outputs.selected }}
           SLICES: ${{ needs.plan.outputs.slices }}
           SHARDS: ${{ needs.plan.outputs.shards }}
-        run: ./dev mutants record --base "$BASE" --head "$HEAD_SHA" --count "${COUNT:-0}" --slices "${SLICES:-0}" --shards "$SHARDS"
+        run: ./dev mutants record --base "$BASE" --head "$HEAD_SHA" --count "${COUNT:-0}" --selected "${SELECTED:-0}" --slices "${SLICES:-0}" --shards "$SHARDS"

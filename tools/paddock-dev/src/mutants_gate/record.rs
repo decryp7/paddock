@@ -140,7 +140,7 @@ pub fn shard_state(job: &ShardJob) -> ShardState {
 
 /// The record of a run: one summary line, then one NOT MEASURED line per shard that measured nothing or only part, then one per
 /// planned slice the run did not start ([`super::Plan::unplanned`]).
-pub fn record_text(base: &str, head: &str, count: usize, slices: usize, jobs: &[ShardJob]) -> String {
+pub fn record_text(base: &str, head: &str, count: usize, selected: usize, slices: usize, jobs: &[ShardJob]) -> String {
     let next = format!("Next step: dispatch mutants.yml with base set to {base} once no train runs");
     let mut lines = Vec::new();
     let (mut measured, mut partial, mut none) = (0, 0, 0);
@@ -182,6 +182,13 @@ pub fn record_text(base: &str, head: &str, count: usize, slices: usize, jobs: &[
             }
         }
     }
+    if count > selected {
+        lines.push(format!(
+            "::warning::mutants record: NOT MEASURED: {} of the {count} mutants are over the per-landing cap of {} (user decision 2026-11-28; the {selected} run were chosen round-robin over the changed functions). Next step: dispatch mutants.yml with base set to a commit between {base} and {head} (a member's merge) to measure part of the rest; base {base} again chooses the same {selected}",
+            count - selected,
+            super::MAX_PER_LANDING
+        ));
+    }
     let unstarted = slices.saturating_sub(jobs.len());
     if unstarted > 0 {
         lines.push(format!(
@@ -189,7 +196,7 @@ pub fn record_text(base: &str, head: &str, count: usize, slices: usize, jobs: &[
         ));
     }
     let head_line = format!(
-        "mutants record: {base}..{head} planned {count} mutants in {slices} slice(s), {} run: {measured} measured, {partial} in part, {none} NOT MEASURED{}; {} tested, {} caught, {} MISSED, {} timed out, {} unviable; {} s in the gates{}",
+        "mutants record: {base}..{head} planned {count} mutants, {selected} chosen, in {slices} slice(s), {} run: {measured} measured, {partial} in part, {none} NOT MEASURED{}; {} tested, {} caught, {} MISSED, {} timed out, {} unviable; {} s in the gates{}",
         jobs.len(),
         if unstarted > 0 {
             format!(", {unstarted} never run")
@@ -206,7 +213,7 @@ pub fn record_text(base: &str, head: &str, count: usize, slices: usize, jobs: &[
             .checked_div(sum.tested)
             .map_or(String::new(), |per| format!(", {per} s a mutant with each shard's setup"))
     );
-    let level = if none + partial + unstarted > 0 {
+    let level = if none + partial + unstarted > 0 || count > selected {
         "::warning::"
     } else {
         "::notice::"
@@ -226,6 +233,7 @@ pub fn command_record(
     base: &str,
     head: &str,
     count: usize,
+    selected: usize,
     slices: usize,
     shards: &str,
 ) -> Result<paddock_cli::Report, paddock_cli::CliError> {
@@ -241,7 +249,7 @@ pub fn command_record(
     let mut http = crate::wait::CurlHttp;
     let mut client = crate::ci_runs::client::Client::new(&mut http, &server, &repo, &token);
     let jobs = read_jobs(&mut client, run, &planned);
-    let text = record_text(base, head, count, slices, &jobs);
+    let text = record_text(base, head, count, selected, slices, &jobs);
     if let Some(path) = env("GITHUB_STEP_SUMMARY") {
         use std::io::Write;
         let _ = std::fs::OpenOptions::new()
@@ -340,7 +348,7 @@ mod tests {
                 Some(result_line("4/5", &summary(3, 0, 0, &["cut short after 3 of 6 mutants"]), 3300)),
             ),
         ];
-        let text = record_text("aaa", "bbb", 30, 5, &jobs);
+        let text = record_text("aaa", "bbb", 30, 30, 5, &jobs);
         let first = text.lines().next().unwrap();
         assert!(
             first.starts_with("::warning::mutants record: aaa..bbb planned 30 mutants"),
@@ -367,10 +375,27 @@ mod tests {
     #[test]
     fn a_run_whose_every_shard_measured_its_slice_is_a_notice_and_slices_over_the_limit_are_named() {
         let jobs = vec![job("0/1", "success", Some(result_line("0/1", &summary(2, 0, 0, &[]), 100)))];
-        let text = record_text("aaa", "bbb", 2, 1, &jobs);
+        let text = record_text("aaa", "bbb", 2, 2, 1, &jobs);
         assert!(text.starts_with("::notice::") && text.lines().count() == 1, "{text}");
-        let text = record_text("aaa", "bbb", 300, 3, &jobs);
+        let text = record_text("aaa", "bbb", 300, 30, 3, &jobs);
         assert!(text.contains("NOT MEASURED: 2 of the plan's 3 slices"), "{text}");
+    }
+
+    /// The mutants over the per-landing cap are NOT MEASURED in the record by number, with the base, and make it a warning.
+    #[test]
+    fn mutants_over_the_landing_cap_are_named_not_measured_with_the_base() {
+        let jobs = vec![job("0/1", "success", Some(result_line("0/1", &summary(2, 0, 0, &[]), 100)))];
+        let text = record_text("aaa", "bbb", 2, 2, 1, &jobs);
+        assert!(!text.contains("per-landing cap"), "{text}");
+        let text = record_text("aaa", "bbb", 80, 60, 1, &jobs);
+        assert!(text.starts_with("::warning::"), "{text}");
+        assert!(
+            text.lines().any(
+                |l| l.contains("NOT MEASURED: 20 of the 80 mutants are over the per-landing cap of 60")
+                    && l.contains("base set to a commit between aaa and bbb")
+            ),
+            "{text}"
+        );
     }
 
     #[test]

@@ -547,6 +547,9 @@ struct MutantsRecordArgs {
     /// The plan's mutant count.
     #[arg(long)]
     count: usize,
+    /// The mutants the plan chose (at most `mutants_gate::MAX_PER_LANDING`).
+    #[arg(long)]
+    selected: usize,
     /// The plan's slice count (`n` of every `k/n`).
     #[arg(long)]
     slices: usize,
@@ -963,7 +966,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         } => mutants_gate::command_plan(a.root, &a.base),
         Command::Mutants {
             command: MutantsCommand::Record(a),
-        } => mutants_gate::record::command_record(a.run, &a.base, &a.head, a.count, a.slices, &a.shards),
+        } => mutants_gate::record::command_record(a.run, &a.base, &a.head, a.count, a.selected, a.slices, &a.shards),
         Command::Mutants {
             command: MutantsCommand::Pin,
         } => Ok(Report::new(serde_json::json!({"pin": mutants_gate::PIN}), mutants_gate::PIN)),

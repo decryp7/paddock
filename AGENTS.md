@@ -185,9 +185,13 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   after a landing and `workflow_dispatch` with a `base`; report-only; **not in ci.yml**: its shards held the Linux runner and made trains queue
   43 to 62 minutes) runs the pinned cargo-mutants (`mutants_gate::PIN`, `./dev mutants pin`, `cargo install --locked`) `--in-diff` over the Rust
   functions the landing changed in `tools/paddock-dev` and `crates/` (tools/paddock-dev/src/mutants_gate.rs), to find a test or a guard that never
-  reaches the code it claims to check. Its plan job counts the diff's mutants (`./dev mutants plan --base <rev>`) and plans one shard for each 6 of
-  them (at most 12); the shards run one at a time (`./dev mutants gate --base <rev> --shard k/n`), and the plan and each shard first end at once
-  while a train is in CI (`./dev ci schedule-skip --any-event`: nothing waits on a slot), saying so in the record line. A MISSED mutant is a
+  reaches the code it claims to check. Its plan job lists the diff's mutants (`./dev mutants plan --base <rev>`), chooses at most 60 a landing
+  (`MAX_PER_LANDING`, round-robin over the changed functions, deterministic; user, 2026-11-28) and splits them in slices of about 10 (at most 14
+  a shard); the shards run two at a time (`max-parallel: 2`, user 2026-11-28; `./dev mutants gate --base <rev> --shard k/n`), each mutant's tests
+  stop at the first failure and its build is incremental. The plan and each shard first end at once while a train is queued or in CI (`./dev ci
+  schedule-skip --any-event`: nothing waits on a slot, so a train queued meanwhile finds a slot free and waits at most one shard for a second).
+  The record job (`./dev mutants record`) names every shard that measured nothing or only part (yielded, cancelled, over a cap, cut short) and
+  the mutants over the landing cap as NOT MEASURED, with the base to dispatch again. A MISSED mutant is a
   `::warning::` naming the function and the mutation; timeouts, unviable mutants and a shard that ran out of time are counted apart and never a
   pass. Report-only until its first green run (`MODE`, review 2026-12-11). Locally: `./dev mutants gate --base <rev>` (pin installed by hand).
   Measured: docs/benchmarks.md.

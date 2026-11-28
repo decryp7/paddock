@@ -93,6 +93,74 @@ pub const SHARD_TARGET: usize = 10;
 /// record, never silently.
 pub const MAX_SHARDS: usize = 12;
 
+/// The most mutants one landing tests (user decision, 2026-11-28, in chat): chosen evenly over the changed functions
+/// ([`select_round_robin`]), the rest NOT MEASURED in the plan and the record with the base. At the expected 2.3 minutes a mutant on
+/// Linux (docs/benchmarks.md, "Mutation testing: the per-mutant cost") 60 are six shards of 10, about 1.75 hours two at a time.
+pub const MAX_PER_LANDING: usize = 60;
+
+/// One mutant of a listing: its name (cargo-mutants' `name`, with line and column) and the function it is in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Listed {
+    /// `src/a.rs:6:5: replace f -> u32 with 0`.
+    pub name: String,
+    /// The workspace, file and function it belongs to.
+    pub group: String,
+}
+
+/// The indexes of at most `cap` mutants of `all`, one of each function in turn (round-robin over the functions in the order they first
+/// appear, each function's mutants in listing order), returned in listing order. Deterministic: the same listing gives the same choice,
+/// so every shard, which lists for itself, agrees with the plan.
+pub fn select_indexes(all: &[Listed], cap: usize) -> Vec<usize> {
+    let mut picked: Vec<usize> = turn_order(all).into_iter().take(cap).collect();
+    picked.sort_unstable();
+    picked
+}
+
+/// Every index of `all` in round-robin turn order: round by round, function by function.
+fn turn_order(all: &[Listed]) -> Vec<usize> {
+    let mut groups: Vec<(&str, Vec<usize>)> = Vec::new();
+    for (i, m) in all.iter().enumerate() {
+        match groups.iter_mut().find(|(g, _)| *g == m.group) {
+            Some((_, v)) => v.push(i),
+            None => groups.push((&m.group, vec![i])),
+        }
+    }
+    let deepest = groups.iter().map(|(_, v)| v.len()).max().unwrap_or(0);
+    (0..deepest)
+        .flat_map(|round| groups.iter().filter_map(move |(_, v)| v.get(round).copied()))
+        .collect()
+}
+
+/// The names of the first `cap` mutants in round-robin turn order ([`select_indexes`] is the same choice in listing order).
+pub fn select_round_robin(all: &[Listed], cap: usize) -> Vec<String> {
+    turn_order(all).into_iter().take(cap).map(|i| all[i].name.clone()).collect()
+}
+
+/// The mutants of a `--list --json` answer of workspace `ws`, parsed once (ER-42).
+fn parse_listing(ws: &str, text: &str) -> Result<Vec<Listed>, String> {
+    let v: Value = serde_json::from_str(text).map_err(|e| format!("`--list --json` is not JSON: {e}"))?;
+    let list = v.as_array().ok_or("`--list --json` is not a list")?;
+    list.iter()
+        .map(|m| {
+            let name = m["name"].as_str().ok_or("a listed mutant has no `name`")?.to_string();
+            let file = m["file"].as_str().unwrap_or("");
+            let function = m["function"]["function_name"].as_str().unwrap_or("(no function)");
+            Ok(Listed {
+                name,
+                group: format!("{ws}\u{0}{file}\u{0}{function}"),
+            })
+        })
+        .collect()
+}
+
+/// cargo-mutants' name filters (`-F`, one exact name each) for the chosen names.
+fn name_filters(names: &[&str]) -> Vec<String> {
+    names
+        .iter()
+        .flat_map(|n| ["-F".to_string(), format!("^{}$", regex::escape(n))])
+        .collect()
+}
+
 /// The whole run's hang limit: the baseline, the control and [`MAX_MUTANTS`] mutants.
 pub const RUN_LIMIT: Duration = Duration::from_secs(3300);
 
@@ -472,10 +540,100 @@ fn check_version(tool: &dyn Tool, root: &Path, scratch: &Path) -> Result<(), Str
 }
 
 /// The mutants `--in-diff` would test in `dir` (one workspace), optionally of one `--shard k/n`: how many.
-fn count_listed(tool: &dyn Tool, dir: &Path, diff_arg: &str, shard_arg: Option<&str>, scratch: &Path) -> Result<usize, String> {
+fn count_listed(
+    tool: &dyn Tool,
+    dir: &Path,
+    diff_arg: &str,
+    filters: &[String],
+    shard_arg: Option<&str>,
+    scratch: &Path,
+) -> Result<usize, String> {
     let mut list_args = args(&["--in-diff", diff_arg, "--list", "--json"]);
+    list_args.extend(filters.iter().cloned());
     list_args.extend(shard_arg.iter().flat_map(|a| args(&["--shard", a])));
     tool.mutants(dir, &list_args, scratch).and_then(|r| listed(&r.stdout))
+}
+
+/// One workspace's part of the diff: where it is listed and run, its diff file, and every mutant `--in-diff` finds there.
+struct Part {
+    ws: &'static str,
+    dir: PathBuf,
+    diff_arg: String,
+    mutants: Vec<Listed>,
+}
+
+/// Writes each workspace's diff to `scratch` and lists its mutants in the folder `dir_for` gives (the plan: the repository; the gate:
+/// its checkout, made on the first call). A workspace that cannot be read is a `not_measured` line; `dir_for` failing ends the whole run
+/// (`None`), as nothing can be listed.
+fn collect_parts(
+    tool: &dyn Tool,
+    root: &Path,
+    base: &str,
+    scratch: &Path,
+    lines: &mut Vec<String>,
+    not_measured: &mut Vec<String>,
+    dir_for: &mut dyn FnMut(&str) -> Result<PathBuf, String>,
+) -> Option<Vec<Part>> {
+    let mut parts = Vec::new();
+    for ws in WORKSPACES {
+        let diff = match tool.diff(root, ws, base) {
+            Ok(d) => d,
+            Err(e) => {
+                not_measured.push(format!("{ws}: the diff against {base} cannot be read ({e})"));
+                continue;
+            }
+        };
+        if diff.trim().is_empty() {
+            lines.push(format!("{ws}: no Rust source changed since {base}"));
+            continue;
+        }
+        let diff_file = scratch.join(format!("{}.diff", ws.replace('/', "-")));
+        if let Err(e) = std::fs::write(&diff_file, &diff) {
+            not_measured.push(format!("{ws}: the diff cannot be written ({e})"));
+            continue;
+        }
+        let dir = match dir_for(ws) {
+            Ok(d) => d,
+            Err(e) => {
+                not_measured.push(e);
+                return None;
+            }
+        };
+        let diff_arg = diff_file.to_string_lossy().into_owned();
+        let listing = tool
+            .mutants(&dir, &args(&["--in-diff", &diff_arg, "--list", "--json"]), scratch)
+            .and_then(|r| parse_listing(ws, &r.stdout));
+        match listing {
+            Ok(mutants) => parts.push(Part {
+                ws,
+                dir,
+                diff_arg,
+                mutants,
+            }),
+            Err(e) => not_measured.push(format!("{ws}: the mutants of the diff cannot be listed ({e})")),
+        }
+    }
+    Some(parts)
+}
+
+/// Per part, the exact-name filters of the mutants [`select_indexes`] chose over all parts together.
+fn chosen_filters(parts: &[Part]) -> Vec<Vec<String>> {
+    let all: Vec<Listed> = parts.iter().flat_map(|p| p.mutants.iter().cloned()).collect();
+    let chosen = select_indexes(&all, MAX_PER_LANDING);
+    let mut start = 0;
+    parts
+        .iter()
+        .map(|p| {
+            let end = start + p.mutants.len();
+            let names: Vec<&str> = chosen
+                .iter()
+                .filter(|&&i| i >= start && i < end)
+                .map(|&i| all[i].name.as_str())
+                .collect();
+            start = end;
+            name_filters(&names)
+        })
+        .collect()
 }
 
 /// Runs the control, then mutates the changed functions of every workspace in [`WORKSPACES`] between `base` and the commit `head` of
@@ -495,38 +653,45 @@ pub fn measure(tool: &dyn Tool, root: &Path, head: &str, base: &str, shard: Opti
         return s;
     }
     let tree = scratch.join("tree");
-    let mut budget = MAX_MUTANTS;
     let mut checked_out = false;
-    for ws in WORKSPACES {
-        let diff = match tool.diff(root, ws, base) {
-            Ok(d) => d,
-            Err(e) => {
-                s.not_measured.push(format!("{ws}: the diff against {base} cannot be read ({e})"));
-                continue;
-            }
-        };
-        if diff.trim().is_empty() {
-            s.lines.push(format!("{ws}: no Rust source changed since {base}"));
-            continue;
-        }
-        let slug = ws.replace('/', "-");
-        let diff_file = scratch.join(format!("{slug}.diff"));
-        if let Err(e) = std::fs::write(&diff_file, &diff) {
-            s.not_measured.push(format!("{ws}: the diff cannot be written ({e})"));
-            continue;
-        }
+    let mut dir_for = |ws: &str| -> Result<PathBuf, String> {
         if !checked_out {
-            if let Err(e) = tool.checkout(root, head, &tree) {
-                s.not_measured
-                    .push(format!("the checkout of {head} for the mutants cannot be made ({e})"));
-                return s;
-            }
+            tool.checkout(root, head, &tree)
+                .map_err(|e| format!("the checkout of {head} for the mutants cannot be made ({e})"))?;
             checked_out = true;
         }
-        let dir = tree.join(ws);
-        let diff_arg = diff_file.to_string_lossy().into_owned();
+        Ok(tree.join(ws))
+    };
+    let Some(parts) = collect_parts(tool, root, base, scratch, &mut s.lines, &mut s.not_measured, &mut dir_for) else {
+        return s;
+    };
+    let total: usize = parts.iter().map(|p| p.mutants.len()).sum();
+    if total > MAX_PER_LANDING {
+        s.lines.push(format!(
+            "{} of the {total} mutants of the diff are over the per-landing cap of {MAX_PER_LANDING} and not run (the plan and the record name them)",
+            total - MAX_PER_LANDING
+        ));
+    }
+    let filters = chosen_filters(&parts);
+    let mut budget = MAX_MUTANTS;
+    for (part, filters) in parts.iter().zip(&filters) {
+        let ws = part.ws;
+        let slug = ws.replace('/', "-");
+        let dir = &part.dir;
+        let diff_arg = part.diff_arg.clone();
         let shard_arg = shard.map(|(k, n)| format!("{k}/{n}"));
-        let n = match count_listed(tool, &dir, &diff_arg, shard_arg.as_deref(), scratch) {
+        if part.mutants.is_empty() {
+            s.lines.push(format!("{ws}: the changed lines hold no function to mutate"));
+            continue;
+        }
+        if filters.is_empty() {
+            s.lines.push(format!(
+                "{ws}: none of its {} mutants is in the landing's choice",
+                part.mutants.len()
+            ));
+            continue;
+        }
+        let n = match count_listed(tool, dir, &diff_arg, filters, shard_arg.as_deref(), scratch) {
             Ok(n) => n,
             Err(e) => {
                 s.not_measured.push(format!("{ws}: the mutants of the diff cannot be listed ({e})"));
@@ -534,7 +699,7 @@ pub fn measure(tool: &dyn Tool, root: &Path, head: &str, base: &str, shard: Opti
             }
         };
         if n == 0 {
-            s.lines.push(format!("{ws}: the changed lines hold no function to mutate"));
+            s.lines.push(format!("{ws}: this shard's slice of the chosen mutants is empty"));
             continue;
         }
         // A planned shard is whole or not measured (the plan's shard count is what bounds it); an unsharded run takes the cap's slice.
@@ -558,9 +723,9 @@ pub fn measure(tool: &dyn Tool, root: &Path, head: &str, base: &str, shard: Opti
             continue;
         }
         let out = scratch.join(format!("{slug}-out"));
-        let mut a = args(&[
-            "--in-diff",
-            &diff_arg,
+        let mut a = args(&["--in-diff", &diff_arg]);
+        a.extend(filters.iter().cloned());
+        a.extend(args(&[
             "--in-place",
             "--no-shuffle",
             "--timeout",
@@ -571,7 +736,7 @@ pub fn measure(tool: &dyn Tool, root: &Path, head: &str, base: &str, shard: Opti
             "nextest",
             "--output",
             &out.to_string_lossy(),
-        ]);
+        ]));
         if let Some(sh) = &shard_arg {
             a.extend(args(&["--shard", sh]));
         } else if take < n {
@@ -580,7 +745,7 @@ pub fn measure(tool: &dyn Tool, root: &Path, head: &str, base: &str, shard: Opti
         }
         a.extend(args(&["--", "--profile", NEXTEST_PROFILE]));
         a.extend(args(NEXTEST_EXTRA));
-        let ran = match tool.mutants(&dir, &a, scratch) {
+        let ran = match tool.mutants(dir, &a, scratch) {
             Ok(r) => r,
             Err(e) => {
                 s.not_measured.push(format!("{ws}: {e}"));
@@ -717,6 +882,8 @@ pub struct Plan {
     pub slices: usize,
     /// The shards the run starts: the first `min(slices, MAX_SHARDS)` slices.
     pub shards: usize,
+    /// The mutants the landing tests: at most [`MAX_PER_LANDING`], chosen by [`select_round_robin`].
+    pub selected: usize,
     /// Why part of the diff could not be counted: never read as "no mutants" (ER-33).
     pub not_measured: Vec<String>,
     /// One line per workspace.
@@ -731,39 +898,31 @@ pub fn plan(tool: &dyn Tool, root: &Path, base: &str, scratch: &Path) -> Plan {
         p.not_measured.push(why);
         return p;
     }
-    for ws in WORKSPACES {
-        let diff = match tool.diff(root, ws, base) {
-            Ok(d) => d,
-            Err(e) => {
-                p.not_measured.push(format!("{ws}: the diff against {base} cannot be read ({e})"));
-                continue;
-            }
-        };
-        if diff.trim().is_empty() {
-            p.lines.push(format!("{ws}: no Rust source changed since {base}"));
-            continue;
-        }
-        let diff_file = scratch.join(format!("{}.diff", ws.replace('/', "-")));
-        if let Err(e) = std::fs::write(&diff_file, &diff) {
-            p.not_measured.push(format!("{ws}: the diff cannot be written ({e})"));
-            continue;
-        }
-        match count_listed(tool, &root.join(ws), &diff_file.to_string_lossy(), None, scratch) {
-            Ok(n) => {
-                p.count += n;
-                p.lines.push(format!("{ws}: {n} mutants in the changed lines"));
-            }
-            Err(e) => p.not_measured.push(format!("{ws}: the mutants of the diff cannot be listed ({e})")),
-        }
+    let mut dir_for = |ws: &str| -> Result<PathBuf, String> { Ok(root.join(ws)) };
+    let parts = collect_parts(tool, root, base, scratch, &mut p.lines, &mut p.not_measured, &mut dir_for).unwrap_or_default();
+    for part in &parts {
+        p.count += part.mutants.len();
+        p.lines
+            .push(format!("{}: {} mutants in the changed lines", part.ws, part.mutants.len()));
     }
-    p.slices = shard_count(p.count);
+    p.selected = p.count.min(MAX_PER_LANDING);
+    if p.count > p.selected {
+        let functions: std::collections::BTreeSet<&str> = parts.iter().flat_map(|x| x.mutants.iter().map(|m| m.group.as_str())).collect();
+        p.not_measured.push(format!(
+            "{} of the {} mutants are over the per-landing cap of {MAX_PER_LANDING} (user decision 2026-11-28; the {MAX_PER_LANDING} run are chosen round-robin over the {} changed functions); to measure more, dispatch mutants.yml with base set to a commit between {base} and the head (a member's merge): the same base chooses the same {MAX_PER_LANDING}",
+            p.count - p.selected,
+            p.count,
+            functions.len()
+        ));
+    }
+    p.slices = shard_count(p.selected);
     p.shards = p.slices.min(MAX_SHARDS);
     if p.slices > p.shards {
-        let per = p.count.div_ceil(p.slices);
+        let per = p.selected.div_ceil(p.slices);
         p.not_measured.push(format!(
             "about {} of the {} mutants (slices {}/{} to {}/{}) are over the run's limit of {MAX_SHARDS} shards of at most {MAX_PER_SHARD}; dispatch mutants.yml again for them after this run, or land the change in smaller parts",
-            p.count.saturating_sub(per * p.shards),
-            p.count,
+            p.selected.saturating_sub(per * p.shards),
+            p.selected,
             p.shards,
             p.slices,
             p.slices - 1,
@@ -777,9 +936,10 @@ pub fn plan(tool: &dyn Tool, root: &Path, base: &str, scratch: &Path) -> Plan {
 pub fn plan_outputs(p: &Plan) -> String {
     let list: Vec<String> = (0..p.shards).map(|k| format!("{k}/{}", p.slices)).collect();
     format!(
-        "run={}\ncount={}\nslices={}\nshards={}\n",
+        "run={}\ncount={}\nselected={}\nslices={}\nshards={}\n",
         p.shards > 0,
         p.count,
+        p.selected,
         p.slices,
         json!(list)
     )
@@ -795,10 +955,11 @@ pub fn plan_text(p: &Plan) -> String {
         text.push_str(&format!("::warning::mutants plan: NOT MEASURED: {why}\n"));
     }
     text.push_str(&format!(
-        "mutants plan: {} mutants in {} slice(s) of at most {}, {} shard(s) run\n",
+        "mutants plan: {} mutants, {} chosen, in {} slice(s) of at most {}, {} shard(s) run\n",
         p.count,
+        p.selected,
         p.slices,
-        p.count.div_ceil(p.slices.max(1)),
+        p.selected.div_ceil(p.slices.max(1)),
         p.shards
     ));
     text
@@ -946,6 +1107,8 @@ mod tests {
         version: String,
         control: String,
         listed: usize,
+        /// How many functions the listed mutants are spread over (mutant `i` is in function `f{i % groups}`).
+        groups: usize,
         run: String,
         run_code: Option<i32>,
         diff: String,
@@ -964,6 +1127,7 @@ mod tests {
                     ],
                 ),
                 listed: 3,
+                groups: 1,
                 run: outcomes("Success", &[("CaughtMutant", "f", 10, "replace f -> u32 with 0")]),
                 run_code: Some(0),
                 diff: "diff --git a/src/a.rs b/src/a.rs\n".into(),
@@ -972,6 +1136,37 @@ mod tests {
         }
         fn calls(&self) -> Vec<Vec<String>> {
             self.calls.lock().unwrap().clone()
+        }
+        /// The `--list --json` answer as cargo-mutants 27 gives it: `-F` name filters applied, then the `--shard k/n` slice.
+        fn listing(&self, a: &[String]) -> String {
+            let filters: Vec<regex::Regex> = a
+                .windows(2)
+                .filter(|w| w[0] == "-F")
+                .map(|w| regex::Regex::new(&w[1]).unwrap())
+                .collect();
+            let mut list: Vec<Value> = (0..self.listed)
+                .map(|i| {
+                    let f = format!("f{}", i % self.groups.max(1));
+                    json!({"name": format!("src/a.rs:{}:5: replace {f} -> u32 with {i}", i + 1), "file": "src/a.rs",
+                           "function": {"function_name": f}, "package": "p"})
+                })
+                .filter(|m| filters.is_empty() || filters.iter().any(|r| r.is_match(m["name"].as_str().unwrap())))
+                .collect();
+            if let Some(w) = a.windows(2).find(|w| w[0] == "--shard") {
+                let (k, n) = parse_shard(&w[1]).unwrap();
+                let chunk = list.len().div_ceil(n as usize);
+                list = list.into_iter().skip(k as usize * chunk).take(chunk).collect();
+            }
+            json!(list).to_string()
+        }
+        /// The names the mutants run was limited to (its `-F` filters), in order.
+        fn run_filters(&self) -> Vec<String> {
+            let calls = self.calls();
+            let run = calls
+                .iter()
+                .find(|a| a.iter().any(|x| x == "--test-tool"))
+                .expect("the mutants run");
+            run.windows(2).filter(|w| w[0] == "-F").map(|w| w[1].clone()).collect()
         }
     }
 
@@ -989,7 +1184,7 @@ mod tests {
                 return ok(self.version.clone(), Some(0));
             }
             if a.iter().any(|x| x == "--list") {
-                return ok(json!(vec![0; self.listed]).to_string(), Some(0));
+                return ok(self.listing(a), Some(0));
             }
             let text = if cwd.ends_with("control") { &self.control } else { &self.run };
             let out = a.iter().position(|x| x == "--output").map(|i| PathBuf::from(&a[i + 1])).unwrap();
@@ -1227,7 +1422,7 @@ mod tests {
     #[test]
     fn a_shard_over_the_cap_is_not_measured_and_names_the_cap_it_is_over() {
         let mut over = Fake::new();
-        over.listed = MAX_PER_SHARD + 4;
+        over.listed = 2 * MAX_PER_SHARD + 2;
         let scratch = tempfile::tempdir().unwrap();
         let s = measure(
             &over,
@@ -1270,8 +1465,16 @@ mod tests {
             // Every shard is k/total of one split: total slices of at most the cap each, of which the first MAX_SHARDS run.
             let total = parse_shard(&list[0]).unwrap().1 as usize;
             assert!(list.iter().all(|s| parse_shard(s).unwrap().1 as usize == total), "{list:?}");
-            assert!(n.div_ceil(total) <= MAX_PER_SHARD, "n {n}: {total} slices of {}", n.div_ceil(total));
-            let fits = n <= MAX_SHARDS * MAX_PER_SHARD;
+            let chosen = n.min(MAX_PER_LANDING);
+            assert_eq!(p.selected, chosen, "{p:?}");
+            assert!(
+                chosen.div_ceil(total) <= MAX_PER_SHARD,
+                "n {n}: {total} slices of {}",
+                chosen.div_ceil(total)
+            );
+            // The landing cap leaves mutants out before the shard limit can (MAX_PER_LANDING fits in MAX_SHARDS shards).
+            const { assert!(MAX_PER_LANDING <= MAX_SHARDS * MAX_PER_SHARD) };
+            let fits = n <= MAX_PER_LANDING;
             assert_eq!(p.not_measured.is_empty(), fits, "n {n}: {p:?}");
             if !fits {
                 assert!(plan_text(&p).contains("NOT MEASURED"), "{}", plan_text(&p));
@@ -1316,6 +1519,87 @@ mod tests {
         assert_eq!(argv, ["mutants", "--list"]);
     }
 
+    /// User decision, 2026-11-28 (in chat): a landing tests at most MAX_PER_LANDING mutants, the plan splits only those, and the rest is
+    /// NOT MEASURED in the plan with the reason and the base.
+    #[test]
+    fn a_landing_over_the_cap_plans_only_the_capped_mutants_and_names_the_rest() {
+        let mut f = Fake::new();
+        f.listed = 200;
+        f.groups = 20;
+        let scratch = tempfile::tempdir().unwrap();
+        let p = plan(&f, scratch.path(), "basesha", scratch.path());
+        let out = plan_outputs(&p);
+        assert!(out.contains("count=200\n"), "{out}");
+        assert!(out.contains(&format!("selected={MAX_PER_LANDING}\n")), "{out}");
+        assert_eq!(p.slices, shard_count(MAX_PER_LANDING), "{p:?}");
+        let why = p
+            .not_measured
+            .iter()
+            .find(|w| w.contains("per-landing cap"))
+            .unwrap_or_else(|| panic!("{p:?}"));
+        assert!(
+            why.contains(&format!("{} of the 200", 200 - MAX_PER_LANDING)) && why.contains("basesha"),
+            "{why}"
+        );
+    }
+
+    /// The capped mutants are chosen round-robin over the changed functions, so every function gets its share, and the same diff always
+    /// gives the same choice (each shard chooses again from its own listing, and must agree with the plan).
+    #[test]
+    fn the_capped_mutants_are_chosen_evenly_over_the_functions_and_the_same_every_time() {
+        let run = || {
+            let mut f = Fake::new();
+            f.listed = 200;
+            f.groups = 3;
+            let scratch = tempfile::tempdir().unwrap();
+            let s = measure(
+                &f,
+                scratch.path(),
+                "headsha",
+                "base",
+                Some((0, 6)),
+                scratch.path(),
+                Mode::ReportOnly,
+            );
+            assert!(s.not_measured.is_empty(), "a slice of 10 of the capped 60: {:?}", s.not_measured);
+            f.run_filters()
+        };
+        let first = run();
+        assert_eq!(
+            first.len(),
+            MAX_PER_LANDING,
+            "every shard limits its run to the landing's capped choice: {first:?}"
+        );
+        for g in 0..3 {
+            let n = first.iter().filter(|r| r.contains(&format!("replace f{g} "))).count();
+            assert_eq!(n, MAX_PER_LANDING / 3, "function f{g}: {first:?}");
+        }
+        assert_eq!(first, run(), "the choice is deterministic");
+    }
+
+    /// Round-robin keeps a small function whole and splits the rest evenly.
+    #[test]
+    fn round_robin_takes_one_mutant_of_each_function_in_turn() {
+        let m = |name: &str, function: &str| Listed {
+            name: name.into(),
+            group: function.into(),
+        };
+        let mut all = vec![
+            m("a1", "a"),
+            m("a2", "a"),
+            m("a3", "a"),
+            m("a4", "a"),
+            m("b1", "b"),
+            m("c1", "c"),
+            m("c2", "c"),
+            m("c3", "c"),
+        ];
+        assert_eq!(select_round_robin(&all, 5), ["a1", "b1", "c1", "a2", "c2"]);
+        assert_eq!(select_round_robin(&all, 100).len(), all.len());
+        all.clear();
+        assert!(select_round_robin(&all, 5).is_empty());
+    }
+
     #[test]
     fn a_shard_is_k_of_n_with_k_below_n() {
         assert_eq!(parse_shard("0/4"), Ok((0, 4)));
@@ -1348,7 +1632,7 @@ mod tests {
         );
         assert_eq!(s.tested, 1);
         let mut over = Fake::new();
-        over.listed = MAX_PER_SHARD + 1;
+        over.listed = 2 * MAX_PER_SHARD + 2;
         let scratch = tempfile::tempdir().unwrap();
         let s = measure(
             &over,
@@ -1360,6 +1644,8 @@ mod tests {
             Mode::ReportOnly,
         );
         assert_eq!((s.tested, s.over_cap), (0, MAX_PER_SHARD + 1), "{:?}", s.lines);
+        // The slice is over the shard cap, not the landing cap.
+        const { assert!(MAX_PER_SHARD * 2 + 2 <= MAX_PER_LANDING) };
         assert!(s.lines.iter().any(|l| l.contains("plan more shards")), "{:?}", s.lines);
     }
 

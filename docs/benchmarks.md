@@ -3416,6 +3416,9 @@ slot (before: 12 shards of 72 to 75 minutes, about 15 hours, with about half of 
 environment), the hang detector stays 900 s (four times the Mac suite, 2.5 times the Linux one), `--test-workspace` stays off (cargo-mutants already
 tests only the mutated package; paddock-dev is one package of 2990 tests, and a narrower filter would turn caught mutants into false MISSED ones).
 Limits: four mutants of one file, all caught, one run each on a loaded Mac; no missed mutant timed with the new arguments; no CI run yet.
+**Then (user decision 2026-11-28, in chat):** at most 60 mutants a landing (`MAX_PER_LANDING`, round-robin over the changed functions; train ae's
+156, 134 of them in 46 functions of tools/paddock-dev: 60 chosen, 96 NOT MEASURED in the plan and the record) and two shards at once (`max-parallel: 2`, each yielding to a train
+at its start). Expected for train ae, not measured: six slices of 10, about 35 minutes each, about 1.75 hours.
 
 ## Push gate hang limits of the long rows (2026-11-27, fix/gate-row-stall)
 
