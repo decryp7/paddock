@@ -84,12 +84,33 @@ mod real {
     }
 
     // (3) the same at the file: a lock taken here is not held by a child that outlives the handle.
+    //
+    // On macOS (and any fork+exec) a spawn gives its child a copy of the whole descriptor table, close-on-exec ones included, until
+    // the child's exec closes them; the lock is on the open file description, so a handle dropped while another thread is
+    // mid-spawn looks held for a moment (lessons.md, "A just-released lock can look held"). That is not inheritance: it clears
+    // within moments, and inheritance never does. So the test overlaps a spawner thread on purpose (it failed with the other tests
+    // as its accidental spawners) and judges the lock on the observation that it becomes free while the child still runs.
     #[test]
     fn a_child_started_while_the_lock_is_held_does_not_inherit_it() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        /// Spawns that must have overlapped the drops before the test may end, on a machine of any speed.
+        const MIN_SPAWNS: usize = 50;
         let w = World::new();
         let lock = w.root().join("throttle-slot1.lock");
-        let held = paddock_throttle::slotfile::take(&lock).unwrap().expect("free");
         let flag = w.flag();
+        let stop = Arc::new(AtomicBool::new(false));
+        let spawned = Arc::new(AtomicUsize::new(0));
+        let spawner = {
+            let (stop, spawned) = (stop.clone(), spawned.clone());
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::SeqCst) {
+                    let _ = paddock_testkit::TestCommand::new("true").status();
+                    spawned.fetch_add(1, Ordering::SeqCst);
+                }
+            })
+        };
+        let held = paddock_throttle::slotfile::take(&lock).unwrap().expect("free");
         let mut child = Guard {
             child: paddock_testkit::TestCommand::new("sh")
                 .args(["-c", r#"while [ ! -e "$0" ]; do sleep 0.1; done"#, flag.to_str().unwrap()])
@@ -98,13 +119,53 @@ mod real {
             label: "child that outlives the handle".into(),
         };
         assert!(paddock_throttle::slotfile::is_held(&lock).unwrap());
+        // Drop and take again while the spawner runs, until it has overlapped enough.
         drop(held);
+        while spawned.load(Ordering::SeqCst) < MIN_SPAWNS {
+            wait_until("the lock is free again", || !paddock_throttle::slotfile::is_held(&lock).unwrap());
+            let again = paddock_throttle::slotfile::take(&lock).unwrap();
+            drop(again);
+        }
+        stop.store(true, Ordering::SeqCst);
+        spawner.join().unwrap();
         assert!(child.child.try_wait().unwrap().is_none(), "the child is still running");
-        assert!(
-            !paddock_throttle::slotfile::is_held(&lock).unwrap(),
-            "the lock went with the handle, not with the child"
-        );
+        wait_until("the lock went with the handle, not with the child", || {
+            !paddock_throttle::slotfile::is_held(&lock).unwrap()
+        });
         w.release();
         assert!(child.finish().success());
+    }
+
+    // (ER-33) the probe above can see a real inheritance: a child that is given the locked description (as its stdin) keeps the lock
+    // after the handle is gone, and frees it when it ends.
+    #[test]
+    fn a_child_given_the_locked_file_keeps_the_lock_until_it_ends() {
+        let w = World::new();
+        let lock = w.root().join("throttle-slot2.lock");
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock)
+            .unwrap();
+        file.try_lock().expect("free");
+        let flag = w.flag();
+        let mut child = Guard {
+            child: paddock_testkit::TestCommand::new("sh")
+                .args(["-c", r#"while [ ! -e "$0" ]; do sleep 0.1; done"#, flag.to_str().unwrap()])
+                .stdin(file.try_clone().unwrap())
+                .spawn()
+                .expect("spawn sh"),
+            label: "child that inherits the lock".into(),
+        };
+        drop(file);
+        assert!(child.child.try_wait().unwrap().is_none(), "the child is still running");
+        assert!(paddock_throttle::slotfile::is_held(&lock).unwrap(), "the child holds the lock");
+        w.release();
+        assert!(child.finish().success());
+        wait_until("the child's end frees the lock", || {
+            !paddock_throttle::slotfile::is_held(&lock).unwrap()
+        });
     }
 }

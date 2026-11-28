@@ -458,6 +458,11 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   (`is_held_settled`). Rule: `is_held_now` only where a held reading leads to waiting and looking again; a one-shot
   decision uses `claim` or `is_held_settled`. When a fix is "pick the right one of two calls", make the wrong one fail to
   compile or carry its cost in its name; a test that only gets slower proves nothing.
+  Second instance (2026-11-28): `filelock::real::a_child_started_while_the_lock_is_held_does_not_inherit_it` failed on macOS beside the
+  other filelock tests, which spawn throttles on other threads: the lock is on the open file description, `std` opens it close-on-exec
+  (the lock file is not inherited), and still a spawn on another thread holds a copy until its exec. The test now overlaps a spawner on
+  purpose, judges the lock freed on the observation that it clears while the child still runs, and has a control that a really
+  inherited description stays held. The product needs no change: a waiter that sees a slot held for that moment polls again.
 - A Node script's "am I the main module" check must compare real paths: Node gives `import.meta.url` the resolved path
   and leaves `process.argv[1]` as given, so through a symlink (a CI work folder linked to a stable one, `node_modules`)
   `import.meta.url === pathToFileURL(process.argv[1]).href` is false and the script exits 0 doing nothing (the Chrome for
