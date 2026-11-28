@@ -277,7 +277,9 @@ mod tests {
             "unsupported is not a holder"
         );
         let held = InstanceLock::claim(&path).unwrap();
-        assert!(is_held_now(&path), "a real holder is held at one check");
+        paddock_testkit::lock::await_held("a real holder is held at one check", || {
+            is_held_now(&path)
+        });
         drop(held);
     }
 
@@ -354,7 +356,7 @@ mod tests {
             held.borrow().is_some()
         });
         let first = held.take();
-        assert!(is_held_settled(&path));
+        paddock_testkit::lock::await_held("the claimed lock is held", || is_held_settled(&path));
         assert!(matches!(InstanceLock::claim(&path).unwrap(), Claim::Held));
         let other = tmp.path().join("b.lock");
         until(|| matches!(InstanceLock::claim(&other), Ok(Claim::Acquired(_))));
@@ -422,10 +424,9 @@ mod tests {
         std::fs::write(&file, b"x").unwrap();
         let err = InstanceLock::claim(&file.join("a.lock")).unwrap_err();
         assert!(err.to_string().contains("a.lock"), "{err}");
-        assert!(
-            !is_held_settled(&file.join("a.lock")),
-            "an error is not a holder"
-        );
+        paddock_testkit::lock::await_free("an error is not a holder", || {
+            is_held_settled(&file.join("a.lock"))
+        });
         // A folder where the lock file should be cannot be opened as one.
         let folder = tmp.path().join("folder.lock");
         std::fs::create_dir(&folder).unwrap();
@@ -445,9 +446,9 @@ mod tests {
         std::fs::write(&file, "x").unwrap();
         // a path below a regular file cannot be opened
         assert_eq!(held_state(&file.join("agent.lock")), HeldState::Unknown);
-        assert!(
-            !is_held_settled(&file.join("agent.lock")),
-            "is_held_settled keeps its old answer for other callers"
+        paddock_testkit::lock::await_free(
+            "is_held_settled keeps its old answer for other callers",
+            || is_held_settled(&file.join("agent.lock")),
         );
         let lock = dir.join("agent.lock");
         assert_eq!(held_state(&lock), HeldState::Free);

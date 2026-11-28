@@ -15,6 +15,8 @@
 //! `--format` of the call that reads the commit, [`TRAILERS_FORMAT`], so no process is started for them and no regex reads the text);
 //! only a merge made by hand, without them, falls back to the old reading of its subject.
 
+use crate::git::short;
+
 /// The `--format` placeholder that gives a commit's trailer block, as git's own parser reads it: `Key: value` lines of the last
 /// paragraph when it is a trailer block, unfolded; empty when there is none.
 pub const TRAILERS_FORMAT: &str = "%(trailers:only,unfold)";
@@ -70,6 +72,19 @@ pub fn merge_member(subject: &str, trailers: &str) -> MergeMember {
     }
 }
 
+/// The scratch ref the sync tip is pushed to for the trial: `sync/<member>/<short sha of the synced commit>`. A new commit is a new
+/// ref, so no push replaces one. `merge check --gates` finds the trial by the same name ([`crate::merge_check`]'s member trial).
+pub fn sync_ref(member: &str, synced_sha: &str) -> String {
+    format!("sync/{member}/{}", short(synced_sha))
+}
+
+/// `sync/<member>/<short sha>` as `(member, short sha)`: a last component of exactly nine hex digits (what [`sync_ref`] writes). An
+/// old flat `sync/<member>` (no sha) is `None`.
+pub fn split_sync_ref(reference: &str) -> Option<(&str, &str)> {
+    let (member, sha) = reference.strip_prefix("sync/")?.rsplit_once('/')?;
+    (sha.len() == 9 && sha.bytes().all(|b| b.is_ascii_hexdigit()) && !member.is_empty()).then_some((member, sha))
+}
+
 /// The member a ref names: the branch (`origin/` dropped), and for `sync/<member>/<hex>` the member's own branch and the ref.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Named {
@@ -82,8 +97,8 @@ pub struct Named {
 /// What `arg` (a branch, a remote branch or a `sync/<member>/<hex>` ref) names.
 pub fn named(arg: &str) -> Named {
     let name = arg.strip_prefix("origin/").unwrap_or(arg);
-    // `sync/<member>/<short sha>` is the one spelling [`super::trial_dispatch::sync_ref`] writes and reads.
-    match super::trial_dispatch::split_sync_ref(name) {
+    // `sync/<member>/<short sha>` is the one spelling [`sync_ref`] writes and reads.
+    match split_sync_ref(name) {
         Some((member, _)) => Named {
             branch: member.to_string(),
             sync_ref: Some(name.to_string()),
@@ -198,6 +213,16 @@ pub fn path_reason<'m>(message: &'m str, key: &str, path: &str) -> Option<&'m st
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_sync_ref_splits_into_member_and_sha_and_a_flat_one_does_not() {
+        assert_eq!(split_sync_ref("sync/feat/x/012345678"), Some(("feat/x", "012345678")));
+        assert_eq!(split_sync_ref("sync/feat/x"), None);
+        assert_eq!(split_sync_ref("sync/feat/0123456789"), None);
+        assert_eq!(split_sync_ref("feat/x/012345678"), None);
+        let made = sync_ref("feat/x", "0123456789abcdef0123456789abcdef01234567");
+        assert_eq!(split_sync_ref(&made), Some(("feat/x", "012345678")));
+    }
 
     #[test]
     fn the_trailers_name_the_member_and_the_subject_is_only_the_fallback() {

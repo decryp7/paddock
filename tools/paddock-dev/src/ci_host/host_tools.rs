@@ -132,7 +132,7 @@ pub fn run_with(env: &HashMap<String, String>, windows: bool, arch: &str, pin: &
 
 /// `host-tools` messages carry no step prefix (the action printed `cargo-nextest ...` lines): one `::error::` line.
 fn fail_plain(step: &mut Step<'_>, cause: &str, next: &str) -> i32 {
-    step.say(crate::ci_tool::error_line(cause, next));
+    step.say(crate::log_text::error_line(cause, next));
     1
 }
 

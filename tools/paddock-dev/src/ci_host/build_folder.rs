@@ -22,6 +22,7 @@
 //! (docs/dev-setup.md), so the slot does not enter the key.
 
 use super::Step;
+use crate::cargo_target::{REMAP_TABLE, REMAP_TARGET};
 use clap::Args as ClapArgs;
 use paddock_env::{Os, winpath};
 use std::collections::HashMap;
@@ -39,14 +40,6 @@ pub struct BuildFolderArgs {
 
 /// The short name the CLI uses.
 pub type Args = BuildFolderArgs;
-
-/// The one fixed name the build folder is remapped to (`ci.toml`'s `--remap-path-prefix=<build folder>=REMAP_TARGET`). The readers that
-/// accept a `ci.toml` as "only the build folder" (`input_hash::only_names_build_folder`, the release probe) match this name, and the
-/// twins `conformance/ci/build-folder.sh` and the `dev` wrapper's `only_build_folder` spell it as a literal.
-pub const REMAP_TARGET: &str = "/paddock-target";
-
-/// The cargo table that holds the remap (see the module comment for why not `[build]`).
-pub const REMAP_TABLE: &str = "[target.'cfg(all())']";
 
 /// The text of `ci.toml`: the build folder (`None` in a Linux container, which builds in `target/`) and the remap of the folder.
 pub fn ci_toml_text(target_dir: Option<&str>, build_folder: &str) -> String {

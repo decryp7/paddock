@@ -21,7 +21,7 @@
 pub mod contract;
 pub mod select;
 
-use crate::ci_tool::{describe_status, error_line};
+use crate::log_text::{describe_status, error_line};
 use clap::Args;
 use paddock_proc::{Outcome, Sink, run_waited_cancellable};
 use std::collections::HashMap;

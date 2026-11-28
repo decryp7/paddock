@@ -287,11 +287,12 @@ fn a_container_run_that_appears_beside_a_taker_makes_the_younger_give_its_slot_b
     );
     assert!(!rig.lock_dir().exists(), "its slot is free again");
     assert!(
-        rig.root().join("throttle-slot2.info").exists()
-            && paddock_throttle::slotfile::is_held(&rig.root().join("throttle-slot2.lock"))
-                .unwrap(),
+        rig.root().join("throttle-slot2.info").exists(),
         "the container run keeps its slot"
     );
+    paddock_testkit::lock::await_held("the container run keeps its slot", || {
+        paddock_throttle::slotfile::is_held(&rig.root().join("throttle-slot2.lock")).unwrap()
+    });
     drop(kept);
     assert_eq!(
         rig.count("pitcrew-heavy.ticket."),

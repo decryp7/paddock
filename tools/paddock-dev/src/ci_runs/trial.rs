@@ -198,12 +198,12 @@ pub fn prepare_with(
             ],
         )?;
         let files: Vec<String> = files.lines().map(str::trim).filter(|f| !f.is_empty()).map(str::to_string).collect();
-        reverted.extend(crate::merge_check::trailers::reland_lines(&revert, &files));
+        reverted.extend(crate::trailers::reland_lines(&revert, &files));
         relanded.push(revert);
     }
-    let mut lines = crate::merge_check::trailers::member_lines(&crate::merge_check::trailers::named(branch), &branch_sha, &relanded);
+    let mut lines = crate::trailers::member_lines(&crate::trailers::named(branch), &branch_sha, &relanded);
     lines.extend(reverted);
-    let message = crate::merge_check::trailers::with_block(
+    let message = crate::trailers::with_block(
         &format!(
             "Merge {branch} ({}) into trial of {target}",
             branch_sha.get(..9).unwrap_or(&branch_sha)
@@ -321,7 +321,7 @@ pub fn prune(g: &GitTrain, dry: bool) -> Result<Vec<Stale>, String> {
     let mut stale_sync = std::collections::BTreeSet::new();
     for sync_ref in all_sync.lines().map(str::trim).filter_map(|l| l.strip_prefix("origin/")) {
         // `sync/<member>/<short sha>`, or the old flat `sync/<member>` (git cannot hold it beside the new form, so it must go).
-        let member = crate::merge_check::trial_dispatch::split_sync_ref(sync_ref)
+        let member = crate::trailers::split_sync_ref(sync_ref)
             .map(|(m, _)| m)
             .or_else(|| sync_ref.strip_prefix("sync/"));
         let why = if landed_sync.contains(sync_ref) {
@@ -567,7 +567,7 @@ mod tests {
         };
         let shown = seen.borrow().clone();
         let (subject, block) = shown.split_once('\0').unwrap();
-        let read = crate::merge_check::trailers::merge_member("whatever", block);
+        let read = crate::trailers::merge_member("whatever", block);
         assert!(
             read.from_trailer && read.branch == "feat/a" && read.sync_sha.is_some(),
             "{subject}: {block}"

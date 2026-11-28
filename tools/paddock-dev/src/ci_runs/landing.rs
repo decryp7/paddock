@@ -52,7 +52,7 @@ pub fn with_landing_base(
 
 /// [`with_landing_base`] over the real runs: reads main's runs through the API and the checkout's history.
 pub fn with_real_landing_base(
-    http: &mut dyn crate::wait::Http,
+    http: &mut dyn crate::http::Http,
     target: &super::dispatch::Target<'_>,
     root: &std::path::Path,
     workflow: &str,

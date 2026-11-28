@@ -3384,6 +3384,42 @@ before): 12 caught, 0 MISSED, 0 timeouts. cargo-mutants' default copy of one wor
 repository around it and its dev-dependencies' `../../crates` paths are not rewritten; the baseline failed in 6 s), which is why the mutants run in place
 in a checkout. Limits: three Mac diffs and one CI run, each once; the findings were read from the runs' output and not judged one by one for true positives.
 
+## Mutation testing: the per-mutant cost (2026-11-28, fix/mutants-fast, main c5cd28247)
+
+ER-12, ER-20, ER-37. Why mutants.yml took hours: runs 9393 and 9400 (read from the Gitea API) and four mutants of train ae's diff on the Mac.
+**CI before.** Run 9400 (train ae, base `0cb699637`, 156 mutants: 134 in `tools/paddock-dev`, 22 in `crates`) planned 12 shards; shard 0/12 ran
+72.8 minutes (`./dev mutants gate` 3359 s) and measured 7 of its 12 paddock-dev mutants before the 3300 s run limit (about 7 minutes a mutant
+with the shard's setup), and its `crates` part was NOT MEASURED: the unmutated tree failed, every `real_browser` test of paddock-chromium
+("Running as root without --no-sandbox"), because the job lacked ci.yml's `PADDOCK_BROWSER_NO_SANDBOX`. Run 9393 (237 mutants) planned 12 slices
+of 20, over the per-shard cap of 16: ten shards refused their paddock-dev slice in about 0.5 minutes, printed it as a plain line, and the record
+said "shards success". These were not yields to a train; a yielded shard also measured nothing, and the old record could not tell either.
+**Mac, the same four mutants** (`src/ci_setup_rust.rs` 264 and 269, `--shard 0/34` of train ae's paddock-dev diff, all caught; cargo-mutants
+27.1.0 `--in-place`, nextest 0.9.152, 14 cores at a 1-minute load of 7 to 46; phase times from cargo-mutants' `debug.log`):
+
+| run | nextest | incremental | baseline build + test | per mutant: build, test | 4 mutants |
+| --- | --- | --- | --- | --- | --- |
+| A, before | `--profile ci` | on (the Mac's default) | 45.9 s + 227.7 s | 5.2 to 6.8 s, 174.9 to 248.1 s | 18 min |
+| A0, as CI builds | `ci` + `--max-fail=1:immediate --retries=0` | `CARGO_INCREMENTAL=0` | skipped | 21.6 to 28.0 s, 5.5 to 6.2 s | 2 min |
+| B, after | `ci` + `--max-fail=1:immediate --retries=0` | on (`MUTANTS_ENV`) | 54.7 s + 258.0 s | 5.1 to 11.4 s, 11.2 to 12.2 s | 6 min with the baseline |
+
+In A the first mutant's one failing test was number 732 of 2990 and the run went on to the end (248 s, the test tried twice): the `ci` profile has
+`fail-fast = false` and `retries = 1`. **Per caught mutant: about 200 s before, 16 to 24 s after (8 to 14 times less).** A mutant no test catches
+still runs the whole suite (the baseline's 228 to 258 s here, about 6 minutes in a Linux shard, trial 9349), so it costs the same as before; an
+unviable one costs its build. CI builds with `CARGO_INCREMENTAL=0` (setup-rust, for sccache), which made each mutant's build 4 times the
+incremental one here (A0 against B) on 14 cores, and more on a Linux shard's 5 build jobs.
+**Expected in CI, not measured:** with the verdict mix of the CI runs so far (9349, 9374, 9393 shard 11, 9400 shard 0: 31 caught, 20 missed, 14
+unviable), about 2.3 minutes a mutant (half the mutants caught in under a minute, a third at a whole suite), against about 7 before. A shard of
+`SHARD_TARGET` 10 is then about 35 minutes with about 12 minutes of setup, control and unmutated build and tests; at most `MAX_PER_SHARD` 14 (about
+44 minutes, under the 75-minute job cap). Train ae: 156 mutants in 12 slices of 13, all measured, about 8 hours one shard at a time on one Linux
+slot (before: 12 shards of 72 to 75 minutes, about 15 hours, with about half of the mutants cut by the run limit and `crates` not measured).
+**Choices:** no `--baseline=skip` (run 9400's baseline is what found the missing sandbox opt-in; a green CI run of the commit ran in another job's
+environment), the hang detector stays 900 s (four times the Mac suite, 2.5 times the Linux one), `--test-workspace` stays off (cargo-mutants already
+tests only the mutated package; paddock-dev is one package of 2990 tests, and a narrower filter would turn caught mutants into false MISSED ones).
+Limits: four mutants of one file, all caught, one run each on a loaded Mac; no missed mutant timed with the new arguments; no CI run yet.
+**Then (user decision 2026-11-28, in chat):** at most 60 mutants a landing (`MAX_PER_LANDING`, round-robin over the changed functions; train ae's
+156, 134 of them in 46 functions of tools/paddock-dev: 60 chosen, 96 NOT MEASURED in the plan and the record) and two shards at once (`max-parallel: 2`, each yielding to a train
+at its start). Expected for train ae, not measured: six slices of 10, about 35 minutes each, about 1.75 hours.
+
 ## Push gate hang limits of the long rows (2026-11-27, fix/gate-row-stall)
 
 ER-12, ER-36, a Mac with 14 cores. When the local sccache server hung on 2026-11-27 a gate row sat idle until the 60-minute row cap: the rows had
@@ -3490,3 +3526,57 @@ passed the push and failed the member gate)? user, 2026-11-28, in chat (the narr
   C178 on the unlisted module); the file was removed after the run.
 - **Not measured:** a cold build folder for the whole branch, a quiet machine, and the full `./dev check --pre-push` of this branch
   (see the hand-back report).
+
+## Gate rows whose child queues: priority passed on, queue told from run (2026-11-28, fix/gate-rows-child-queue, base c5cd28247)
+
+Question: why did the member gate's `goldens` row take 424 to 589 s when its build took 12 to 23 s, and does passing the gate's priority
+on and reading the child's queue through a status file remove it? (Class: throttle queue time counted as run time; train i's row
+study 64% queue, member-audits' queues of 156 s and 370 s.)
+
+- **Cause (diagnosed by the coordinator, before):** `./dev gen check` was started without `--priority train`, so its throttled build
+  queued at normal priority while every train-lane row overtook it; `gen check` buffers its build output, so the watchdog saw "no unit
+  finished for ~313 s, 0.1 s CPU"; `row-timings.tsv` counted the queue as run time (the row is not heavy, so no `throttle` timed it).
+- **Machine:** the shared Mac mini (arm64), other agents and trains running (1-minute load 17.7 at the start); `./dev throttle`, sccache,
+  warm build folders. One run per row, one run of the after case.
+- **Command (after):** `./dev check --pre-push --member-gate --priority train --only goldens,clippy,conformance-tests --base origin/main`
+  with one comment line appended to `tools/paddock-dev/src/ci_run/mod.rs` (a declared input of `ci-run-golden`, so the row is planned;
+  the line was removed after the run).
+
+  | Row | Before (train rows, coordinator's reading) queued s | run s | After queued s | run s |
+  |---|---:|---:|---:|---:|
+  | `goldens` | counted in run: 424 to 589 total | (build 12 to 23) | 0.0 | 30.0 |
+
+  Beside it in the same after run: `clippy crates` queued 156.6 s, `conformance-tests` queued 156.3 s (normal train rows waiting for a
+  slot, as designed), so the row was not fast because the machine was idle.
+- **Result:** the child's own status file (`goldens-<hash>.queue.jsonl` in the run's log folder) shows the two `throttle` runs of
+  `gen check` queued and admitted within 0.001 s and ran 27.4 s and 1.8 s; the row's table line splits queued 0.0 from run 30.0. The
+  before figures are the coordinator's diagnosis of earlier member-gate runs, not re-measured on this tree (no old build of `./dev` was
+  run again), so the 424 to 589 s to 30.0 s step is two different runs of the same row, not an A/B pair.
+- **Positive controls (unit tests):** a fake child that reports queued then admitted is judged waiting, not stuck, with its 7 s queue in
+  the row's `queued`; a silent child with the same duration is still ended as stuck; the row cap (3 s) does not cut a child that queued
+  6 s and does cut a silent one of the same length.
+- **Not measured:** a member gate whose goldens row queues for minutes behind a loaded train (no such queue formed in the after run), and
+  a gate with an older `throttle` on PATH (it writes no status file: the row is then watched as before, never taken as waiting).
+
+## The moved-path row in the push gate (2026-11-28, feat/moved-path-check, C183)
+
+Question: what does the `moved-paths` row cost, so a push that renames or deletes a file learns that a path register still names it before the full
+conformance run does (user, 2026-11-28, in chat: two gate rounds in the paddock-dev split)?
+
+- **Machine:** the shared Mac mini (arm64), other agents running; the release build of `./dev` warm; `/usr/bin/time -p`, three runs each.
+- **Command:** `./dev check run --only C183` (the row's command: one `git diff --name-status -M` against the merge base, 33 register files read,
+  the positive control run first).
+
+  | What | Wall s |
+  |---|---:|
+  | clean tree (no rename, no deletion), 3 runs | 0.69, 0.67, 0.67 |
+  | one staged rename of a file `docs/gates.toml` names, 3 runs | 1.17 (first), 0.71, 0.67 |
+  | `./dev check --pre-push --only moved-paths --no-reuse` with that rename (the whole gate: plan, row, table), 2 runs | 7.1, 7.2 |
+
+- **Result:** the check itself is about 0.7 s. The row runs only when the push has a rename or a deletion (`Change::moved`, one more
+  `git diff --name-status -M -z --diff-filter=DR` in `discover`); any other push skips it with its reason, so it costs nothing there. The
+  gate's 7 s are the planner and the table, paid by every row.
+- **Positive control:** the staged rename of `apps/debrief/scripts/ci/check-smoke-dialogs.mjs` gave one warning, `docs/gates.toml:181 ... moved to
+  ...-moved.mjs`; the file was moved back after the run. The fixture-repository tests in `tests/it/check_c183.rs` hold the same shape.
+- **Not measured:** a cold build of `./dev`, a quiet machine, and the row on a push that deletes hundreds of files (one `git diff` of the same size
+  as the push's own file list).

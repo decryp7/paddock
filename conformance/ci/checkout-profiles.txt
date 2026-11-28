@@ -66,5 +66,5 @@ mention scripts/svg-drift.test.mjs fixture strings of the drift check's test (th
 mention tools/paddock-dev/src/plan.rs the declared doc input that marks the tools job for docs/images/*.svg (a path pattern, nothing reads the folder)
 mention docs/gates.toml a glob in the register's docs.exclude list; the register is read as text, the review folder itself is not needed
 mention conformance/test/kept-clone.test.mjs fixture strings of this test
-mention tools/paddock-dev/src/merge_check/ doc comment and test strings: docs/images/ is an example trailer path, nothing reads the folder
+mention tools/paddock-dev/src/trailers.rs doc comment and test strings: docs/images/ is an example trailer path, nothing reads the folder
 mention tools/paddock-dev/tests/it/merge_check.rs test strings: a fixture repository of its own with a docs/images file, not the real folder

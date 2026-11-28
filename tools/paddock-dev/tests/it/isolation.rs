@@ -72,7 +72,7 @@ impl Job {
     }
 }
 
-fn free(ci: &Path, n: u32) -> bool {
+fn is_free(ci: &Path, n: u32) -> bool {
     FsLocks::new(ci).try_lock(SlotId::new(n).unwrap()).unwrap().is_some()
 }
 
@@ -90,7 +90,7 @@ fn job_isolation_sh_acquires_uses_releases_and_sweeps_with_the_real_binary() {
     let env = job.exported();
     assert_eq!(env.get("PADDOCK_CI_SLOT").map(String::as_str), Some("s1"));
     assert!(env.get("PADDOCK_CI_SLOT_TOKEN").is_some_and(|t| !t.is_empty()));
-    assert!(!free(&job.ci, 1), "the holder keeps s1 after acquire returned");
+    paddock_testkit::lock::await_held("the holder keeps s1 after acquire returned", || !is_free(&job.ci, 1));
     assert!(!job.ci.join("target-old-s3").exists(), "the sweep removed the idle slot's folder");
 
     let path = job.run(&["path", "target", "x-app"], true);
@@ -104,7 +104,7 @@ fn job_isolation_sh_acquires_uses_releases_and_sweeps_with_the_real_binary() {
     std::fs::create_dir_all(job.ci.join("target-y-s2")).unwrap();
     let rel = job.run(&["release"], true);
     assert!(rel.status.success(), "{}", String::from_utf8_lossy(&rel.stderr));
-    assert!(free(&job.ci, 1), "released");
+    paddock_testkit::lock::await_free("the slot is released", || !is_free(&job.ci, 1));
     assert!(!job.ci.join("target-y-s2").exists());
     assert!(job.ci.join("target-x-app-s1").exists(), "the kept slot's folder stays");
     let status = job.run(&["status"], false);

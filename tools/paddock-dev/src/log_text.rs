@@ -1,8 +1,10 @@
 //! A CI job log line without the runner's timestamp and colours: the one reader for the planner's and the run readers' logs; and the
-//! one writer of a whole log line ([`write_line`], [`eline`], [`oline`]).
+//! one writer of a whole log line ([`write_line`], [`eline`], [`oline`]); and the one wording of a failure
+//! line ([`error_line`]) and of how a process ended ([`describe_status`], [`describe_code`]), which every layer prints.
 
 use regex::Regex;
 use std::io::Write;
+use std::process::ExitStatus;
 use std::sync::LazyLock;
 
 fn re(pattern: &str) -> Regex {
@@ -42,6 +44,37 @@ pub fn eline(line: &str) {
 /// A whole line on standard output (a workflow command or an answer line).
 pub fn oline(line: &str) {
     if write_line(&mut std::io::stdout().lock(), line).is_err() {}
+}
+
+/// `exit <n>` (with the NTSTATUS in hex for a Windows crash code) or `signal <n>`.
+pub fn describe_status(s: ExitStatus) -> String {
+    if let Some(code) = s.code() {
+        return describe_code(code);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(sig) = s.signal() {
+            return format!("signal {sig}");
+        }
+    }
+    "ended without an exit code".to_string()
+}
+
+/// An exit code for a person: Windows reports a crash as an NTSTATUS (0xC0000005 is an access violation, 0xC0000409 a fast
+/// fail), which reads as a huge or negative number in decimal.
+pub fn describe_code(code: i32) -> String {
+    let unsigned = code as u32;
+    if unsigned >= 0xC000_0000 {
+        format!("exit {unsigned} (0x{unsigned:08X}, an NTSTATUS crash code)")
+    } else {
+        format!("exit {code}")
+    }
+}
+
+/// The one `::error::` line of a failure: the cause, then the next step.
+pub fn error_line(cause: &str, next: &str) -> String {
+    format!("::error::{cause} Next step: {next}")
 }
 
 #[cfg(test)]
@@ -92,5 +125,20 @@ mod tests {
     fn stamps_colours_and_carriage_returns_are_removed() {
         assert_eq!(plain("2026-11-09T10:24:37.4427582Z \x1b[32m  PASS\x1b[0m x\r"), "  PASS x");
         assert_eq!(plain("no stamp"), "no stamp");
+    }
+
+    #[test]
+    fn windows_crash_codes_are_named_in_hex() {
+        assert_eq!(describe_code(1), "exit 1");
+        assert_eq!(describe_code(127), "exit 127");
+        assert_eq!(
+            describe_code(-1_073_741_819),
+            "exit 3221225477 (0xC0000005, an NTSTATUS crash code)"
+        );
+    }
+
+    #[test]
+    fn an_error_line_has_the_cause_and_the_next_step() {
+        assert_eq!(error_line("x failed.", "do y."), "::error::x failed. Next step: do y.");
     }
 }
