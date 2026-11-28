@@ -12,7 +12,7 @@
 //!   (a train that carries the fix), logged.
 //!
 //! Both start report-only (ER-41): they print what they would refuse as a `::warning::` and the dispatch goes on, until their first
-//! green use is recorded by run id in [`REGISTER`] (`./dev ci guard-record`, which switches the guard to blocking in the same step).
+//! green use is recorded by run id in [`DISPATCH_GUARDS`] (`./dev ci guard-record`, which switches the guard to blocking in the same step).
 //! Anything unreadable is "not measured", never a pass (ER-33): report-only prints it, blocking refuses it.
 //!
 //! A run's kind is read from its dispatch token ([`DispatchTag`], in the title through the workflow's `run-name`); a run without one
@@ -24,11 +24,9 @@ use super::dispatch::{DispatchTag, ReadWorkflow, Request, RunKind, Target, is_tr
 use crate::active_apps;
 use crate::job_outcome::JobOutcome;
 use crate::plan_since::read_marker;
+use crate::registers::DISPATCH_GUARDS;
 use crate::wait::Http;
 use std::collections::{BTreeMap, BTreeSet};
-
-/// Where each guard's first green use is recorded (ER-41), relative to the repository root.
-pub const REGISTER: &str = "docs/ci-dispatch-guards.toml";
 
 /// A guard of `ci dispatch`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,7 +41,7 @@ pub enum Guard {
 }
 
 impl Guard {
-    /// Its name in [`REGISTER`] and the log.
+    /// Its name in [`DISPATCH_GUARDS`] and the log.
     pub fn name(self) -> &'static str {
         match self {
             Guard::FailedFirst => "failed-first",
@@ -84,14 +82,14 @@ pub enum Mode {
 
 /// The run id recorded for `guard` in the register text; `Err` for a text that is not the register's shape.
 pub fn recorded(text: &str, guard: Guard) -> Result<Option<u64>, String> {
-    let v: toml::Table = text.parse().map_err(|e| format!("{REGISTER} is not TOML: {e}"))?;
+    let v: toml::Table = text.parse().map_err(|e| format!("{DISPATCH_GUARDS} is not TOML: {e}"))?;
     let table = v
         .get("first_green")
         .and_then(toml::Value::as_table)
-        .ok_or_else(|| format!("{REGISTER} has no [first_green] table"))?;
+        .ok_or_else(|| format!("{DISPATCH_GUARDS} has no [first_green] table"))?;
     if let Some(k) = table.keys().find(|k| Guard::parse(k).is_none()) {
         return Err(format!(
-            "{REGISTER}: first_green.{k} is not a guard (failed-first, green-main, train-audits)"
+            "{DISPATCH_GUARDS}: first_green.{k} is not a guard (failed-first, green-main, train-audits)"
         ));
     }
     match table.get(guard.name()) {
@@ -100,7 +98,7 @@ pub fn recorded(text: &str, guard: Guard) -> Result<Option<u64>, String> {
             .as_integer()
             .filter(|n| *n > 0)
             .map(|n| Some(n as u64))
-            .ok_or_else(|| format!("{REGISTER}: first_green.{} is not a run id", guard.name())),
+            .ok_or_else(|| format!("{DISPATCH_GUARDS}: first_green.{} is not a run id", guard.name())),
     }
 }
 
@@ -113,8 +111,8 @@ pub fn mode_of(text: Result<&str, &str>, guard: Guard) -> Mode {
     }
     match text.map_err(str::to_string).and_then(|t| recorded(t, guard)) {
         Ok(Some(first_green)) => Mode::Blocking { first_green },
-        Ok(None) => Mode::ReportOnly(format!("no first green use is recorded in {REGISTER}")),
-        Err(e) => Mode::ReportOnly(format!("{REGISTER} cannot be read ({e})")),
+        Ok(None) => Mode::ReportOnly(format!("no first green use is recorded in {DISPATCH_GUARDS}")),
+        Err(e) => Mode::ReportOnly(format!("{DISPATCH_GUARDS} cannot be read ({e})")),
     }
 }
 
@@ -130,7 +128,7 @@ pub fn with_first_green(text: &str, guard: Guard, run: u64) -> Result<String, St
     out.push_str(&format!("\n\"{}\" = {run}\n", guard.name()));
     match recorded(&out, guard)? {
         Some(id) if id == run => Ok(out),
-        _ => Err(format!("{REGISTER} could not take the record for {}", guard.name())),
+        _ => Err(format!("{DISPATCH_GUARDS} could not take the record for {}", guard.name())),
     }
 }
 
@@ -284,7 +282,7 @@ pub fn train_audits(local: Result<Checkout, String>, server_head: &str, branch: 
 
 /// The checkout at `root`: its HEAD and whether it is dirty.
 pub fn checkout(root: &std::path::Path) -> Result<Checkout, String> {
-    let git = crate::merge_check::git::Git::new(root);
+    let git = crate::git::Git::new(root);
     Ok(Checkout {
         head: git.text(&["rev-parse", "HEAD"])?.trim().to_string(),
         dirty: !git.text(&["status", "--porcelain", "--untracked-files=no"])?.trim().is_empty(),
@@ -335,7 +333,7 @@ pub struct Stopped {
 
 /// The guards of one dispatch, the one entry point of `ci dispatch` and the landing queue: nothing for a ref that is not a train's;
 /// failed-first for a full run of a workflow that takes `since_run`; green-main for every train dispatch but a failed-only round. Each
-/// is decided by its mode in [`REGISTER`] under `root` and its override. The JSON rows of the guards that let it go, or the stop.
+/// is decided by its mode in [`DISPATCH_GUARDS`] under `root` and its override. The JSON rows of the guards that let it go, or the stop.
 #[allow(clippy::too_many_arguments)]
 pub fn check_train(
     http: &mut dyn Http,
@@ -350,7 +348,7 @@ pub fn check_train(
     if !is_train(&req.git_ref) {
         return Ok(Vec::new());
     }
-    let register = std::fs::read_to_string(root.join(REGISTER)).map_err(|e| e.to_string());
+    let register = std::fs::read_to_string(root.join(DISPATCH_GUARDS)).map_err(|e| e.to_string());
     let mode = |g: Guard| mode_of(register.as_deref().map_err(String::as_str), g);
     let kind = RunKind::of(&req.inputs);
     let branch = req.git_ref.strip_prefix("refs/heads/").unwrap_or(&req.git_ref).to_string();
@@ -547,7 +545,7 @@ pub fn red_chain(runs: &[TrainRun]) -> Option<(&TrainRun, u64)> {
     Some((full, newest_red))
 }
 
-/// The failed-first finding with its two allowances (user, 2026-11-25), recorded in [`REGISTER`]: a full run may go without a
+/// The failed-first finding with its two allowances (user, 2026-11-25), recorded in [`DISPATCH_GUARDS`]: a full run may go without a
 /// failed-only round when the round would add nothing, because every commit since the red full run cleanly reverts a member's merge
 /// (`revert`), or because the round would rerun everything on the same head anyway (`round_full`: its rerun plan is the whole run).
 /// Each is `Ok(Some(why))` when it holds; `Ok(None)` or `Err` (it could not be told) leaves the refusal as it is. Only a refusal
@@ -569,7 +567,7 @@ pub fn without_round(finding: Finding, revert: Result<Option<String>, String>, r
 /// inverse of that merge's change against its first parent (the same files, the same removed and added lines). `Ok(None)` when one is
 /// not, or there is no commit; `Err` when git cannot tell (a commit missing here: fetch the train first).
 pub fn clean_reverts(root: &std::path::Path, from: &str, to: &str) -> Result<Option<String>, String> {
-    let git = crate::merge_check::git::Git::new(root);
+    let git = crate::git::Git::new(root);
     let range = format!("{from}..{to}");
     let commits: Vec<String> = git
         .text(&["rev-list", "--first-parent", "--reverse", &range])?

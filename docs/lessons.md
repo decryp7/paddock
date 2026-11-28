@@ -4605,3 +4605,46 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   a name with `\t\r`; the record step prints a `::warning::` with the cause when its lookup fails (ER-27, ER-44); the crate job runs
   `ci test-cache selfcheck --shared` on every leg before it records (ER-33). Not covered: the shell and Node scripts that write a config
   (`conformance/ci/dev-tool-publish.sh`, a token with no backslash or quote) are not Rust and still write their own line.
+
+## A polling receive timeout leaves a Windows socket in an undefined state (2026-11-28, fix/chromium-new-tab-windows, ER-27, ER-28)
+- **What happened.** `real_browser::a_new_tab_loads_a_page_at_once` failed once on the Windows crate leg of train run 9276 (job 53191, try 1,
+  1.5 s: `b.new_page().unwrap()` gave `Err(Closed)`; try 2 passed, so the run read FLAKY). It is one hit in the ~400 CI runs read (since 2026-11-20); the
+  earlier `ERR_ABORTED` failures of this test are the ones ADR 0033 disproved (pid reuse) and the lessons above explain (a replacing navigation).
+  `Closed` has four sources (browser exited, connection ended, the new tab's session or target reported gone, the first-page watch ended) and the
+  error carried none. 40 of 40 runs on macOS stay green, so the Windows cause is not reproduced here (no VM, rule 101).
+- **Cause (documented behaviour, not reproduced).** `cdp::Connection` polled its socket with `set_read_timeout(20 ms)` and kept using it after each
+  timeout. Winsock documents for `SO_RCVTIMEO`: "If a blocking receive call times out, the connection is in an indeterminate state and should be
+  closed" (learn.microsoft.com, Winsock "Socket options", read 2026-11-28). A poll that races a reply can lose bytes; the next frame then fails to
+  parse, the reader ends and every call is `Closed`. Ruled out by reading the code: `Page::attach` marks gone only on Chrome's own detach, destroy
+  and crash events; `first_call` and `closed_wins` return `Closed` only for a gone page or an ended connection. Not ruled out: Chrome ending the
+  connection itself (the first log line of the new `The DevTools connection ended:` says which).
+- **Fix.** The connection has no receive timeout: a reader thread blocks in `read`, a writer thread sends what callers queue, and a drop shuts the
+  socket down to wake the reader. Why it ended is logged once (`The DevTools connection ended: ...`, ER-27). Tests: `the_socket_has_no_receive_timeout`
+  (red: `Some(20ms)`), a frame written in pieces, and a browser-closed connection.
+- **Proof so far.** One Windows CI trial; one run cannot show a rate near 1 in 400, so the entry stays open: if `Closed` shows again, the new log line
+  is the first thing to read.
+- **Copies (rule 55, `browser-driver`).** Debrief's `chromium-driver/src/cdp.rs` got the same fix in the same change (red: `Some(20ms)`). The fake
+  DevTools servers of `paddock-chromium` and Debrief poll a non-blocking socket after the handshake instead of a 10 ms receive timeout (red: the
+  `the_fake_waits_for_a_late_handshake_and_then_ticks` test expected no timeout and saw `Some(10ms)`). Spotter's `cdp.rs` already polled a non-blocking socket.
+
+## A test that builds inside its time budget fails together with its family on a cold build (2026-11-28, fix/nextest-build-cost-class, run 9371)
+- **What happened.** CI run 9371 (a cold cache after a rustflags change) stopped ten plugin tests at the default 60 s (five of `cargo-paddock-plugin::it
+  test_command` in one `crate` job, five of `paddock-plugin-host::it faults` in another); all passed on the retry in 37 s to 46 s, and flaky-as-failure turned the legs
+  red. Every test that locates the plugin fixture starts `cargo build -p paddock-plugin-test --bin ...` when the program is not built (CI selects the two
+  packages without `paddock-plugin-test`), the children wait on one build, and a cold build is longer than the limit meant for the test's own work. The
+  census found 54 such tests in `crates`, 21 in Pitcrew and 1 in Debrief; the stand-in compile (`rustc`, 0.3 s) is no member.
+- **Fix.** One cost class, `build` (ER-12, ER-44): a test that starts a compiler or `cargo build` has the name prefix `build_`, each workspace's default
+  nextest profile gives that filterset a budget from the measured cold time (docs/benchmarks.md, "test build cost class"), and every place that starts a build
+  calls `paddock_testkit::build_cost::charge`, which fails a test of another name under nextest. paddock-dev's `build_cost` tests check the places and the
+  overrides by `syn` and the TOML parser, with positive controls. Not fixed here: the child `cargo build` does not get the parent's `--config` flags, so a
+  rustflags change makes it a full rebuild (the class takes the cost, it does not remove it).
+
+## A golden went stale and the push passed (2026-11-28, fix/prepush-golden-rows, trials 9286, 9327, 9360)
+- **What happened.** Three times in two days a change altered what a golden records and only a CI trial went red: `fix/sccache-start-reliable` and
+  `fix/pipefail-grep-q` changed setup-rust shell steps and left `tests/golden/ci-run/commands.tsv` stale (9286, 9327); `fix/flaky-touched-grading`
+  changed the planner's output and left the planner goldens stale (9360). The push gate ran no golden test, and the member gate's `tests` row only
+  runs for a workspace with a changed file of its own: an action file belongs to no Cargo workspace.
+- **Fix.** The generator registry already declared the ci-run golden's inputs; it now declares every golden (`golden = true`: `ci-run-golden`,
+  `planner-golden`, `ci-host-golden`) and the push gate's `goldens` row runs `./dev gen check --only <the goldens the change reaches>`, planned from the
+  same registry and model (no second mapping, ER-22); a stale golden prints its entry's bless command. A test fails when a file holding a golden test is
+  marked by no golden entry, with controls (ER-33). Cost: docs/benchmarks.md, "the golden row in the push gate".

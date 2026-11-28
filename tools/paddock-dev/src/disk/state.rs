@@ -4,7 +4,7 @@
 //! record, the clock). Anything that cannot be established counts against removal: a missing answer is never "safe".
 
 use super::record::{self, Kind, Record};
-use crate::worktree::git::{Git, Repo, key, worktrees};
+use crate::worktree::git::{Repo, git_at, key, worktrees};
 use crate::worktree::owners::OwnerStore;
 use std::path::{Path, PathBuf};
 
@@ -146,7 +146,7 @@ fn git_facts(dir: &Path, rec: &Record, ctx: &Context) -> GitFacts {
         return f;
     };
     f.git_ok = true;
-    let git = Git::at(dir);
+    let git = git_at(dir);
     let branch = entry.branch.clone().unwrap_or_default();
     // Locked, claimed by an agent (an unreadable owner map counts as claimed), or a train: never touched.
     let owned = OwnerStore::open(&repo.common_dir).read().map_or(true, |m| m.get(&me).is_some());

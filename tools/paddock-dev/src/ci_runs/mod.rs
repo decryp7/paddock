@@ -414,7 +414,7 @@ pub fn guard_record(a: &GuardRecordArgs) -> Result<Report, CliError> {
     let guard = dispatch_guards::Guard::parse(&a.guard)
         .ok_or_else(|| CliError::usage(format!("unknown guard {:?}", a.guard)).with_hint("Use failed-first or green-main."))?;
     let root = std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder cannot be read: {e}.")))?;
-    let file = root.join(dispatch_guards::REGISTER);
+    let file = root.join(crate::registers::DISPATCH_GUARDS);
     let text = std::fs::read_to_string(&file)
         .map_err(|e| CliError::failure(format!("{} cannot be read: {e}.", file.display())).with_hint("Run it from the repository root."))?;
     let updated = dispatch_guards::with_first_green(&text, guard, a.run).map_err(CliError::failure)?;
@@ -447,7 +447,7 @@ pub fn guard_record(a: &GuardRecordArgs) -> Result<Report, CliError> {
             "recorded {} at run {} in {}: the guard now refuses (ER-41). Commit the file.",
             guard.name(),
             a.run,
-            dispatch_guards::REGISTER
+            crate::registers::DISPATCH_GUARDS
         ),
     ))
 }
@@ -1036,7 +1036,7 @@ pub fn landing_held(a: &LandingHeldArgs) -> Result<Report, CliError> {
             }
         }
     };
-    let slow: SlowState = read(&crate::pre_push::state_dir(&root), &a.sha);
+    let slow: SlowState = read(&crate::git::state_dir(&root), &a.sha);
     let (exit, text) = match landing(&ci, &slow) {
         Landing::Landable => (
             Exit::Ok,
@@ -1109,7 +1109,7 @@ pub fn verdict(a: &VerdictArgs) -> Result<Report, CliError> {
             }
         }
     };
-    let r = verdict::report_for(&v, &a.workflow, &a.sha, &crate::pre_push::outcome::GitRepo(&root), a.landing);
+    let r = verdict::report_for(&v, &a.workflow, &a.sha, &crate::subject::GitRepo(&root), a.landing);
     if r.exit != Exit::Ok {
         eprintln!("::error::ci verdict: {}", r.text);
     } else if matches!(v, verdict::Verdict::GreenWithFixItems { .. }) {
@@ -1151,9 +1151,13 @@ pub fn fix_items_cmd(a: &FixItemsArgs) -> Result<Report, CliError> {
                     .with_hint("Run it in a checkout of the repository (--root).")
             })?;
             let text = match done {
-                fix_items::Recorded::Added => format!("{} fix item(s) of run {run} added to {}", items.len(), fix_items::LESSONS),
+                fix_items::Recorded::Added => format!("{} fix item(s) of run {run} added to {}", items.len(), crate::registers::LESSONS),
                 fix_items::Recorded::Already => {
-                    format!("the {} fix item(s) of run {run} are in {} already", items.len(), fix_items::LESSONS)
+                    format!(
+                        "the {} fix item(s) of run {run} are in {} already",
+                        items.len(),
+                        crate::registers::LESSONS
+                    )
                 }
             };
             Ok(Report::new(
@@ -1668,8 +1672,8 @@ pub fn triage(a: &TriageArgs) -> Result<Report, CliError> {
     if let Some(base) = &a.members {
         // ADR 0098: blame the members of a hand-built train. Read-only; a member that cannot be read ends the blame (ER-33).
         let answer = (|| -> Result<(String, serde_json::Value), String> {
-            let root = crate::gates::command::repo_root(None).map_err(|e| e.message)?;
-            let git = crate::merge_check::git::Git::new(&root);
+            let root = crate::repo_root::repo_root(None).map_err(|e| e.message)?;
+            let git = crate::git::Git::new(&root);
             let failures = crate::queue::real::failures_of(&report, a.run, &mut http, &a.server, &a.repo, &token);
             let plan = |first: &str, merge: &str| crate::queue::real::run_planner(&root, first, merge);
             let members = members::read(&git, base, &report.head, &plan, members::needs_files(&failures))?;

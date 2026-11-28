@@ -84,6 +84,55 @@ uses it, results in
 
 ## Results of shared tooling
 
+### 2026-11-28, test build cost class (fix/nextest-build-cost-class)
+
+- **Commit:** measured on a scratch copy of origin/main a3d3d98ee (the tests unchanged: the class and its names are this branch); CI numbers from run 9371 (trial/tmp/sccache-remap-measure at 664b2228e, the `crate (ubuntu-latest, 1/3)` and `(2/3)` jobs 54415 and 54416).
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2.1, rustc 1.100.0 (rust-toolchain.toml), debug test profile. A fresh build folder for every row and no sccache (`RUSTC_WRAPPER=` empty); one build at a time through `./dev throttle`.
+- **Load:** 1-minute load 19.8 at the start of the first row, 7.3 at the end of the last (other agents' work on the host).
+- **Cause (CI run 9371):** the run followed a change of the rustflags (the remap of the build folder's path), and CI selects `paddock-plugin-host` and `cargo-paddock-plugin` without `paddock-plugin-test`, so the fixture is not prebuilt: `paddock_plugin_test::fixture::locate` starts `cargo build -p paddock-plugin-test --bin paddock-plugin-fixture` inside the test. Reproduced in P2 with a parent that has `--config` rustflags the child cargo does not get (that the child lacks them in run 9371 is inferred from P2, not read from the log): the child rebuilds the fixture's dependency graph from nothing. Every test that locates the fixture waits on that one build (cargo's build lock), so the whole family reaches the limit together, and only the first try's compiled work is kept for the retry.
+- **Command:** (P1) `cargo build --quiet -p paddock-plugin-test --bin <name>` in `crates`, one fixture after the other; (P2) `cargo nextest run -p paddock-plugin-host -p cargo-paddock-plugin --all-features --no-fail-fast --config "target.'cfg(all())'.rustflags=['--remap-path-prefix=<build folder>=/paddock-target']"` with a nextest configuration that stops nothing for 30 minutes (the CI shape: the parent has flags the children lack, and CI selects only these two packages, so the fixture is not prebuilt); (P3) `cargo build --quiet -p pitcrew-service --example fake_runner` in `apps/pitcrew`; (P4) `cargo build -q -p debrief-store-worker` in `apps/debrief/app/src-tauri`; (P5) the stand-in's `rustc --edition 2021 -C debuginfo=0` as `paddock-testkit`'s `compile_stub` runs it.
+- **Runs:** single (n = 1 each): a cold build is the thing measured, and it cannot be repeated without emptying the folder.
+- **Numbers:**
+
+  | Measure | Time |
+  |---|---|
+  | P1: plugin fixture, cold folder | 40.7 s (`paddock-plugin-fixture`), then 0.7 s (`-v1`) and 0.6 s (`misbehaving`) over its dependencies |
+  | P2: the 13 slowest tests of the 123 (those that locate the fixture), cold in-test rebuild | 39.6 s to 41.0 s each, the run 43.0 s (14 tests over 30 s), 84.3 s with the test build |
+  | P2: the same tests with the fixture prebuilt (`-p paddock-plugin-test` selected too) | 0.1 s to 2.3 s each |
+  | CI run 9371, 10 tests (`cargo-paddock-plugin::it test_command` 5, `paddock-plugin-host::it faults` 5) | try 1 stopped at 60.01 s to 60.02 s (TMT) all ten; try 2 passed in 37.4 s to 38.6 s, one in 45.8 s (`a_crashing_plugin_is_restarted_after_the_back_off_and_then_quarantined`). A cold CI build is therefore about 60 s plus the 38 s to 46 s the retry still needed, near 100 s |
+  | P3: Pitcrew's `fake_runner` example, cold | 138.3 s |
+  | P4: `debrief-store-worker`, cold, from the app's folder | 412.3 s |
+  | P4b: Debrief's `health::commands::tests::build_a_real_store_worker_...` as nextest ran it (the app's test program built, the worker not; the ci profile), cold in-test `cargo build -p debrief-store-worker` | 249.3 s for the test (try 1; it then failed at the link for want of `libduckdb` in the child's environment, a setup fault of this run, and passed in 5.9 s once `apps/debrief/.cargo/libduckdb.toml` named the library); the class's 1800 s held it where the ci profile's 90 s would have stopped it |
+  | P5: the stand-in compile | 0.3 s |
+  | The other builds in tests: `cargo-paddock-plugin` flow's tiny project, `paddock-testkit`'s one-file crate | 0.2 s to 1.2 s (warm folder, nextest's own times, run once) |
+
+- **The class:** a test that starts a compiler or `cargo build` has the name prefix `build_` (`paddock_testkit::build_cost`). Members, found by running the tests with the charge in place (a test of another name fails with the new name): 54 tests of `crates` (22 `paddock-plugin-host::it faults`, 12 `features`, 12 `install`, 5 `cargo-paddock-plugin::it test_command`, 1 `flow`, 2 `paddock-plugin-test::it fake`), 1 of `paddock-testkit::it process` (a real `cargo build` of a one-file crate), 21 of Pitcrew's `supervision` and 1 of Debrief's `health::commands::tests`. Budgets (hang backstops, ER-12): `crates` 300 s (7x the cold 40.7 s, 3x the CI 100 s), Pitcrew 900 s (6.5x the 138 s), Debrief 1800 s (4.4x the 412 s). Not in the class: the stand-in compile (P5, 0.3 s; `StandIn::install` is in hundreds of tests and none of them was slow in run 9371), `cargo metadata`, `cargo tree` and `cargo generate-lockfile` (no compiler; the graph class of paddock-dev), and Debrief's `debrief-plugin-dotnet` real-runtime fixture (`dotnet build`, skipped where no SDK is installed, and no CI runner has one).
+- **Notes:** the first number of each row is the cold one; the margins are the ones the paddock-dev time tiers use (ADR 0121), kept as a backstop for a hang and not as a performance limit. The in-test build not inheriting the parent's `--config` flags is the cause of the 60 s, and is left as it is here: a build in a test is a class of its own cost, and a class that never needed the default limit again is what this change records. Raw output: the measuring script's log of 2026-11-28, kept in the author's scratch folder only.
+
+### 2026-11-28, the overlap-tests row in sync-member (feat/sync-member-overlap-tests)
+
+- **Commit:** this branch (41b29b1a1), base a3d3d98ee. Rule 100 amendment accepted (user, 2026-11-28, in chat).
+- **Machine:** Mac mini, macOS 27.2, debug build through sccache, 1-minute load 12 to 15 (other agents).
+- **Command:** `./dev check --pre-push --priority train --only goldens,overlap-tests --overlap-since <fork> --base origin/main` on a real sync tip: `origin/fix/flaky-touched-grading` (80 commits behind main, 5 files of paddock-dev changed) with `origin/main` merged in (clean merge, 42 paddock-dev files changed on main); `merge sync-member origin/main` ran all seven rows on it and passed.
+- **Numbers:** the overlap was `paddock-dev` in workspace `tools/paddock-dev`: `overlap-tests tools/paddock-dev` 170.9 s run, 73.7 s queued (the `ci test-cache run` of that one package, shadow mode, so no pass was reused); `goldens` skipped (no golden input changed), 0 s. The rustfmt, Clippy and conformance rows of the same sync took the times of the existing static rows.
+- **Notes:** a member and main that share no package skip the row at the cost of one more plan (not timed separately). The row has no hang limit of its own yet (`HANG_LIMITS` has none for `overlap-tests`; the 60-minute row cap applies) because it has one measured run; add one after more syncs.
+
+### 2026-11-28, the golden row in the push gate (fix/prepush-golden-rows)
+
+- **Commit:** base a3d3d98ee, this branch (before the commit: the working tree of the branch).
+- **Machine:** Mac mini, 14 cores, macOS 27.2, debug test build through sccache, 1-minute load 15 to 17 (other agents).
+- **Command:** `./dev gen check --only ci-run-golden,planner-golden,ci-host-golden` (what the `goldens` row runs for a change that reaches all three), one cold and one warm run; the per-entry times are gen check's own "built in" and "current in" lines.
+- **Numbers:**
+
+  | Entry (tests) | Build, cold | Run, cold | Build, warm | Run, warm |
+  |---|---|---|---|---|
+  | `ci-run-golden` (1 test, `--lib`) | 52.9 s | 49.5 s | 0.7 s | 1.1 s |
+  | `planner-golden` (`golden::`, `plan_graph_ci::`, `repo_graph_net::graph_recorded_rule_goldens`, `--test it`) | 18.1 s | 38.0 s | 0.3 s | 18.6 s |
+  | `ci-host-golden` (`build_jobs_golden::`, `host_steps_golden::`) | 0.2 s | 1.0 s | 0.2 s | 1.0 s |
+  | Whole command | 2 min 40 s | | 23 s | |
+
+- **Notes:** the golden tests are cheap to run (about 21 s warm for all three, 1.1 s for the one a `.gitea/actions` change reaches); what costs is compiling the test profile of paddock-dev after a source change (cold 71 s, the first run in a fresh build folder). The row runs only the entries a change reaches (`ci-run-golden` alone for an action or workflow edit) and is skipped with a reason for any other change. The cold run of `ci-run-golden` took 49.5 s for a test that takes 1 s in nextest: it is the first link and start of the lib test binary, not the test. Plan time: the repository model is built for the `reads` of `ci-run-golden` only when no path already marks it (an action or workflow edit is marked by a path, so no model is built); for any other change it costs 1.6 s on top of a 2.1 s `./dev check --pre-push --dry-run` (3.6 s and 4.0 s with it, 2.07 s and 2.09 s with `reads` emptied, same tree, two runs each).
+
 ### 2026-11-28, the queue model in memory (fix/throttle-queue-model-windows)
 
 - **Commit:** base e7e278361 (the model on the real lock folder) against this branch (the model in memory, 12 seeds on the real folder).
@@ -3374,3 +3423,70 @@ references; about 65 items cross a five-layer sketch upwards. **Churn:** 20 of 2
 trains of 2026-11-26/27 touched 16 areas on average, and 11 of 15 changed a layer every area uses. **Replay** (share of today's test seconds
 each option would have run; whole-repository classes keyed on the whole tree): trains 93 to 98% for every option, members 55 to 78% against
 82% today. Limits: the layering is a sketch; per-test seconds sum the threads. Quoted by ADR [0125](adr/0125-paddock-devs-tests-always-run-and-the-crate-is-layered-before-any-split-by-area.md).
+
+## sccache build-folder remap: the same bytes in every slot (2026-11-28, ci/sccache-remap-build-folder, user decision 142)
+
+**Question.** Windows CI missed sccache across runner slots because compiled libraries embed the slot's build-folder path (trial 9286: every serde rlib held
+`target-paddock-crate-s3` twice, so the bytes differed by slot and so did the key of every dependent). **Change.** `build-folder` writes
+`[target.'cfg(all())'] rustflags = ['--remap-path-prefix=<build folder>=/paddock-target']` to `.cargo/ci.toml` on all three OSes (a Linux container: the remap alone).
+**Option and sources.** rustc's stable `--remap-path-prefix` (rustc book, "Command-line arguments"). Cargo's `trim-paths` is still unstable on the pinned cargo 1.100.0
+(`cargo -Z help` lists `-Z trim-paths`; cargo reference, "Unstable features") and would remap the sources too, which the decision excludes. The key is `target.<cfg>`, not
+`build.rustflags`: cargo uses one source of rustflags and a matching `target.<cfg>` entry (the root config's Windows `+crt-static`) beats `build.rustflags`
+(cargo reference, "Configuration"); all matching `target.<cfg>` entries are joined (checked: both flags reach rustc).
+
+**Local proof (Mac mini, rustc 1.100.0).** `cargo build -p serde_json` in `tools/throttle` into two fresh folders, no sccache, `CARGO_INCREMENTAL=0`:
+
+| Build | serde_core rlib | serde_json rlib | itoa, memchr, zmij |
+|---|---|---|---|
+| no remap, folders A and B | DIFFERENT (1 slot path inside) | DIFFERENT | identical |
+| remap in `ci.toml` form, folders A and B | IDENTICAL (0 slot paths, `/paddock-target/debug/build/serde_core/<h>/out/private.rs`) | IDENTICAL | identical |
+
+With a private sccache server (`SCCACHE_BASEDIRS` naming both folders) the second folder hit 5 of 5 Rust compiles, so the remap argument (which names the folder) does not enter the key.
+
+**CI proof (trial run 9371 of a throwaway branch with a temporary proof step; the step is not in this branch).** Same method on each leg, two fresh folders, rlibs compared with `cmp`:
+macOS (job 54346, slot s4) and Windows (job 54418, slot s1): with the remap serde_core and serde_json are IDENTICAL (`/paddock-target` twice inside, no slot path); without it
+both are DIFFERENT. Windows' `cfg(all())` table therefore joins with `+crt-static` and the remap matches the `C:/...` folder. The macOS slot folder also held a serde_core restored
+from the cache with `target-paddock-crate-s3` inside: the old defect, seen in slot s4.
+
+**Panics and backtraces.** A test crate whose build script writes `gen.rs` into `OUT_DIR` and `include!`s it, built with the remap: `file!()` of an own file `src/lib.rs`,
+`Location::caller()` `src/lib.rs:8:43`, an own panic `src/lib.rs:14:56`; the generated file shows `/paddock-target/debug/build/probe/<h>/out/gen.rs` (also in its panic location).
+Source paths are unchanged; only build-script output is renamed, so a debugger cannot open it from the printed path (it is generated).
+
+**sccache statistics, Windows crate leg.** Before (run 9325, job 53572, slot s2, a warm build folder): 43 compiles executed, L0 hits 0, L1 (S3) hits 0, misses 43, S3 writes 16,
+write failures 22. After, first run with the new flags (run 9371, job 54418, slot s1): 1101 executed (the flag changes every key and every fingerprint, once), S3 hits 0, misses 1101,
+**S3 write failures 888, writes 0**; the guard logged the store not answering within 10 s. macOS (job 54346): 1113 executed, L0 hits 26, S3 hits 0, write failures 984. So the
+S3 hit rate after the change could **not be measured**: the first run only fills the cache, and the store refused most writes, so a later slot found little to hit. A second run
+(the real branch's trial) is held (user: RustFS is being moved).
+**First-run cost.** Every Rust job rebuilt everything once (crate Windows 41 min against 6 to 13, macOS 21 min against 4 to 10). On Linux, ten plugin tests that build a fixture binary
+inside the test hit the 60 s hang limit and passed on the retry (flaky-as-failure, so the jobs were red): cold cache after the flag change, not a path effect; one more run on a filled cache is
+needed to confirm. A Linux container's path is the same in every lane, so the remap helps Linux only across workspaces; the user decided to apply it there too.
+**Not measured:** S3 hits after the change; a warm second run; Linux hit rates.
+
+## Member audits in a developer's push (2026-11-28, fix/prepush-member-audits)
+
+Question: can a developer's `./dev check --pre-push` run the `member-audits` profile, so a builder meets `safe_remove_lint` and its
+neighbours before the train does (twice on 2026-11-28: `std::fs::remove_dir_all` in the mutants branch and in `test_cache/probe.rs`
+passed the push and failed the member gate)? user, 2026-11-28, in chat (the narrowed source-audit set and the prose-only skip).
+
+- **Machine:** the shared Mac mini (arm64), other agents and trains running; `./dev throttle`, `RUSTUP_AUTO_INSTALL=0`, sccache, a warm
+  build folder for the lib and `it` test binaries. One run per row.
+- **Command:** `cargo nextest run --profile member-audits --locked --no-tests=fail` in `tools/paddock-dev`: all 91 audits, against the 56
+  that remain when the `graph_` and `tree_` cost classes (src/test_cost.rs) are left out.
+
+  | What | Load (1 min) | Tests | nextest s | Whole command s |
+  |---|---:|---:|---:|---:|
+  | whole profile, run 1 (the `it` binary built just before) | about 20 | 91 | 112.4 | 133.7 |
+  | whole profile, run 2, warm | 7 to 13 | 91 | 105.0 | 105.5 |
+  | source audits (no `graph_`, `tree_`), run 1, warm | 7 to 13 | 56 | 9.8 | 17.9 |
+  | source audits, run 2, warm | 7 to 13 | 56 | 16.7 | 17.1 |
+
+- **Result:** the whole profile is about 105 s warm on a busy machine (the 2026-11-17 figure of 35 s was at load 6.6, before the audits
+  grew; the row's mean in step-history is 113 s), over the 60 s line. 35 of the 91 audits are `graph_` and `tree_` tests (`cargo metadata`
+  and whole-tree reads, two at a time by the nextest groups) and are most of the time. The source audits (`safe_remove_lint`,
+  `cargo_target_lint`, `dev_bin`, `check_allow_list`, `parity_corpus`, the `no_source_file_*` tests, the live checks) take about 17 s. So a
+  developer's push runs the source audits (`gates::audit_dev_filter`) and the member gate runs all 91. A change of only prose under
+  `docs/adr`, `docs/research`, `docs/plans`, `docs/planned`, or `docs/wiki` (`gates::AUDIT_BLIND`) skips the row with its reason.
+- **Positive control:** a file `src/zz_control.rs` with `std::fs::remove_dir_all` fails `safe_remove_lint` in the developer subset (and
+  C178 on the unlisted module); the file was removed after the run.
+- **Not measured:** a cold build folder for the whole branch, a quiet machine, and the full `./dev check --pre-push` of this branch
+  (see the hand-back report).

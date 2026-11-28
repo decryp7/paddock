@@ -21,7 +21,7 @@ pub mod graph;
 pub mod registry;
 pub mod run;
 
-use crate::merge_check::git::Git;
+use crate::git::Git;
 use paddock_cli::{CliError, Exit, Report};
 use paddock_cli::{Outcome, Verdict};
 use registry::{PATH, Registry};
@@ -61,6 +61,41 @@ pub fn load(root: &Path) -> Result<Registry, CliError> {
             errs.join("\n  ")
         ))
     })
+}
+
+/// The ids of the golden entries `changed` makes due, as the pre-push `goldens` row asks (ER-21), over the tree at `root` with the graph
+/// the planner already built: what the hand paths mark and, for an entry that names `reads`, what the model reaches. The model is built
+/// only when a golden with `reads` is not already marked by a path; when it cannot be built every such golden is due (a check that
+/// could not look is never a pass, ER-33).
+pub fn golden_due_in(
+    root: &Path,
+    history: &dyn paddock_repo_graph::History,
+    graph: &crate::plan::RepoGraph,
+    changed: &[String],
+) -> Result<Vec<String>, String> {
+    let reg = load(root).map_err(|e| format!("{e:?}"))?;
+    let by_hand = reg.golden_due(changed, &BTreeSet::new());
+    let open: Vec<&registry::Generator> = reg
+        .generators
+        .iter()
+        .filter(|g| g.golden && !g.reads.is_empty() && !by_hand.contains(&g.id))
+        .collect();
+    if open.is_empty() {
+        return Ok(by_hand);
+    }
+    let reached = match crate::repo_model::build_world(root, history, graph, None) {
+        Ok(mut world) => {
+            graph::with_generators(&mut world, &reg);
+            graph::due(&world, &reg, changed).into_iter().map(|d| d.id).collect()
+        }
+        Err(why) => {
+            eprintln!(
+                "::warning::goldens: the repository model could not be built ({why}), so every golden with `reads` is due. Next step: fix the cause above; `./dev plan --compare` shows the model."
+            );
+            open.iter().map(|g| g.id.clone()).collect()
+        }
+    };
+    Ok(reg.golden_due(changed, &reached))
 }
 
 /// The exit of a set of results, folded by the shared [`Verdict`] (broken 7, stale 5, not measured 6, current 0). No result at
@@ -218,7 +253,7 @@ pub fn check_with_due(
 
 /// `./dev gen check`.
 pub fn command(a: &CheckArgs) -> Result<Report, CliError> {
-    let root = crate::gates::command::repo_root(a.root.as_deref())?;
+    let root = crate::repo_root::repo_root(a.root.as_deref())?;
     let reg = load(&root)?;
     let changed = if a.all || !a.files.is_empty() {
         a.files.clone()
@@ -255,9 +290,14 @@ fn changed_since(root: &Path, base: &str) -> Result<Vec<String>, CliError> {
             "::error::gen check NOT MEASURED: git could not list the change: {e}. Next step: give --base <rev> that exists, or --files a,b, or --all."
         ))
     };
-    let mb = git.text(&["merge-base", base, "HEAD"]).map_err(gap)?;
-    let mut paths = git.paths(&["diff", "--name-only", "-z", "--no-renames", mb.trim()]).map_err(gap)?;
-    paths.extend(git.paths(&["ls-files", "-z", "--others", "--exclude-standard"]).map_err(gap)?);
+    let mb = git.text(&["merge-base", base, "HEAD"]).map_err(|e| gap(e.to_string()))?;
+    let mut paths = git
+        .paths(&["diff", "--name-only", "-z", "--no-renames", mb.trim()])
+        .map_err(|e| gap(e.to_string()))?;
+    paths.extend(
+        git.paths(&["ls-files", "-z", "--others", "--exclude-standard"])
+            .map_err(|e| gap(e.to_string()))?,
+    );
     paths.sort();
     paths.dedup();
     Ok(paths)

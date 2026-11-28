@@ -1,89 +1,14 @@
 //! The git side of `./dev worktree`: running git, finding the repository and reading `git worktree list --porcelain`.
 
-use paddock_proc::{Limits, run_bounded};
+use crate::git::{Git, GitError};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
-/// The longest one git call may run.
-pub const GIT_TIMEOUT_SECS: u64 = 120;
-const TIMEOUT: Duration = Duration::from_secs(GIT_TIMEOUT_SECS);
+/// The longest one git call may run, in seconds.
+pub const GIT_TIMEOUT_SECS: u64 = crate::git::TIMEOUT_SECS;
 
-/// A git command that failed, with the words that explain it.
-#[derive(Debug)]
-pub struct GitError {
-    /// The git arguments (never secrets: only paths, refs and flags).
-    pub args: String,
-    /// What git printed on standard error (or why it could not run).
-    pub stderr: String,
-}
-
-impl std::fmt::Display for GitError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "`git {}` failed: {}", self.args, self.stderr.trim())
-    }
-}
-
-/// What a git run produced.
-pub struct Out {
-    /// Exit status 0.
-    pub ok: bool,
-    /// Standard output.
-    pub stdout: String,
-    /// Standard error.
-    pub stderr: String,
-}
-
-/// Git in one folder (`git -C <dir>`).
-#[derive(Debug, Clone)]
-pub struct Git {
-    dir: PathBuf,
-}
-
-impl Git {
-    /// Git run in `dir`.
-    pub fn at(dir: &Path) -> Git {
-        Git { dir: dir.to_path_buf() }
-    }
-
-    /// Runs git and returns what it printed whatever its status.
-    pub fn run(&self, args: &[&str]) -> Result<Out, GitError> {
-        let mut cmd = crate::git_env::git();
-        // Never take git's optional locks (`status` refreshing the index): a reader must not collide with the work it reads.
-        cmd.arg("-C").arg(&self.dir).args(args).env("GIT_OPTIONAL_LOCKS", "0");
-        let out = run_bounded(cmd, Limits::new(TIMEOUT).max_output(1 << 26)).map_err(|e| GitError {
-            args: args.join(" "),
-            stderr: e.to_string(),
-        })?;
-        if !matches!(out.outcome, paddock_proc::Outcome::Exited(_)) {
-            return Err(GitError {
-                args: args.join(" "),
-                stderr: format!("did not finish ({:?})", out.outcome),
-            });
-        }
-        Ok(Out {
-            ok: out.success(),
-            stdout: out.stdout_text(),
-            stderr: out.stderr_text(),
-        })
-    }
-
-    /// Runs git; a non-zero status is an error carrying git's message.
-    pub fn text(&self, args: &[&str]) -> Result<String, GitError> {
-        let out = self.run(args)?;
-        if out.ok {
-            Ok(out.stdout)
-        } else {
-            Err(GitError {
-                args: args.join(" "),
-                stderr: out.stderr,
-            })
-        }
-    }
-
-    /// Runs git for a yes/no question (`merge-base --is-ancestor`): exit 0 is true, anything else false.
-    pub fn succeeds(&self, args: &[&str]) -> Result<bool, GitError> {
-        Ok(self.run(args)?.ok)
-    }
+/// The reader of a worktree command: the shared [`Git`] with optional locks off (a reader must not collide with the work it reads).
+pub fn git_at(dir: &Path) -> Git<'static> {
+    Git::owned(dir).without_optional_locks()
 }
 
 /// The repository the command works on.
@@ -98,7 +23,7 @@ pub struct Repo {
 impl Repo {
     /// Finds the repository from `from` with `git rev-parse --git-common-dir`, whichever worktree `from` is in.
     pub fn discover(from: &Path) -> Result<Repo, GitError> {
-        let out = Git::at(from).text(&["rev-parse", "--path-format=absolute", "--git-common-dir"])?;
+        let out = git_at(from).text(&["rev-parse", "--path-format=absolute", "--git-common-dir"])?;
         let common = tool_dir(&canonical(Path::new(out.trim())), paddock_env::Os::current())?;
         let primary = common.parent().map(Path::to_path_buf).ok_or_else(|| GitError {
             args: "rev-parse --git-common-dir".into(),
@@ -111,8 +36,8 @@ impl Repo {
     }
 
     /// Git in the primary checkout.
-    pub fn git(&self) -> Git {
-        Git::at(&self.primary)
+    pub fn git(&self) -> Git<'static> {
+        git_at(&self.primary)
     }
 }
 
@@ -222,7 +147,7 @@ pub struct WorkState {
 impl WorkState {
     /// Reads the worktree at `dir` with two git calls; an error is an unknown state, which callers treat as not removable.
     pub fn of(dir: &Path) -> Result<WorkState, GitError> {
-        let git = Git::at(dir);
+        let git = git_at(dir);
         let mut s = WorkState::default();
         for line in git.text(&["status", "--porcelain"])?.lines() {
             let b = line.as_bytes();
@@ -283,6 +208,16 @@ fn tool_dir(resolved: &Path, os: paddock_env::Os) -> Result<PathBuf, GitError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_worktree_reader_runs_with_hooks_off_and_unquoted_paths_like_every_other_reader() {
+        let d = tempfile::tempdir().unwrap();
+        let init = crate::git_env::git().arg("-C").arg(d.path()).args(["init", "-q"]).output().unwrap();
+        assert!(init.status.success());
+        let git = git_at(d.path());
+        assert_eq!(git.text(&["config", "--get", "core.hooksPath"]).unwrap(), "/dev/null\n");
+        assert_eq!(git.text(&["config", "--get", "core.quotePath"]).unwrap(), "false\n");
+    }
 
     #[test]
     fn porcelain_is_parsed_with_locks_branches_and_detached_heads() {

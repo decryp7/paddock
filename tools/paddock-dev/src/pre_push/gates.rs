@@ -145,6 +145,11 @@ pub struct Facts {
     pub nextest_config: std::collections::BTreeMap<String, String>,
     /// The packages each workspace's change reaches, where [`Facts::test_filters`] narrows to them (absent: every package).
     pub reached: std::collections::BTreeMap<String, BTreeSet<String>>,
+    /// The ids of the golden entries of `docs/generators.toml` the change reaches ([`crate::generators::golden_due_in`]), or why they
+    /// cannot be told (the `goldens` row is then not measured, never a pass).
+    pub goldens: Result<Vec<String>, String>,
+    /// The packages both the member and main changed, when `merge sync-member` asked (`--overlap-since`; [`super::overlap`]).
+    pub overlap: super::overlap::Overlap,
 }
 
 /// The reason of every row an inactive app's set leaves out: a skip with this reason is never a pass ([`super::render_timed`]
@@ -198,6 +203,7 @@ pub const ROW_SET: &[&str] = &[
     "conformance-tests",
     "dyno-wire-fixtures",
     "gates-register",
+    "goldens",
     "job-model",
     "locks-guard",
     "member-audits",
@@ -207,7 +213,7 @@ pub const ROW_SET: &[&str] = &[
 
 /// The id prefixes of the rows planned per workspace : they
 /// are not in [`ROW_SET`], and the planner's test tells the fixed rows from these.
-pub const PER_WORKSPACE_PREFIXES: &[&str] = &["fmt ", "lockfile ", "clippy ", "clippy-windows ", "tests "];
+pub const PER_WORKSPACE_PREFIXES: &[&str] = &["fmt ", "lockfile ", "clippy ", "clippy-windows ", "tests ", "overlap-tests "];
 
 /// Workspaces whose lints are not a push gate: they have a CI job of their own that is not part of a branch run.
 const OWN_JOB: &[&str] = &["/fuzz", "/templates/"];
@@ -256,11 +262,17 @@ fn strs(v: &[&str]) -> Vec<String> {
     v.iter().map(|s| s.to_string()).collect()
 }
 
+/// Whether a Cargo workspace is one the push gate lints and tests: not one with a CI job of its own ([`OWN_JOB`]: a cargo-fuzz
+/// workspace has no nextest `ci` profile). The one definition for `tests <ws>` and `overlap-tests <ws>` (ER-22).
+pub fn is_gate_workspace(ws: &str) -> bool {
+    !OWN_JOB.iter().any(|s| ws.contains(s))
+}
+
 /// The affected Cargo workspaces, in the planner's order.
 pub fn workspaces(plan: &Value) -> Vec<String> {
     plan["packages"]
         .as_object()
-        .map(|o| o.keys().filter(|k| !OWN_JOB.iter().any(|s| k.contains(s))).cloned().collect())
+        .map(|o| o.keys().filter(|k| is_gate_workspace(k)).cloned().collect())
         .unwrap_or_default()
 }
 
@@ -444,8 +456,10 @@ fn plan_rows(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
     out.push(conformance(facts));
     out.push(conformance_tests(plan, facts));
     out.extend(commit_lint(change));
-    out.push(member_audits(facts));
+    out.push(member_audits(change, facts));
     out.push(job_model(facts));
+    out.push(goldens(facts));
+    out.extend(overlap_tests(facts));
     out.extend(member_tests(plan, change, facts));
     let reaches_pitwall = plan["apps"].as_array().is_some_and(|a| a.iter().any(|x| x == "pitwall"));
     if reaches_pitwall && app_inactive(facts, "pitwall") {
@@ -689,20 +703,42 @@ pub fn split_audit_filter(filter: &str) -> Option<(String, String)> {
     None
 }
 
+/// The only paths no audit reads, declared once: prose of the design record. Every audit that scans the tree
+/// (`safe_remove_lint`, `cargo_target_lint`, the live checks, the plan against the real graph, the registers) reads code, config,
+/// registers or workflows, so a change outside this list can reach one. A path is added here only with the audit's test showing it.
+pub const AUDIT_BLIND: &[&str] = &["docs/adr/", "docs/research/", "docs/plans/", "docs/planned/", "docs/wiki/"];
+
+/// The nextest filter of a developer's push: the profile's audits minus the whole-repository cost classes (`graph_`, `tree_`), by the
+/// one definition of the classes ([`crate::test_cost::Class`], ER-22). The profile's `default-filter` still applies (nextest ANDs them).
+pub fn audit_dev_filter() -> String {
+    let classes: Vec<String> = crate::test_cost::Class::ALL.iter().map(|c| c.filter()).collect();
+    format!("not ({})", classes.join(" | "))
+}
+
+/// True when the change is known (a base is set), has files, and every file is under [`AUDIT_BLIND`]: then no audit can see it.
+/// An unknown base or an empty list is never blind (fail closed, ER-33).
+fn audit_blind(change: &Change) -> bool {
+    change.base.is_some() && !change.files.is_empty() && change.files.iter().all(|f| AUDIT_BLIND.iter().any(|p| f.starts_with(p)))
+}
+
 /// The audits of `tools/paddock-dev/tests/it`: tests that read the whole tree (the allow-list parity, the cargo-target lint, the
 /// parity corpus, the plan against the tree, the golden checks). A member's own touched-file tests never see a clash between two
 /// members' changes in them; on the merged tree they do (train 13: local-sccache's audits against golden-checked-when-made's code, the
 /// allow-list parity against C135, the parity corpus against test-env-builder; each first showed in the train-wide nextest run, ER-8).
 ///
-/// Runs only when the push gate is the member gate (`./dev merge check --gates` passes `--member-gate`), whatever changed (ER-41); a
-/// developer's push skips it with a reason, as the user wants no extra minutes there (2026-11-17). Blocking from the start: the audits are established tests, not a new check (user, 2026-11-17). `--no-tests=fail`
-/// makes a filter that selects nothing a failure, never a pass (ER-33); `RUSTUP_AUTO_INSTALL=0` stops a probe from installing a
-/// toolchain (ER-45). Measured in docs/benchmarks.md, "Member audits in the member gate".
-fn member_audits(facts: &Facts) -> Planned {
-    if !facts.member_gate {
+/// Runs in the member gate whatever changed (ER-41), and in a developer's push unless every changed file is prose no audit reads
+/// ([`AUDIT_BLIND`]): the audits scan the whole tree (the tool's sources, the shared crates, conformance, the registers, the
+/// workflows), so a push that skipped them let `safe_remove_lint` fail only in the train, twice on 2026-11-28 (ER-9, ER-53).
+/// A developer's push runs the source audits only ([`audit_dev_filter`]: not the `graph_` and `tree_` cost classes, which are
+/// about 90% of the 105 s the profile takes warm and are the planner's own reading of the real graph); the member gate runs all of
+/// them (docs/benchmarks.md, "Member audits in a developer's push"). Blocking: the audits are established tests, not a new check
+/// (user, 2026-11-17). `--no-tests=fail` makes a filter that selects nothing a
+/// failure, never a pass (ER-33); `RUSTUP_AUTO_INSTALL=0` stops a probe from installing a toolchain (ER-45).
+fn member_audits(change: &Change, facts: &Facts) -> Planned {
+    if !facts.member_gate && audit_blind(change) {
         return Planned::Skip {
             id: "member-audits".into(),
-            reason: "they run in the member gate of `./dev merge check --gates` (`--member-gate`), not in a developer's push".into(),
+            reason: "every changed file is prose no audit reads (docs/adr, research, plans, planned, wiki); the member gate runs them whatever changed".into(),
         };
     }
     let mut g = Gate {
@@ -730,6 +766,9 @@ fn member_audits(facts: &Facts) -> Planned {
     if let Some(dir) = dir {
         g.args.splice(2..2, ["--config".to_string(), cargo_target::config_value(&dir)]);
     }
+    if !facts.member_gate {
+        g.args.extend(["-E".to_string(), audit_dev_filter()]);
+    }
     Planned::Run(g)
 }
 
@@ -755,6 +794,71 @@ fn test_cache_args(ws: &str, facts: &Facts, filter: &str) -> Vec<String> {
 /// The tests of `ws` its host run selects: the plan's reached packages as CI's member run narrows them ([`Facts::test_filters`]).
 fn reached_filter<'a>(ws: &str, facts: &'a Facts) -> &'a str {
     facts.test_filters.get(ws).map(String::as_str).unwrap_or("")
+}
+
+/// One workspace's host tests through the test cache (`ci test-cache run`), narrowed by `filter` (empty: the whole workspace): the one
+/// builder of the `tests <ws>` and `overlap-tests <ws>` rows (ER-22).
+fn tests_gate(id: String, ws: &str, facts: &Facts, filter: &str, next: String) -> Gate {
+    let mut g = Gate {
+        heavy: true,
+        need: Need::Tool("cargo-nextest".into()),
+        env: vec![("RUSTUP_AUTO_INSTALL".into(), "0".into())],
+        ci_env: true,
+        ..gate(id, "", "", &[], 5, next)
+    };
+    g.args = test_cache_args(ws, facts, filter);
+    g.build_dir = Some(build_dir(facts, ws, None));
+    g
+}
+
+/// The `overlap-tests` rows (ER-21: three times a member green alone broke on the combined tree): `merge sync-member` names the
+/// packages the member and main both changed ([`Facts::overlap`]), and the sync tip runs exactly those packages' tests, one row per
+/// workspace, on this host. No package in common skips the row with the reason; an overlap that could not be told is not measured
+/// (ER-33), never a pass. A developer's push does not ask, so it skips. Only workspaces
+/// the push gate tests ([`is_gate_workspace`], the same set as `tests <ws>`) are targets: a cargo-fuzz workspace has no nextest `ci`
+/// profile. Blocking from the start (user, 2026-11-28, in chat): a failing row ends sync-member non-zero; the tests are CI's own
+/// established tests, not a new check. Measured in docs/benchmarks.md, "the overlap-tests row in sync-member".
+fn overlap_tests(facts: &Facts) -> Vec<Planned> {
+    use super::overlap::Overlap;
+    let id = || "overlap-tests".to_string();
+    match &facts.overlap {
+        Overlap::NotAsked => vec![Planned::Skip {
+            id: id(),
+            reason: "only `./dev merge sync-member` asks for it (`--overlap-since`): the tests of the packages the member and main both changed".into(),
+        }],
+        Overlap::Unknown(why) => vec![Planned::NotMeasured {
+            id: id(),
+            reason: format!("the packages both the member and main changed could not be told: {why}"),
+            next: "run the tests of the packages both sides changed yourself (`./dev plan <fork point> --explain` and the member's plan name them); this is not a finding in your change".into(),
+        }],
+        Overlap::Packages(by_ws) if !by_ws.keys().any(|ws| is_gate_workspace(ws)) => vec![Planned::Skip {
+            id: id(),
+            reason: "the member and main changed disjoint packages (or only workspaces with a CI job of their own, such as cargo-fuzz): nothing both of them touched that the push gate tests".into(),
+        }],
+        Overlap::Packages(by_ws) => by_ws
+            .iter()
+            .filter(|(ws, _)| is_gate_workspace(ws))
+            .map(|(ws, names)| {
+                if let Some(reason) = inactive_app(facts, ws).map(|_| inactive_reason(app_of_workspace(ws).unwrap_or(ws))) {
+                    return Planned::Skip { id: format!("overlap-tests {ws}"), reason };
+                }
+                let list = names.iter().cloned().collect::<Vec<_>>();
+                dev_run(
+                    facts,
+                    tests_gate(
+                        format!("overlap-tests {ws}"),
+                        ws,
+                        facts,
+                        &crate::plan_ci::package_filterset(&list),
+                        format!(
+                            "a test of {} fails on the sync tip (the member merged with main): fix it on the member, then re-sync",
+                            list.join(", ")
+                        ),
+                    ),
+                )
+            })
+            .collect(),
+    }
 }
 
 /// The member gate's tests (user, 2026-11-25): the full nextest `ci` profile of every Cargo workspace the member touches (a workspace
@@ -791,23 +895,16 @@ fn member_tests(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
         return out;
     }
     for ws in &candidates {
-        let mut g = Gate {
-            heavy: true,
-            need: Need::Tool("cargo-nextest".into()),
-            env: vec![("RUSTUP_AUTO_INSTALL".into(), "0".into())],
-            ci_env: true,
-            ..gate(
+        out.push(dev_run(
+            facts,
+            tests_gate(
                 format!("tests {ws}"),
-                "",
-                "",
-                &[],
-                5,
+                ws,
+                facts,
+                reached_filter(ws, facts),
                 "fix the test it names (its failed tests and first panic are above), then re-run the member gate".into(),
-            )
-        };
-        g.args = test_cache_args(ws, facts, reached_filter(ws, facts));
-        g.build_dir = Some(build_dir(facts, ws, None));
-        out.push(dev_run(facts, g));
+            ),
+        ));
     }
     out
 }
@@ -842,6 +939,43 @@ fn locks_guard(change: &Change, facts: &Facts) -> Planned {
             )
         },
     )
+}
+
+/// The golden row (ER-21: three times in two days a change altered what a generated golden records, the push passed because it ran no
+/// golden test, and only a CI trial went red): `./dev gen check --only <ids>` for the golden entries of `docs/generators.toml` the change
+/// reaches ([`Facts::goldens`]; each entry declares its inputs, `golden = true`). Each runs its golden tests and, on a stale golden,
+/// prints the exact bless command from its `regenerate` line. A change that reaches none skips the row with the reason. Whatever
+/// changed (ER-41): the inputs are declared next to the golden, not guessed here. Blocking from the start, like the member audits: the
+/// golden tests are CI's own established tests, not a new check. Measured in docs/benchmarks.md, "Golden row in the push gate".
+fn goldens(facts: &Facts) -> Planned {
+    match &facts.goldens {
+        Err(why) => Planned::NotMeasured {
+            id: "goldens".into(),
+            reason: format!("which goldens the change reaches could not be told: {why}"),
+            next: "run `./dev gen check --all` (it runs every generator and golden), or fix the cause above; this is not a finding in your change".into(),
+        },
+        Ok(ids) if ids.is_empty() => Planned::Skip {
+            id: "goldens".into(),
+            reason: "no golden's declared inputs changed (the `golden = true` entries of docs/generators.toml and their paths)".into(),
+        },
+        Ok(ids) => dev_run(
+            facts,
+            Gate {
+                args: strs(&["gen", "check", "--only", &ids.join(",")]),
+                ..gate(
+                    "goldens".into(),
+                    "",
+                    "",
+                    &[],
+                    3,
+                    format!(
+                        "a golden is stale: the line above names the test and its bless command (the `regenerate` of {} in docs/generators.toml); run it on your machine, review the diff and commit it with the change",
+                        ids.join(", ")
+                    ),
+                )
+            },
+        ),
+    }
 }
 
 /// ADR 0123 §7: `./dev ci job-model check`, the member gate's copy of the plan job's step, so a layout change in ci.yml (a job without

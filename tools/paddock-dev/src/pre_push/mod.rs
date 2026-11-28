@@ -43,12 +43,13 @@ pub mod gates;
 pub mod kept;
 pub mod known;
 pub mod outcome;
+pub mod overlap;
 pub mod reuse;
 pub mod row_timings;
 pub mod train_split;
 
+use crate::git::{git_text, state_dir};
 use crate::plan::{Request, plan_with_graph};
-use crate::plan_repo::git_text;
 use crate::throttle::{QUEUE_STALL, ROW_CAP};
 use clap::Args;
 use exec::{Kind, RealExec, Row, RunOpts, heavy_limit, run_all_limited, workers};
@@ -91,8 +92,9 @@ pub struct PrePushArgs {
     /// per line) and check exactly that commit in a throw-away worktree, not the working tree. The hook passes it.
     #[arg(long)]
     pub refs_from_stdin: bool,
-    /// Also run the repository-wide audits (`member-audits`): set by the member gate of `./dev merge check --gates`
-    /// on the merge commit, not by a developer's push, whose time budget it would grow.
+    /// The member gate of `./dev merge check --gates`, run on the merge commit: the repository-wide audits (`member-audits`) and the
+    /// whole-tree rows run whatever changed. A developer's push runs the source audits (no `graph_`, `tree_` class) unless the change
+    /// is prose no audit reads.
     #[arg(long)]
     pub member_gate: bool,
     /// Run every app's rows, whatever `docs/ci-active-apps.toml` says: for a release, or for the person bringing an app back. Without
@@ -121,6 +123,10 @@ pub struct PrePushArgs {
     /// Run every row even when an earlier green run with the same key is on record ([`reuse`]; `PADDOCK_NO_REUSE=1` is the same switch).
     #[arg(long)]
     pub no_reuse: bool,
+    /// Set by `./dev merge sync-member`: the commit the member forked from main. With `--base` the train, the `overlap-tests` row runs the
+    /// tests of the packages that both the member's change (`--base`..HEAD) and main's (this commit..`--base`) reach ([`overlap`]).
+    #[arg(long)]
+    pub overlap_since: Option<String>,
 }
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(120);
@@ -294,7 +300,10 @@ struct RealLookups {
 
 impl known::Lookups for RealLookups {
     fn ls_remote(&self, remote: &str) -> Option<String> {
-        git_text(&self.root, &["ls-remote", "--", remote])
+        crate::git::Git::new(&self.root)
+            .with_own_environment()
+            .text(&["ls-remote", "--", remote])
+            .ok()
     }
     fn ci_green(&self, sha: &str) -> Result<u64, String> {
         match crate::ci_runs::ci_verdict(known::CI_WORKFLOW, sha) {
@@ -305,22 +314,9 @@ impl known::Lookups for RealLookups {
     }
 }
 
-/// The repository root: the given folder, else the top of the git checkout the current folder is in.
-pub(crate) fn repo_root(given: &Option<PathBuf>) -> Result<PathBuf, CliError> {
-    match given {
-        Some(r) => Ok(r.clone()),
-        None => {
-            let cwd = std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder cannot be read: {e}.")))?;
-            git_text(&cwd, &["rev-parse", "--show-toplevel"])
-                .map(|t| PathBuf::from(t.trim()))
-                .ok_or_else(|| CliError::failure("This is not a git checkout.").with_hint("Run it inside the repository."))
-        }
-    }
-}
-
 /// The command.
 pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
-    let root = repo_root(&args.root)?;
+    let root = crate::repo_root::repo_root(args.root.as_deref())?;
     let stdin = if args.refs_from_stdin { read_stdin()? } else { String::new() };
     // Prepared on first use by a cargo gate, never here and never in `command_in`: a push that runs no cargo gate, and the tests of
     // the push gate, must not start a server on the machine they run on (ER-45).
@@ -545,6 +541,25 @@ fn command_in(
             (ws.clone(), hit)
         })
         .collect();
+    facts.goldens = crate::generators::golden_due_in(&work, &history, &graph, &change.files);
+    facts.overlap = match (&args.overlap_since, &change.base) {
+        (None, _) => overlap::Overlap::NotAsked,
+        (Some(_), None) => overlap::Overlap::Unknown("the change has no base to measure main's side from".into()),
+        (Some(since), Some(base)) => {
+            let main_side = Request {
+                files: Vec::new(),
+                all: false,
+                explain: false,
+                root: None,
+                base: Some(since.clone()),
+                head: base.clone(),
+            };
+            match crate::plan::plan_on_graph(&work, &history, &main_side, &graph) {
+                Ok(main_plan) => overlap::of_plans(&plan, &main_plan),
+                Err(e) => overlap::Overlap::Unknown(format!("main's side ({since}..{base}) could not be planned: {e}")),
+            }
+        }
+    };
     let mut planned = gates::plan_gates(&plan, &change, &facts);
     planned = select_rows(planned, &args.only)?;
     planned = train_split::select(planned, args.set);
@@ -589,7 +604,7 @@ fn command_in(
     );
     // What the run is about (the commit and its tree) is the evidence of every pass, so it is known before the first gate runs.
     let checked = pushed.first().cloned().or_else(|| if clean { head_sha.clone() } else { None });
-    let subject = outcome::subject_of(&root, checked.as_deref());
+    let subject = crate::subject::subject_of(&root, checked.as_deref());
     // A test's executor runs no real gate, so it never reads or writes the machine's records.
     let reuse = if given.is_none() {
         reuse_for(&work, &state, &env, &graph.cargo, args.no_reuse)
@@ -758,20 +773,6 @@ fn accepted_ids(option: &[String], env: &HashMap<String, String>) -> Vec<String>
         .map(|v| v.split(',').map(|w| w.trim().to_string()).collect::<Vec<_>>())
         .unwrap_or_default();
     option.iter().cloned().chain(from_env).filter(|w| !w.is_empty()).collect()
-}
-
-/// The folder for this checkout's gate logs and override log: `<git common dir>/paddock-pre-push`.
-///
-/// `PADDOCK_PREPUSH_STATE` replaces it (a test's own folder, so it never waits for a build-folder lock a real gate of this checkout holds,
-/// ER-14, ER-51); the run, the test cache and the slow-row records all read it through here.
-pub(crate) fn state_dir(root: &Path) -> PathBuf {
-    if let Some(own) = crate::places::state_override("PADDOCK_PREPUSH_STATE") {
-        return own;
-    }
-    git_text(root, &["rev-parse", "--path-format=absolute", "--git-common-dir"])
-        .map(|t| PathBuf::from(t.trim()))
-        .unwrap_or_else(|| root.join(".git"))
-        .join("paddock-pre-push")
 }
 
 /// The most of git's pre-push input that is read (a push of thousands of refs is not a pre-push gate's case).
@@ -1223,7 +1224,7 @@ fn row_id(p: &gates::Planned) -> &str {
 }
 
 /// `--only`: keep the rows the selectors name (a whole row name such as `clippy crates`, or its first word without a trailing comma).
-/// No selector keeps every row. A selector that names no row is an error, whichever others do: it lists every such selector and the valid
+/// No selector keeps every row. A bare known row kind that nothing reaches is a skip with the reason; any other selector that names no row is an error, whichever others do: it lists every such selector and the valid
 /// row names, so a typo never turns into a smaller run that reads as "passed, safe to push" (ER-33).
 fn select_rows(planned: Vec<gates::Planned>, only: &[String]) -> Result<Vec<gates::Planned>, CliError> {
     if only.is_empty() {
@@ -1237,7 +1238,25 @@ fn select_rows(planned: Vec<gates::Planned>, only: &[String]) -> Result<Vec<gate
         let (full, first) = names(p);
         *w == full || *w == first
     };
-    let unmatched: Vec<&String> = only.iter().filter(|w| !planned.iter().any(|p| hit(w, p))).collect();
+    // A bare selector that names a known row kind (a fixed row or the first word of a per-workspace one) but matches no planned row is a
+    // row nothing reaches (a docs-only change plans no `clippy` row): a skip with the reason, never an error. A plan with no rows at
+    // all is a broken plan, and a typo or a whole name that matches nothing is still an error.
+    let kinds: Vec<String> = gates::ROW_SET
+        .iter()
+        .map(|s| s.to_string())
+        .chain(gates::PER_WORKSPACE_PREFIXES.iter().map(|p| p.trim().to_string()))
+        .collect();
+    let (unmatched, absent): (Vec<&String>, Vec<&String>) = only
+        .iter()
+        .filter(|w| !planned.iter().any(|p| hit(w, p)))
+        .partition(|w| planned.is_empty() || !kinds.contains(w));
+    let skips: Vec<gates::Planned> = absent
+        .iter()
+        .map(|w| gates::Planned::Skip {
+            id: (*w).clone(),
+            reason: format!("this change plans no `{w}` row: nothing it touches reaches one"),
+        })
+        .collect();
     if !unmatched.is_empty() {
         let mut valid: Vec<&str> = planned.iter().map(row_id).collect();
         valid.sort_unstable();
@@ -1251,7 +1270,9 @@ fn select_rows(planned: Vec<gates::Planned>, only: &[String]) -> Result<Vec<gate
             valid.join("; ")
         )));
     }
-    Ok(planned.into_iter().filter(|p| only.iter().any(|w| hit(w, p))).collect())
+    let mut kept: Vec<gates::Planned> = planned.into_iter().filter(|p| only.iter().any(|w| hit(w, p))).collect();
+    kept.extend(skips);
+    Ok(kept)
 }
 
 fn dry_run(planned: &[gates::Planned]) -> Report {
@@ -1463,9 +1484,9 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
             .and_then(|t| t.trim().parse::<u32>().ok())
             .unwrap_or(0)
     };
-    // File names through the shared reader (`merge_check::git::Git`): NUL-separated, never quoted, both names of a move
+    // File names through the shared reader (`git::Git`): NUL-separated, never quoted, both names of a move
     // (`--no-renames`), so a file moved out of a workspace still plans that workspace and a non-ASCII path is the real one.
-    let reader = crate::merge_check::git::Git::new(root);
+    let reader = crate::git::Git::new(root);
     let names = |args: &[&str]| {
         reader
             .paths(args)
@@ -1584,6 +1605,8 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>, ex: &dyn
         test_filters: Default::default(),
         nextest_config,
         reached: Default::default(),
+        goldens: Ok(Vec::new()),
+        overlap: Default::default(),
     }
 }
 

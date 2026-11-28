@@ -844,7 +844,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         } => ci_runs::record::command(&a),
         Command::Ci {
             command: CiCommand::ConformanceArgs(a),
-        } => gates::command::repo_root(a.root.as_deref()).and_then(|root| {
+        } => crate::repo_root::repo_root(a.root.as_deref()).and_then(|root| {
             // The one reader is the contract, `conformance/paddock.ci.json` (ADR 0038 section 1), which replaced the line in ci.yml.
             let read = if a.host == "rust" {
                 crate::ci_run::contract::conformance_rust_args_at(&root)

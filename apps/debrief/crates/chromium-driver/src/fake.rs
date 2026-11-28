@@ -266,11 +266,33 @@ fn apply_control() {
     }
 }
 
+/// After the handshake the connection is polled on a socket that does not block, never with a receive timeout: Winsock leaves a
+/// socket "in an indeterminate state" after a receive that timed out (`SO_RCVTIMEO`, learn.microsoft.com, read 2026-11-28).
+fn ready_for_polling(ws: &tungstenite::WebSocket<std::net::TcpStream>) {
+    let _ = ws.get_ref().set_read_timeout(None);
+    let _ = ws.get_ref().set_nonblocking(true);
+}
+
+/// Nothing to read: wait one tick, and write what a send left queued (a send on a non-blocking socket may only queue).
+fn idle(ws: &mut tungstenite::WebSocket<std::net::TcpStream>) {
+    std::thread::sleep(TICK);
+    let _ = ws.flush();
+}
+
+/// A send went out, or is queued behind a full socket (non-blocking); only a real failure is false.
+fn sent(r: tungstenite::Result<()>) -> bool {
+    match r {
+        Ok(()) => true,
+        Err(tungstenite::Error::Io(e)) => e.kind() == std::io::ErrorKind::WouldBlock,
+        Err(_) => false,
+    }
+}
+
 fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: &str) {
     // The handshake waits for the whole upgrade request however slow the client is; only the message loop ticks (a
     // read timeout during the handshake abandoned it, "Handshake not finished", on a loaded machine).
     let Ok(mut ws) = tungstenite::accept(stream) else { return };
-    let _ = ws.get_ref().set_read_timeout(Some(TICK));
+    ready_for_polling(&ws);
     let mut told_closed = false;
     // Applies the user's actions; false when the connection is to end. The browser reports a closed window once, as
     // Chrome does: the page's session detaches and its target is destroyed.
@@ -285,7 +307,7 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
                 json!({"method": "Target.detachedFromTarget", "params": {"sessionId": "S1", "targetId": "T1"}}),
                 json!({"method": "Target.targetDestroyed", "params": {"targetId": "T1"}}),
             ] {
-                if ws.send(Message::text(ev.to_string())).is_err() {
+                if !sent(ws.send(Message::text(ev.to_string()))) {
                     return false;
                 }
             }
@@ -298,7 +320,10 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
         }
         let msg = match ws.read() {
             Ok(m) => m,
-            Err(tungstenite::Error::Io(e)) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => continue,
+            Err(tungstenite::Error::Io(e)) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+                idle(&mut ws);
+                continue;
+            }
             Err(_) => return,
         };
         let Message::Text(t) = msg else { continue };
@@ -360,7 +385,7 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
                 std::thread::sleep(TICK);
             }
         }
-        if ws.send(Message::text(reply.to_string())).is_err() {
+        if !sent(ws.send(Message::text(reply.to_string()))) {
             return;
         }
         if method == "Page.navigate" && !closed && !LOADS_STALLED.load(Ordering::SeqCst) {

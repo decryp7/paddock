@@ -1,24 +1,13 @@
 //! The `.gitea` and `conformance` files the planner narrows workflow changes with, read from git and the working tree
 //! (the I/O half of `planFor` in the retired `scripts/affected.mjs`).
 
+use crate::git::git_text;
 use crate::plan_gitea::GiteaSource;
-use paddock_proc::{Limits, run_bounded};
 use paddock_repo_graph::GraphError;
 use regex::Regex;
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
-
-const TIMEOUT: Duration = Duration::from_secs(120);
-
-/// Runs `git -C root args`, returning standard output when git succeeded.
-pub fn git_text(root: &Path, args: &[&str]) -> Option<String> {
-    let mut cmd = crate::git_env::git();
-    cmd.arg("-C").arg(root).args(args);
-    let out = run_bounded(cmd, Limits::new(TIMEOUT).max_output(1 << 28)).ok()?;
-    out.success().then(|| out.stdout_text())
-}
 
 fn lines(text: Option<String>) -> Vec<String> {
     text.unwrap_or_default()

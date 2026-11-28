@@ -14,8 +14,8 @@
 //! purpose. A file git merged cleanly, and the result is exactly its merge, is skipped. Generated files ([`super::generated`]) are skipped: they are regenerated, not merged.
 
 use super::diff::{DIFF_FLAGS, FileDiff, parse, trivial};
-use super::git::short;
 use super::{Ctx, Finding, Kind, trailers};
+use crate::git::short;
 use std::collections::{HashMap, HashSet};
 
 const MIN_LINES: usize = 2;

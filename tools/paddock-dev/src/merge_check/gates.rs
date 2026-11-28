@@ -14,7 +14,8 @@
 //! result printed with a `::warning::` and the exit code unchanged; [`ENFORCED`] false restores that.
 
 use super::generator_step::{Step, checkout_problem};
-use super::{Merge, git::Git, short};
+use super::{Merge, short};
+use crate::git::Git;
 use paddock_cli::{Exit, Outcome, Severity, Subject};
 use paddock_proc::{Limits, command, run_bounded};
 use serde_json::json;

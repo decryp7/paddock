@@ -109,6 +109,15 @@ passes `--config` on every cargo step. Never put a script between cargo and scca
 whose 8191-character command line limit rustc's arguments for a large crate (windows-sys) exceed. The workspace's own path crates still
 key on their checkout path (`CARGO_MANIFEST_DIR`); a symlink does not help, cargo uses the physical path.
 
+CI's build-folder action also remaps the build folder to one fixed name (user decision 142, 2026-11-28): its `.cargo/ci.toml` holds
+`[target.'cfg(all())'] rustflags = ['--remap-path-prefix=<build folder>=/paddock-target']`. A build script's `OUT_DIR` is inside the
+build folder and serde_core embeds the path of the generated file it includes, so a rlib built in slot s3 differed from the same one
+built in s1, and so did the sccache key of every crate that depends on it (docs/benchmarks.md, "sccache build-folder remap"). Only the
+build folder is remapped, never the sources, so panics and backtraces keep their source paths. It is rustc's stable flag; cargo's
+`trim-paths` is still unstable (`-Z trim-paths`) and would remap the sources too. The `target.<cfg>` table is deliberate: cargo uses
+one source of rustflags and a matching `target.<cfg>` entry (the root config's Windows `+crt-static`) beats `build.rustflags`, while
+all matching `target.<cfg>` entries are joined. Developers' worktrees write no `ci.toml` and are not remapped.
+
 ### Local sccache
 
 Agents' builds use one local sccache 0.20.1 (the CI pin and checksums, `tools/paddock-dev/src/ci_setup_rust.rs`), set by Paddock's

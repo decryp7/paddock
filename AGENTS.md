@@ -85,7 +85,7 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 - **Merge queue: parked (user, 2026-11-24).** `./dev queue` and `./dev pr` (docs/plans/merge-queue.md) stay in the tool, but
   nothing runs them and CI does not test them; trains are built by hand with the member gate (`./dev merge check --gates`).
   A member merges current main and re-runs its member gate on that tip before it joins a train (rule 100). `./dev merge sync-member <train>`, run after the merge, runs the
-  fast static rows (fmt, conformance, gates-register, clippy, clippy-windows, in the train lane: `--priority train`) on the sync tip first and fails on a bad row (`--no-static "<reason>"` skips them, logged);
+  fast static rows (fmt, conformance, gates-register, clippy, clippy-windows, `goldens` and `overlap-tests`, in the train lane: `--priority train`) on the sync tip first and fails on a bad row (`--no-static "<reason>"` skips them, logged). `overlap-tests` (user, 2026-11-28, in chat) runs the host tests of the packages that both the member (its pre-merge tip against the fork point) and main (fork point to the train tip) changed, by the planner's reach (`pre_push/overlap.rs`): a member green alone that breaks on the combined tree is where both sides changed one package. No shared package skips it with the reason; a fork point or plan that cannot be computed is not measured, never a pass;
   the member's own CI trial (the affected jobs on the train, `ci dispatch --trial` on `sync/<member>/<short sha>`, a new ref per synced commit that sync-member pushes with a plain push: integrator role only) is dispatched
   **only for a member with no green trial of its own on main** (a Linux trial with `--onto origin/main` on its current head, or on a head whose only differences are merges of main; user 2026-11-27).
   A member that has one runs sync-member and joins with `--no-trial "trial <run id> green on main"` (logged); members without one join on the static rows, and **one trial of the
@@ -152,6 +152,10 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   --priority train [--set slow]`, `./dev gen check --priority train`; `./dev merge check --gates` passes it itself): the step goes before
   normal waiters (tools/throttle/README.md, "Train priority").
 - **E2E and screenshots run on fresh code (guidance; a binding rule is proposed).** A running dev server is reused only with `PW_REUSE_SERVER=1`; default ports derive from the worktree path (`e2ePort` in `@decryp7/paddock-e2e`); a config that consumes `ui/dist` or the css fails at load with "rebuild ui: npm run build -w ui" when they were built from older sources (`build-guard.ts`, content stamps; lessons.md). New Playwright configs use these.
+- **A test that starts a compiler or `cargo build` is in the build class.** Its function name starts with `build_`, and a call to
+  `paddock_testkit::build_cost::charge` stands before the code that looks for or starts the build (a test of another name fails under
+  nextest with the new name). Each workspace's `.config/nextest.toml` gives the class its budget from a measured cold build
+  (docs/benchmarks.md, "test build cost class"); `tools/paddock-dev/tests/it/build_cost.rs` checks the places and the overrides.
 - **Git fixtures (rule 102).** A test that needs a git repository builds it once per machine with `paddock_testkit::git_fixture::template` and copies it per test with `copy_tree`; a fixture builder with six or more `git` starts per test is a C174 finding (report-only).
 - **A reader change adds or updates a replay shape (user decision 96, 2026-11-26).** A change to the CI verdict, reuse, green, fix-items or
   trial readers (`tools/paddock-dev/src/ci_runs/`, `run_scope`) records the real run that shows its shape with
@@ -208,7 +212,7 @@ Run these as well as the touched-file checks, on the merged tree when you hand b
 - Last, on a branch for a train: merge `origin/main` into the branch, then run `./dev check --pre-push --member-gate --base origin/main`
   on that head (user, 2026-11-25). The train's member gate reuses its green rows for every workspace only this branch touched; a
   branch behind main has another tree there, so the train runs them again (`.claude/skills/land-train`, step 3).
-- The member audits, the repository-wide audits of tools/paddock-dev that only the member gate runs (a developer's `./dev check --pre-push` skips them): `cargo nextest run --profile member-audits --locked --no-tests=fail` in `tools/paddock-dev`.
+- The member audits, the repository-wide audits of tools/paddock-dev (a developer's `./dev check --pre-push` runs the source audits too (not the `graph_` and `tree_` classes) and skips them only when every changed file is under `AUDIT_BLIND` in `tools/paddock-dev/src/pre_push/gates.rs`, the design record's prose; user, 2026-11-28, in chat): `cargo nextest run --profile member-audits --locked --no-tests=fail` in `tools/paddock-dev`.
 - A review reads a diff with `git show` and builds only in a scratch copy, never in the author's worktree.
 - A design document (ADR, plan, research note) records the branch heads it read (ADR 0091), checks claims about shipped code with `git tag --contains <commit>`, and names every check it relies on as built on origin/main, held on a named branch, or a prerequisite (ADR 0096).
 - A loop that runs a command, process, query or request once per item needs a `// per-item: <reason>` comment, and a new bulk command needs a budget test (rule 85, ADR 0108).

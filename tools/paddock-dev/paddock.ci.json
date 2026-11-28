@@ -44,10 +44,6 @@
         "reason": "host-runner production code of the CI kit: it runs on every runner, and no OS signal in the module says so (docs/research/2026-11-22-os-scoped-tests.md section 1)"
       },
       {
-        "name": "merge_check::git::",
-        "reason": "holds OS behaviour itself (it spawns git), so its tests stay on every host although its area is skipped (decision 114)"
-      },
-      {
         "name": "pre_push::exec::",
         "reason": "called by host-runner production code (ci_run, ci_setup_rust) inside a folder that is otherwise dev-Mac only, so it is tested on every host (docs/research/2026-11-22-os-scoped-tests.md section 1)"
       },
