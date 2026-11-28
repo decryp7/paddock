@@ -3398,3 +3398,32 @@ references; about 65 items cross a five-layer sketch upwards. **Churn:** 20 of 2
 trains of 2026-11-26/27 touched 16 areas on average, and 11 of 15 changed a layer every area uses. **Replay** (share of today's test seconds
 each option would have run; whole-repository classes keyed on the whole tree): trains 93 to 98% for every option, members 55 to 78% against
 82% today. Limits: the layering is a sketch; per-test seconds sum the threads. Quoted by ADR [0125](adr/0125-paddock-devs-tests-always-run-and-the-crate-is-layered-before-any-split-by-area.md).
+
+## Member audits in a developer's push (2026-11-28, fix/prepush-member-audits)
+
+Question: can a developer's `./dev check --pre-push` run the `member-audits` profile, so a builder meets `safe_remove_lint` and its
+neighbours before the train does (twice on 2026-11-28: `std::fs::remove_dir_all` in the mutants branch and in `test_cache/probe.rs`
+passed the push and failed the member gate)? user, 2026-11-28, in chat (the narrowed source-audit set and the prose-only skip).
+
+- **Machine:** the shared Mac mini (arm64), other agents and trains running; `./dev throttle`, `RUSTUP_AUTO_INSTALL=0`, sccache, a warm
+  build folder for the lib and `it` test binaries. One run per row.
+- **Command:** `cargo nextest run --profile member-audits --locked --no-tests=fail` in `tools/paddock-dev`: all 91 audits, against the 56
+  that remain when the `graph_` and `tree_` cost classes (src/test_cost.rs) are left out.
+
+  | What | Load (1 min) | Tests | nextest s | Whole command s |
+  |---|---:|---:|---:|---:|
+  | whole profile, run 1 (the `it` binary built just before) | about 20 | 91 | 112.4 | 133.7 |
+  | whole profile, run 2, warm | 7 to 13 | 91 | 105.0 | 105.5 |
+  | source audits (no `graph_`, `tree_`), run 1, warm | 7 to 13 | 56 | 9.8 | 17.9 |
+  | source audits, run 2, warm | 7 to 13 | 56 | 16.7 | 17.1 |
+
+- **Result:** the whole profile is about 105 s warm on a busy machine (the 2026-11-17 figure of 35 s was at load 6.6, before the audits
+  grew; the row's mean in step-history is 113 s), over the 60 s line. 35 of the 91 audits are `graph_` and `tree_` tests (`cargo metadata`
+  and whole-tree reads, two at a time by the nextest groups) and are most of the time. The source audits (`safe_remove_lint`,
+  `cargo_target_lint`, `dev_bin`, `check_allow_list`, `parity_corpus`, the `no_source_file_*` tests, the live checks) take about 17 s. So a
+  developer's push runs the source audits (`gates::audit_dev_filter`) and the member gate runs all 91. A change of only prose under
+  `docs/adr`, `docs/research`, `docs/plans`, `docs/planned`, or `docs/wiki` (`gates::AUDIT_BLIND`) skips the row with its reason.
+- **Positive control:** a file `src/zz_control.rs` with `std::fs::remove_dir_all` fails `safe_remove_lint` in the developer subset (and
+  C178 on the unlisted module); the file was removed after the run.
+- **Not measured:** a cold build folder for the whole branch, a quiet machine, and the full `./dev check --pre-push` of this branch
+  (see the hand-back report).

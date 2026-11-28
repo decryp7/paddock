@@ -2,7 +2,7 @@
 
 use super::budget::Timing;
 use super::exec::{Done, Exec, Kind, Limits, Row, RunOpts, run_all_timed, run_all_with, test_subject};
-use super::gates::{AUDIT_PROFILE, Change, Facts, Gate, Need, Planned, plan_gates, windows_skip_reason};
+use super::gates::{AUDIT_PROFILE, Change, Facts, Gate, Need, Planned, audit_dev_filter, plan_gates, windows_skip_reason};
 use super::{accept_not_measured, parse_refs, render, render_timed};
 use crate::throttle::QUEUE_STALL;
 use paddock_cli::Exit;
@@ -722,26 +722,61 @@ fn every_lib_clause_of_the_member_audits_selects_a_test_of_the_lib() {
     );
 }
 
-/// A developer's push does not run the audits (minutes would be added to every push); it says why. The member gate does.
+/// A developer's push runs the audits when the change reaches anything they read (they scan the whole tree: the tool's sources, the
+/// shared crates, conformance, the registers), so a builder meets safe_remove_lint, the parity corpus and the allow-list parity before
+/// the train does (the recurring miss of 2026-11-28: a push passed, the member gate failed member-audits). It skips with a reason only
+/// when every changed file is prose no audit reads ([`AUDIT_BLIND`]), and the member gate runs them whatever changed.
 #[test]
-fn a_developers_push_skips_the_member_audits_with_a_reason_and_the_member_gate_runs_them() {
+fn a_developers_push_runs_the_member_audits_when_a_change_reaches_what_they_read_and_skips_prose_only_changes() {
     let off = Facts {
         member_gate: false,
         ..facts()
     };
-    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &off);
-    assert!(!ids(&planned).contains(&"member-audits".to_string()), "{:?}", ids(&planned));
+    for files in [
+        &["tools/paddock-dev/src/test_cache/probe.rs"][..],
+        &["crates/a.rs"],
+        &["docs/gates.toml"],
+        &["docs/adr/0001-x.md", "tools/paddock-dev/src/a.rs"],
+        &["Mystery"],
+        &[],
+    ] {
+        let planned = plan_gates(&plan(), &change(files), &off);
+        assert!(ids(&planned).contains(&"member-audits".to_string()), "{files:?}: {planned:?}");
+    }
+    for files in [&["docs/adr/0999-x.md"][..], &["docs/research/a.md", "docs/plans/b.md"]] {
+        let planned = plan_gates(&plan(), &change(files), &off);
+        assert!(
+            !ids(&planned).contains(&"member-audits".to_string()),
+            "{files:?}: {:?}",
+            ids(&planned)
+        );
+        assert!(
+            planned
+                .iter()
+                .any(|p| matches!(p, Planned::Skip { id, reason } if id == "member-audits" && reason.contains("no audit reads"))),
+            "skipped with its reason: {planned:?}"
+        );
+    }
+    // The developer's run is the source audits only: the member gate's command plus the declared filter; the gate itself has none.
+    let dev = plan_gates(&plan(), &change(&["tools/paddock-dev/src/test_cache/probe.rs"]), &off);
+    let g = run_gates(&dev).into_iter().find(|g| g.id == "member-audits").expect("planned");
+    let args = g.args.join(" ");
+    assert!(args.ends_with(&format!("-E {}", audit_dev_filter())), "{args}");
     assert!(
-        planned
-            .iter()
-            .any(|p| matches!(p, Planned::Skip { id, reason } if id == "member-audits" && reason.contains("--member-gate"))),
-        "skipped with its reason: {planned:?}"
+        audit_dev_filter().contains("test(/(^|::)graph_[^:]*$/)") && audit_dev_filter().contains("test(/(^|::)tree_[^:]*$/)"),
+        "the class filters come from test_cost::Class: {}",
+        audit_dev_filter()
     );
-    let on = Facts {
-        member_gate: true,
-        ..facts()
+    let gate = plan_gates(&plan(), &change(&["tools/paddock-dev/src/test_cache/probe.rs"]), &facts());
+    let g = run_gates(&gate).into_iter().find(|g| g.id == "member-audits").expect("planned");
+    assert!(!g.args.iter().any(|a| a == "-E"), "the member gate runs every audit: {:?}", g.args);
+    // Positive control (ER-33): a change with an unknown base is never judged prose-only, and the member gate runs whatever changed.
+    let unknown = Change {
+        base: None,
+        ..change(&["docs/adr/0999-x.md"])
     };
-    assert!(ids(&plan_gates(&plan(), &change(&["crates/a.rs"]), &on)).contains(&"member-audits".to_string()));
+    assert!(ids(&plan_gates(&plan(), &unknown, &off)).contains(&"member-audits".to_string()));
+    assert!(ids(&plan_gates(&plan(), &change(&["docs/adr/0999-x.md"]), &facts())).contains(&"member-audits".to_string()));
 }
 
 /// ADR 0123 §7: the job-model check is a member-gate row (a layout change fails before a train, ER-9, ER-53), runs `./dev ci job-model check`

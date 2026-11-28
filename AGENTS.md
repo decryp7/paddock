@@ -208,7 +208,7 @@ Run these as well as the touched-file checks, on the merged tree when you hand b
 - Last, on a branch for a train: merge `origin/main` into the branch, then run `./dev check --pre-push --member-gate --base origin/main`
   on that head (user, 2026-11-25). The train's member gate reuses its green rows for every workspace only this branch touched; a
   branch behind main has another tree there, so the train runs them again (`.claude/skills/land-train`, step 3).
-- The member audits, the repository-wide audits of tools/paddock-dev that only the member gate runs (a developer's `./dev check --pre-push` skips them): `cargo nextest run --profile member-audits --locked --no-tests=fail` in `tools/paddock-dev`.
+- The member audits, the repository-wide audits of tools/paddock-dev (a developer's `./dev check --pre-push` runs the source audits too (not the `graph_` and `tree_` classes) and skips them only when every changed file is under `AUDIT_BLIND` in `tools/paddock-dev/src/pre_push/gates.rs`, the design record's prose; user, 2026-11-28, in chat): `cargo nextest run --profile member-audits --locked --no-tests=fail` in `tools/paddock-dev`.
 - A review reads a diff with `git show` and builds only in a scratch copy, never in the author's worktree.
 - A design document (ADR, plan, research note) records the branch heads it read (ADR 0091), checks claims about shipped code with `git tag --contains <commit>`, and names every check it relies on as built on origin/main, held on a named branch, or a prerequisite (ADR 0096).
 - A loop that runs a command, process, query or request once per item needs a `// per-item: <reason>` comment, and a new bulk command needs a budget test (rule 85, ADR 0108).
