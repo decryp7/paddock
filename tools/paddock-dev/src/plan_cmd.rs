@@ -22,6 +22,7 @@
 
 use crate::git::git_text;
 use crate::host_tests::HostTests;
+use crate::http::Http;
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_ci::{
     BaseInput, MatrixOpts, USAGE, choose_base, ci_outputs, coverage_run, full_os, matrix, member_run, only_app, package_filters,
@@ -29,7 +30,7 @@ use crate::plan_ci::{
 };
 use crate::plan_since::{APP_WORKFLOWS, GiteaRuns, SincePlan};
 use crate::run_scope::{ExpectedMap, PlannedLegs, Scope, ci_scope, expected_of, load_model, scope_of};
-use crate::wait::{CurlHttp, Http};
+use crate::wait::CurlHttp;
 use paddock_cli::{CliError, Report};
 use paddock_repo_graph::GitHistory;
 use serde_json::Value;
@@ -143,7 +144,7 @@ pub fn command(args: &[String], root: Option<PathBuf>) -> Result<Report, CliErro
     }
     if args.first().is_some_and(|a| a == "--escapes") {
         // The escape monitor of the nightly (ADR 0117 WP-9); exit 5 when it is not clean.
-        let (data, text, clean) = crate::escape::cmd::command(&root, &args[1..], &env).map_err(fail)?;
+        let (data, text, clean) = crate::escape_ci::cmd::command(&root, &args[1..], &env).map_err(fail)?;
         let report = Report::new(data, text);
         return Ok(if clean {
             report
@@ -402,7 +403,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
             crate::plan_graph::escape_selected(&plan, &legs, &crate::plan_ci::os_legs())
         } else {
             crate::repo_inputs::load(root)
-                .map(|inputs| crate::escape::cmd::rules_selected(&plan, &inputs, &graph))
+                .map(|inputs| crate::escape_ci::cmd::rules_selected(&plan, &inputs, &graph))
                 .unwrap_or_default()
         };
         let mut reach = |commit: &str| -> Result<(paddock_repo_graph::model::Reached, Vec<(String, String)>), String> {
@@ -414,7 +415,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
             let reached = crate::repo_model::reach_in(&world, root, &req, &changed, &graph);
             Ok((reached, crate::repo_model::projects(&world.inputs, &graph)))
         };
-        crate::escape::cmd::save_ci(root, &req, selected, &mut reach, &mut |l| log(l));
+        crate::escape_ci::cmd::save_ci(root, &req, selected, &mut reach, &mut |l| log(l));
     }
     match &plan_app {
         Some(p) => log(&format!("base: only {p}, every leg (a tag's gates)")),

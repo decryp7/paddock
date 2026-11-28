@@ -293,6 +293,6 @@ test('CI: every job that runs commit-lint --range or C23 checks out full history
   for (const name of ['conformance']) {
     const j = job(name);
     assert.ok(j.length > 100, `${name} job found`);
-    assert.match(j, /actions\/checkout@v4[\s\S]*?fetch-depth: 0/, `${name} checks out with fetch-depth: 0`);
+    assert.match(j, /actions\/checkout@[0-9a-f]{40}( # v[0-9.]+)?[\s\S]*?fetch-depth: 0/, `${name} checks out with fetch-depth: 0`);
   }
 });

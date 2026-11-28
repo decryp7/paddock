@@ -25,7 +25,7 @@ jobs:
       image: catthehacker/ubuntu:act-latest
     steps:
       - name: Check out the repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Versions
         id: v
@@ -36,18 +36,18 @@ jobs:
           echo "date=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
 
       - name: Log in to dev.decryptology.net
-        uses: docker/login-action@v4
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: dev.decryptology.net
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       # The Dockerfile's last step runs ci-image/verify.sh: the build fails if any tool is missing or off its pin.
       - name: Build and push the image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         env:
           ACTIONS_RUNTIME_TOKEN: ''
         with:

@@ -390,7 +390,10 @@ impl S3Store {
                 .filter_map(|p| p.split("</Key>").next())
                 .map(str::to_string)
                 .collect()),
-            Some((c, _)) => Err(StoreError(format!("the store answered {c} to a listing{}", s3_error(&body)))),
+            Some((c, _)) => Err(StoreError(format!(
+                "the store answered {c} to a listing{}",
+                crate::local_sccache::s3_error(&body)
+            ))),
             None => Err(StoreError("curl reported no transfer".into())),
         }
     }
@@ -406,7 +409,10 @@ impl S3Store {
         let result = (|| {
             let (c, answer) = self.one(&rel, "PUT", Some(&up), "put")?;
             if !(200..300).contains(&c) {
-                return Err(StoreError(format!("the store answered {c} to a put{}", s3_error(&answer))));
+                return Err(StoreError(format!(
+                    "the store answered {c} to a put{}",
+                    crate::local_sccache::s3_error(&answer)
+                )));
             }
             let (c, got) = self.one(&rel, "GET", None, "get")?;
             let round_trip = c == 200 && got == body;
@@ -478,22 +484,6 @@ pub(super) fn fetch_retrying(
         }
     }
     first
-}
-
-/// The error code and message of an S3 error body (`<Code>AccessDenied</Code><Message>..</Message>`), for a log line: both are the
-/// server's words about the request, never the key.
-pub(crate) fn s3_error(body: &str) -> String {
-    let tag = |t: &str| {
-        body.split(&format!("<{t}>"))
-            .nth(1)
-            .and_then(|r| r.split(&format!("</{t}>")).next())
-            .map(str::to_string)
-    };
-    match (tag("Code"), tag("Message")) {
-        (Some(c), Some(m)) => format!(" ({c}: {})", m.chars().take(200).collect::<String>()),
-        (Some(c), None) => format!(" ({c})"),
-        _ => String::new(),
-    }
 }
 
 /// Reads curl's per-transfer `write-out` lines, `<code>|<redirect url>|<output file>`. A redirect (3xx) is never followed: a signed request

@@ -341,10 +341,9 @@ mod tests {
         let err = locks.try_lock(s1).unwrap_err();
         assert!(matches!(err, SlotError::LiveBusy { .. }), "{err}");
         drop(_probe);
-        assert!(
-            locks.try_lock(s1).unwrap().is_some(),
-            "the slot was not left locked by the failed take"
-        );
+        paddock_testkit::lock::await_free("the slot is not left locked by the failed take", || {
+            locks.try_lock(s1).unwrap().is_none()
+        });
     }
 
     /// A status probe in flight (it has `sN.live` locked shared) leaves the lock acquirers contend on alone: no sleep, no timing.
@@ -358,7 +357,9 @@ mod tests {
             .unwrap()
             .expect("a free slot looks free");
         let lock = locks.open(&locks.file(s1, "lock")).unwrap();
-        assert!(lock.try_lock().is_ok(), "the probe did not take sN.lock");
+        paddock_testkit::lock::await_free("the probe does not take sN.lock", || {
+            lock.try_lock().is_err()
+        });
     }
 
     #[test]
@@ -366,15 +367,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let locks = FsLocks::new(dir.path());
         let s1 = SlotId::new(1).unwrap();
-        assert!(!locks.is_held(s1).unwrap());
+        paddock_testkit::lock::await_free("a fresh slot is free", || locks.is_held(s1).unwrap());
         let guard = locks.try_lock(s1).unwrap().unwrap();
-        assert!(locks.is_held(s1).unwrap());
-        assert!(
-            locks.try_lock(s1).unwrap().is_none(),
-            "a second acquirer is refused by sN.lock"
-        );
+        paddock_testkit::lock::await_held("a taken slot is held", || locks.is_held(s1).unwrap());
+        paddock_testkit::lock::await_held("a second acquirer is refused by sN.lock", || {
+            locks.try_lock(s1).unwrap().is_none()
+        });
         drop(guard);
-        assert!(!locks.is_held(s1).unwrap());
+        paddock_testkit::lock::await_free("a released slot is free", || locks.is_held(s1).unwrap());
     }
 
     #[test]

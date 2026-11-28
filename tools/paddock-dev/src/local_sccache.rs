@@ -1340,8 +1340,34 @@ pub fn shell_lines(ready: &Ready) -> Vec<String> {
         .collect()
 }
 
+/// The error code and message of an S3 error body (`<Code>AccessDenied</Code><Message>..</Message>`), for a log line: both are the
+/// server's words about the request, never the key.
+pub fn s3_error(body: &str) -> String {
+    let tag = |t: &str| {
+        body.split(&format!("<{t}>"))
+            .nth(1)
+            .and_then(|r| r.split(&format!("</{t}>")).next())
+            .map(str::to_string)
+    };
+    match (tag("Code"), tag("Message")) {
+        (Some(c), Some(m)) => format!(" ({c}: {})", m.chars().take(200).collect::<String>()),
+        (Some(c), None) => format!(" ({c})"),
+        _ => String::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_s3_error_body_gives_its_code_and_message_and_never_more() {
+        let body = "<?xml version=\"1.0\"?><Error><Code>AccessDenied</Code><Message>no</Message><Key>secret</Key></Error>";
+        assert_eq!(s3_error(body), " (AccessDenied: no)");
+        assert_eq!(s3_error("<Code>Slow</Code>"), " (Slow)");
+        assert_eq!(s3_error("not xml"), "");
+        let long = format!("<Code>C</Code><Message>{}</Message>", "m".repeat(300));
+        assert_eq!(s3_error(&long).len(), " (C: )".len() + 200);
+    }
+
     use super::*;
 
     fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {

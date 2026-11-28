@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Renovate for the whole Paddock monorepo (ADR 0014 §8): every Cargo workspace, the one npm workspace and the workflows. One weekly PR for ordinary updates; Angular and Tauri each as one PR across all workspaces; Rust patch updates and lock maintenance per workspace, so an app in release freeze can hold its own; a new version waits 3 days before it is proposed (ER-57); security fixes at any time, without the wait, also from the OSV database.",
+  "description": "Renovate for the whole Paddock monorepo (ADR 0014 §8): every Cargo workspace, the one npm workspace and the workflows. One weekly PR for ordinary updates; Angular and Tauri each as one PR across all workspaces; Rust patch updates and lock maintenance per workspace, so an app in release freeze can hold its own; a new version waits 3 days before it is proposed (ER-57); security fixes at any time, without the wait, also from the OSV database. Every remote action in .gitea is pinned to a commit SHA with its version as a trailing comment (C182, ER-26); helpers:pinGitHubActionDigests pins new ones and the github-actions manager (its default file patterns cover .gitea/workflows and .gitea/actions, docs.renovatebot.com/modules/manager/github-actions) bumps the SHA with the comment; a bare SHA without a comment is not updated, so always keep the comment.",
   "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
   "schedule": ["before 6am on monday"],
   "minimumReleaseAge": "3 days",

@@ -28,7 +28,7 @@ jobs:
     outputs:
       run: ${{ steps.plan.outputs.run }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 1 }
       - id: plan
         uses: decryp7/paddock/.gitea/actions/plan@v0.3.0
@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: decryp7/paddock/.gitea/actions/setup-rust@v0.3.0
 
       # Last green night's results, for the regression check. Exact key per night, newest restored by prefix.
@@ -92,7 +92,7 @@ jobs:
         run: |
           echo "- bench-previous cache: saved: $RESULT" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
         if: always()
         with:
           name: bench-results

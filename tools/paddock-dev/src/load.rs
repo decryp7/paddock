@@ -462,7 +462,7 @@ pub fn command(a: &LoadArgs) -> Result<Report, CliError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wait::Http;
+    use crate::http::Http;
 
     /// Answers every URL with one body.
     struct One(Value);

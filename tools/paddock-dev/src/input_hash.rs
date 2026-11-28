@@ -94,7 +94,7 @@ fn config_digest(exec: &dyn Exec, root: &Path, text: &str) -> Result<String, Cli
 /// line `rustflags = ['--remap-path-prefix=<folder>=/paddock-target']` under `[target.'cfg(all())']`; any other key there counts.
 /// Read line by line exactly as the wrapper's awk does (`only_build_folder`), so any other table, key or an inline table counts.
 pub fn only_names_build_folder(config: &str) -> bool {
-    use crate::ci_host::build_folder::{REMAP_TABLE, REMAP_TARGET};
+    use crate::cargo_target::{REMAP_TABLE, REMAP_TARGET};
     let text = config.replace('\r', "");
     let mut section = String::new();
     let assigns = |line: &str, key: &str| {

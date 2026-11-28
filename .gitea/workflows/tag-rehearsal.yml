@@ -73,7 +73,7 @@ jobs:
             echo "::error::tag rehearsal: this run is on $GITHUB_REF; a rehearsal runs from main only (never a tag). Next step: dispatch tag-rehearsal.yml with ref main."
             exit 1
           fi
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - id: train
         uses: ./.gitea/actions/schedule-skip
         with:
@@ -95,7 +95,7 @@ jobs:
       SHA: ${{ github.sha }}
       PADDOCK_DEV_DOWNLOAD: "0"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
           persist-credentials: false
