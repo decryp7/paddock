@@ -1252,3 +1252,11 @@ owner = "ER-21 class, seen twice: a just-released flock reads held while another
 since = 2026-11-28
 review_by = 2026-12-12
 approved = "coordinator"
+
+[[report_only]]
+id = "C183"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c183.rs, then flip the mode to Gate. A file git's own rename detection (`git diff --name-status -M` from the merge base, through the shared git reader) sees renamed or deleted that a path register still names: the registers are declared once in the check (REGISTERS: CODEOWNERS, docs/repo-graph.toml, generators.toml, known-copies.toml, gates.toml, escape-register.toml, ipc-endpoints.toml, shared-crate-features.toml, paddock.waivers.toml, paddock.conformance.json, conformance/ci/*.txt, every paddock.ci.json, inputs.txt, conformance/shared-enums.json, disk/temp-prefixes.toml; the conformance engine's allow lists and baselines follow a rename on their own and are not read). It reports the register line with moved to <new path> or deleted. User decision 2026-11-28, in chat: during the paddock-dev split, conformance mention lines, conformance/ci/checkout-profiles.txt and paddock.ci.json hostTests kept old paths after moves, twice, and only a full conformance run caught it (one gate round each). No baseline file (ER-46): the report is the list. Positive control in the check and tests/it/check_c183.rs: a fixture git repository with a moved file and a stale register line goes red; registers that follow the move, a re-created path and longer look-alike paths stay green; a tree with no register or no git is not measured. The pre-push row moved-paths runs it only when the push renames or deletes a file"
+owner = "ER-21 class: path-keyed registers kept old paths after files moved (paddock-dev split: conformance mention lines, checkout-profiles.txt, paddock.ci.json hostTests, twice)"
+since = 2026-11-28
+review_by = 2026-12-12
+approved = "coordinator"

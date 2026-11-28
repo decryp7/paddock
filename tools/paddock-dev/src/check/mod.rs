@@ -69,6 +69,7 @@ register_checks! {
     c179::C179,
     c180::C180,
     c181::C181,
+    c183::C183,
 }
 
 use config::Config;
@@ -95,6 +96,7 @@ pub struct Ctx<'a> {
     stage: paddock_approvals::Stage,
     workflows: OnceCell<Rc<Vec<util::workflows::Workflow>>>,
     renames: OnceCell<Rc<baseline::Renames>>,
+    moves: OnceCell<Result<Rc<Vec<crate::git::Moved>>, String>>,
 }
 
 impl<'a> Ctx<'a> {
@@ -118,6 +120,7 @@ impl<'a> Ctx<'a> {
             stage: paddock_approvals::Stage::Landing,
             workflows: OnceCell::new(),
             renames: OnceCell::new(),
+            moves: OnceCell::new(),
         }
     }
 
@@ -218,6 +221,25 @@ impl<'a> Ctx<'a> {
                         .map(|b| baseline::renames(self.root(), &b))
                         .unwrap_or_default(),
                 )
+            })
+            .clone()
+    }
+
+    /// The files git sees renamed or deleted between the run's merge base and the tree, read once through the shared reader
+    /// ([`crate::git::Git::moves`]), or why that could not be read (an in-memory tree, a folder that is no work tree, a target git cannot
+    /// resolve): a check that needs the list reports "not measured" then, never an empty answer (ER-33).
+    pub fn moves(&self) -> Result<Rc<Vec<crate::git::Moved>>, String> {
+        self.moves
+            .get_or_init(|| {
+                if self.is_in_memory() || !baseline::is_work_tree(self.root()) {
+                    return Err("the folder is not a git work tree".to_string());
+                }
+                let base = baseline::merge_base(self.root(), &self.base_ref())
+                    .map_err(|(msg, why)| format!("no merge base with {}: {} {}", self.base_ref(), msg, why.trim()))?;
+                crate::git::Git::new(self.root())
+                    .moves(&[&base])
+                    .map(Rc::new)
+                    .map_err(|e| e.to_string())
             })
             .clone()
     }
