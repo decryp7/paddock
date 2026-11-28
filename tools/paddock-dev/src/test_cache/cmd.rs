@@ -286,7 +286,6 @@ pub fn command(a: &TestCacheArgs) -> Result<Report, CliError> {
             None => audit(&local),
         }),
         "selfcheck" => selfcheck(shared.as_ref()),
-        "probe" => probe(shared.as_ref()),
         "blind" => blind_sites(&root, &a.workspace),
         "plan" => plan(a, &root, store),
         "shadow-run" => shadow_run(a, &root),
@@ -501,12 +500,10 @@ pub(super) fn run_with(
         let (put, held) = super::not_overwriting_trusted(put, cands, &looked.0);
         if let Err(w) = &writes {
             text.push(format!("test-cache: nothing stored ({w})"));
+        } else if let Err(e) = store.put_many(&put) {
+            text.push(format!("::warning::test-cache: records not stored: {e}"));
         } else {
-            let wrote = super::store::Stored::of(&put, store.put_many(&put));
-            if let Some(lost) = wrote.lost_line() {
-                text.push(format!("::warning::test-cache: {lost}"));
-            }
-            text.push(format!("test-cache: stored {} pass(es); {}", wrote.stored, held.held_line()));
+            text.push(format!("test-cache: stored {} pass(es); {}", put.len(), held.held_line()));
         }
         if !out.1 {
             // The whole output: the gate's row reads the failed tests and the first panic from it.
@@ -593,31 +590,6 @@ fn nextest(
     Ok((text, out.success()))
 }
 
-/// `ci test-cache probe --shared`: the scenarios of [`super::probe`] against the shared store, one line each; exit 5 when a scratch key was
-/// left behind, 6 (not measured) without a store. It never fails on a slow or refused request: it reports them.
-fn probe(shared: Option<&super::s3::S3Store>) -> Result<Report, CliError> {
-    let Some(s) = shared else {
-        return Ok(Report::new(
-            serde_json::json!({"verdict": "not_measured"}),
-            "::error::ci test-cache probe: no shared store. Next step: pass --shared and set the S3 credentials.".to_string(),
-        )
-        .with_exit(Exit::NotMeasured));
-    };
-    let (mut lines, left) = super::probe::run(s, &format!("probe-{}-{}", std::process::id(), now()));
-    let exit = if left.is_empty() {
-        lines.push("test-cache probe: every scratch key was deleted".to_string());
-        Exit::Ok
-    } else {
-        lines.push(format!(
-            "::error::ci test-cache probe: {} scratch key(s) left behind: {}. Next step: delete them under the bucket's `selfcheck` prefix.",
-            left.len(),
-            left.join(", ")
-        ));
-        Exit::Findings
-    };
-    Ok(Report::new(serde_json::json!({"left": left.len()}), lines.join("\n")).with_exit(exit))
-}
-
 /// `ci test-cache selfcheck --shared`: put, get, list and delete one scratch object in the shared store. Exit 5 when any step failed,
 /// 6 (not measured) when the store cannot be reached or has no credentials: never a pass (ER-33).
 pub(super) fn selfcheck(shared: Option<&super::s3::S3Store>) -> Result<Report, CliError> {
@@ -681,26 +653,20 @@ fn forget(cfg: &Config, cands: &[Candidate], store: &dyn Store, filter: &str) ->
             key: super::key_of(c, cfg, &class, filter),
         })
         .collect();
-    let answers = store.delete_many(&asks);
-    // Per key (ADR 0116 §5, amended 2026-11-28): a key that could not be deleted is named, the others are forgotten.
-    let bad: Vec<String> = answers.iter().filter_map(|a| a.as_ref().err().map(|e| e.0.clone())).collect();
-    let gone: Vec<Option<Record>> = answers.into_iter().flatten().collect();
+    let gone = store
+        .delete_many(&asks)
+        .map_err(|e| fail(format!("::error::ci test-cache forget: {e}. Next step: check the store.")))?;
     let n = gone.iter().flatten().count();
-    let mut lines: Vec<String> = gone
+    let text = gone
         .iter()
         .flatten()
         .map(|r| format!("test-cache: forgot target={} (from run {})", r.target, r.run))
-        .collect();
-    lines.push(format!("test-cache: {n} record(s) forgotten"));
-    if let Some(first) = bad.first() {
-        lines.push(format!(
-            "::error::ci test-cache forget: {} of {} keys could not be deleted: {first}. Next step: check the store and run it again.",
-            bad.len(),
-            asks.len()
-        ));
-    }
-    let exit = if bad.is_empty() { Exit::Ok } else { Exit::Findings };
-    Ok(Report::new(serde_json::json!({"forgot": n, "failed": bad.len()}), lines.join("\n")).with_exit(exit))
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok(Report::new(
+        serde_json::json!({"forgot": n}),
+        format!("{text}\ntest-cache: {n} record(s) forgotten"),
+    ))
 }
 
 /// The runner class to key for: `--class`, else this machine's.
@@ -840,17 +806,22 @@ pub(super) fn record_with(
         }
     }
     let (put, held) = super::not_overwriting_trusted(super::records_from_log(log, cands, cfg, class, filter, meta), cands, &decisions);
-    let wrote = super::store::Stored::of(&put, store.put_many(&put));
-    if let Some(lost) = wrote.lost_line() {
-        lines.push(format!("::warning::test-cache: {lost}"));
-    }
-    lines.push(format!(
-        "test-cache: recorded {} packages of {} candidates ({passed} passed here; not in this leg's partition or without a test in the log: {not_in_leg}; failed or not clean: {failed}); {}",
-        wrote.stored,
-        cands.len(),
-        held.held_line()
-    ));
-    (lines, wrote.stored)
+    let stored = match store.put_many(&put) {
+        Ok(()) => {
+            lines.push(format!(
+                "test-cache: recorded {} packages of {} candidates ({passed} passed here; not in this leg's partition or without a test in the log: {not_in_leg}; failed or not clean: {failed}); {}",
+                put.len(),
+                cands.len(),
+                held.held_line()
+            ));
+            put.len()
+        }
+        Err(e) => {
+            lines.push(format!("::warning::test-cache: records not stored: {e}"));
+            0
+        }
+    };
+    (lines, stored)
 }
 
 /// The filters the legs of `workspace` on `class` carry, normalized and without repeats: the whole package, and the filterset of a host
