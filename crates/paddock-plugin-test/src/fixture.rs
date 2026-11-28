@@ -537,7 +537,7 @@ fn locate_bin(name: &str) -> Result<PathBuf, String> {
     );
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let dir = paddock_testkit::cargo_layout::profile_dir_for(&exe)?;
-    find_or_build(&dir, name, || crate::process::build_with_cargo(name))
+    find_or_build(&dir, name, || crate::process::build_with_cargo(name, &dir))
 }
 
 /// `<dir>/<name>` (with `.exe` on Windows) when it exists, else what `build` makes of it.
