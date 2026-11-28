@@ -13,6 +13,12 @@ disallowed-methods = [
     # rule); only its own default body calls the raw one. Positive control: paddock-proc's `usage::tests::a_raw_listing_is_what_the_clippy_ban_catches`.
     # allow-invalid: a crate that does not depend on paddock-proc cannot resolve the path.
     { path = "paddock_proc::usage::ProcessSource::listed_children", allow-invalid = true, reason = "the raw listing can hold strangers under a reused parent pid: use ProcessSource::children, which keeps the children by identity (ADR 0033), or justify the site with #[expect]" },
+    # User decision (2026-11-27; CI runs 6603, 7448, 9168 and 9201): a process's run state is read at one instant, so a test that reads it
+    # right after an event races the OS. Tests wait for the state (paddock_testkit_start::wait_state, wait_exited) or read it once after
+    # the event that would change it (state_after, still_running_after); a production read or a justified site carries #[expect].
+    # Positive control: paddock-proc's `statewait::read` (its #[expect] is unfulfilled when the ban is gone).
+    # allow-invalid: a crate that does not depend on paddock-proc cannot resolve the path.
+    { path = "paddock_proc::runstate::run_state", allow-invalid = true, reason = "a state read at one instant races the OS: wait with paddock_testkit_start::wait_state / wait_exited, or read once after the event with state_after / still_running_after; a production read or a justified site carries #[expect]" },
     # Bulk-API redesign G3: every start is made by the one constructor, so a budget test's count (paddock_env::starts) sees it.
     { path = "std::process::Command::new", reason = "build it with paddock_env::command::command (paddock_proc::command), or attached_command for a child that shares this console: no console window on Windows, and counted for budget tests (paddock_env::starts)" },
     { path = "tokio::process::Command::new", allow-invalid = true, reason = "build a std Command with paddock_env::command::command and convert it (tokio::process::Command::from): counted for budget tests" },
