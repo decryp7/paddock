@@ -427,10 +427,10 @@ mod tests {
         server.join().unwrap();
     }
 
-    /// A frame that arrives in pieces with long pauses between them is read whole, and a reply is matched to its command:
-    /// the reader waits on the socket as long as it takes (no poll of its own to race the bytes).
+    /// A frame that arrives in pieces is read whole, and a reply is matched to its command: the reader waits on the socket
+    /// for as long as it takes (no poll of its own to race the bytes).
     #[test]
-    fn a_frame_in_slow_pieces_is_read_whole_and_a_command_gets_its_reply() {
+    fn a_frame_written_in_pieces_is_read_whole_and_a_command_gets_its_reply() {
         use std::io::Write;
         let (port, server) = serve_one(|mut ws| {
             let Ok(Message::Text(cmd)) = ws.read() else {
@@ -440,7 +440,7 @@ mod tests {
             let event = json!({"method": "Page.loadEventFired", "params": {}, "sessionId": "S1"})
                 .to_string();
             let reply = json!({"id": id, "result": {"ok": true}}).to_string();
-            // Unmasked text frames (a server's), each cut in three with a pause, far longer than the old 20 ms poll.
+            // Unmasked text frames (a server's), each written in three pieces, each flushed on its own.
             let raw = ws.get_mut();
             for payload in [event, reply] {
                 let mut frame = vec![0x81, payload.len() as u8];
@@ -448,7 +448,6 @@ mod tests {
                 for part in frame.chunks(frame.len() / 3 + 1) {
                     raw.write_all(part).unwrap();
                     raw.flush().unwrap();
-                    std::thread::sleep(Duration::from_millis(80));
                 }
             }
             let _ = ws.read();

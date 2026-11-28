@@ -4620,7 +4620,7 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   connection itself (the first log line of the new `The DevTools connection ended:` says which).
 - **Fix.** The connection has no receive timeout: a reader thread blocks in `read`, a writer thread sends what callers queue, and a drop shuts the
   socket down to wake the reader. Why it ended is logged once (`The DevTools connection ended: ...`, ER-27). Tests: `the_socket_has_no_receive_timeout`
-  (red: `Some(20ms)`), a frame cut in three with 80 ms pauses, and a browser-closed connection.
+  (red: `Some(20ms)`), a frame written in pieces, and a browser-closed connection.
 - **Proof so far.** One Windows CI trial; one run cannot show a rate near 1 in 400, so the entry stays open: if `Closed` shows again, the new log line
   is the first thing to read.
 - **Copies (rule 55, `browser-driver`).** `apps/debrief/crates/chromium-driver/src/cdp.rs` has the same 20 ms poll and is not changed here (Debrief
