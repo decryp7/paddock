@@ -1,4 +1,4 @@
-//! `mutants gate`: mutation-testing of the diff, ci.yml's `mutants` job (user decision 127, 2026-11-27; moved from the member gate to CI the same day).
+//! `mutants gate`: mutation-testing of the diff, mutants.yml, after a landing (user decision 127, 2026-11-27; decision 143, 2026-11-28 moved it out of ci.yml).
 //!
 //! The class it catches: a test or a guard that never reaches the production code it claims to check (a landing test that rebuilt the
 //! planner's wiring itself; `config::removed`, a guard nothing called; a producer test that looked at an action `ci.yml` does not use).
@@ -27,8 +27,8 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// Whether a finding fails the run. Report-only (ER-41) until the first green train run of ci.yml's `mutants` job on the real tree is
-/// recorded here, by run id, in the same change that sets this to [`Mode::Gate`] and removes the job's `continue-on-error`. Review date
+/// Whether a finding fails the run. Report-only (ER-41) until the first green run of mutants.yml on the real tree is
+/// recorded here, by run id, in the same change that sets this to [`Mode::Gate`]. Review date
 /// 2026-12-11: flip it, or delete the job.
 pub const MODE: Mode = Mode::ReportOnly;
 
@@ -55,11 +55,20 @@ pub const MUTANT_TIMEOUT_SECS: u64 = 900;
 /// in `crates` a mutant took 13 s. 12 fits the run limit and the 60-minute row cap of a push step.
 pub const MAX_MUTANTS: usize = 12;
 
-/// The most mutants one planned shard (`--shard k/n`, a leg of ci.yml's `mutants` matrix) tests: a leg has a job of its own, so it is
+/// The most mutants one planned shard (`--shard k/n`, a leg of mutants.yml's matrix) tests: a leg has a job of its own, so it is
 /// held by the run limit and not by a push step's row cap. Measured on the trial of 2026-11-27 (docs/benchmarks.md): a shard of the
 /// four-way split saw 25 mutants for the whole paddock-dev diff of this branch, which the cap of 12 refused; eight legs of at most
 /// this many hold such a diff.
 pub const MAX_PER_SHARD: usize = 16;
+
+/// The most mutants one planned shard tests when the plan has its way (user decision 143, 2026-11-28): a shard is one job that holds one Linux
+/// slot, so it is kept short enough that a train dispatched meanwhile waits for it only briefly. Each paddock-dev mutant runs the package's
+/// tests (about 150 s on the Mac, docs/benchmarks.md, "Mutation testing of the diff"), so six is about 20 to 25 minutes.
+pub const SHARD_TARGET: usize = 6;
+
+/// The most shards a plan makes. Shards run one at a time (mutants.yml), so this bounds the run; a diff with more mutants than
+/// `MAX_SHARDS * MAX_PER_SHARD` leaves the rest `not measured` by the shard's own cap, never silently.
+pub const MAX_SHARDS: usize = 12;
 
 /// The whole run's hang limit: the baseline, the control and [`MAX_MUTANTS`] mutants.
 pub const RUN_LIMIT: Duration = Duration::from_secs(3300);
@@ -417,26 +426,35 @@ fn control(tool: &dyn Tool, scratch: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether the installed cargo-mutants is the pin. `Err` is the `not measured` line, with the install command.
+fn check_version(tool: &dyn Tool, root: &Path, scratch: &Path) -> Result<(), String> {
+    match tool.mutants(root, &args(&["--version"]), scratch) {
+        Ok(r) if version_of(&r.stdout) == Some(PIN) => Ok(()),
+        Ok(r) => Err(format!(
+            "cargo-mutants {} is installed and the pin is {PIN}: install it with `cargo install cargo-mutants --version {PIN} --locked` (an upgrade is one change of mutants_gate::PIN)",
+            version_of(&r.stdout).unwrap_or("is not")
+        )),
+        Err(e) => Err(format!(
+            "cargo-mutants {PIN} cannot be started ({e}): install it with `cargo install cargo-mutants --version {PIN} --locked`"
+        )),
+    }
+}
+
+/// The mutants `--in-diff` would test in `dir` (one workspace), optionally of one `--shard k/n`: how many.
+fn count_listed(tool: &dyn Tool, dir: &Path, diff_arg: &str, shard_arg: Option<&str>, scratch: &Path) -> Result<usize, String> {
+    let mut list_args = args(&["--in-diff", diff_arg, "--list", "--json"]);
+    list_args.extend(shard_arg.iter().flat_map(|a| args(&["--shard", a])));
+    tool.mutants(dir, &list_args, scratch).and_then(|r| listed(&r.stdout))
+}
+
 /// Runs the control, then mutates the changed functions of every workspace in [`WORKSPACES`] between `base` and the commit `head` of
 /// the repository at `root`, in a checkout of `head` under the scratch folder `scratch` (mutants are applied in place there, never in
 /// `root`). The run's findings and what it could not measure are in the [`Summary`].
 pub fn measure(tool: &dyn Tool, root: &Path, head: &str, base: &str, shard: Option<(u32, u32)>, scratch: &Path, mode: Mode) -> Summary {
     let mut s = Summary::default();
-    match tool.mutants(root, &args(&["--version"]), scratch) {
-        Ok(r) if version_of(&r.stdout) == Some(PIN) => {}
-        Ok(r) => {
-            s.not_measured.push(format!(
-                "cargo-mutants {} is installed and the pin is {PIN}: install it with `cargo install cargo-mutants --version {PIN} --locked` (an upgrade is one change of mutants_gate::PIN)",
-                version_of(&r.stdout).unwrap_or("is not")
-            ));
-            return s;
-        }
-        Err(e) => {
-            s.not_measured.push(format!(
-                "cargo-mutants {PIN} cannot be started ({e}): install it with `cargo install cargo-mutants --version {PIN} --locked`"
-            ));
-            return s;
-        }
+    if let Err(why) = check_version(tool, root, scratch) {
+        s.not_measured.push(why);
+        return s;
     }
     if let Err(why) = control(tool, scratch) {
         s.broken = Some(why);
@@ -474,10 +492,7 @@ pub fn measure(tool: &dyn Tool, root: &Path, head: &str, base: &str, shard: Opti
         let dir = tree.join(ws);
         let diff_arg = diff_file.to_string_lossy().into_owned();
         let shard_arg = shard.map(|(k, n)| format!("{k}/{n}"));
-        let mut list_args = args(&["--in-diff", &diff_arg, "--list", "--json"]);
-        list_args.extend(shard_arg.iter().flat_map(|a| args(&["--shard", a])));
-        let listing = tool.mutants(&dir, &list_args, scratch);
-        let n = match listing.as_ref().map_err(Clone::clone).and_then(|r| listed(&r.stdout)) {
+        let n = match count_listed(tool, &dir, &diff_arg, shard_arg.as_deref(), scratch) {
             Ok(n) => n,
             Err(e) => {
                 s.not_measured.push(format!("{ws}: the mutants of the diff cannot be listed ({e})"));
@@ -642,6 +657,123 @@ pub fn report(s: &Summary, mode: Mode, started: std::time::Instant) -> Report {
     } else {
         report
     }
+}
+
+/// How many shards the diff's `n` mutants are planned in: one more for each [`SHARD_TARGET`], at most [`MAX_SHARDS`], none for none.
+pub fn shard_count(n: usize) -> usize {
+    n.div_ceil(SHARD_TARGET).min(MAX_SHARDS)
+}
+
+/// What `mutants plan` found.
+#[derive(Debug, Default)]
+pub struct Plan {
+    /// The mutants of the diff over all workspaces.
+    pub count: usize,
+    /// The shards planned for them ([`shard_count`]).
+    pub shards: usize,
+    /// Why part of the diff could not be counted: never read as "no mutants" (ER-33).
+    pub not_measured: Vec<String>,
+    /// One line per workspace.
+    pub lines: Vec<String>,
+}
+
+/// Counts the mutants `--in-diff` finds in each workspace of [`WORKSPACES`] between `base` and `HEAD` of the repository at `root`, and plans the
+/// shards. It only lists (`--list`): nothing is built, applied or checked out.
+pub fn plan(tool: &dyn Tool, root: &Path, base: &str, scratch: &Path) -> Plan {
+    let mut p = Plan::default();
+    if let Err(why) = check_version(tool, root, scratch) {
+        p.not_measured.push(why);
+        return p;
+    }
+    for ws in WORKSPACES {
+        let diff = match tool.diff(root, ws, base) {
+            Ok(d) => d,
+            Err(e) => {
+                p.not_measured.push(format!("{ws}: the diff against {base} cannot be read ({e})"));
+                continue;
+            }
+        };
+        if diff.trim().is_empty() {
+            p.lines.push(format!("{ws}: no Rust source changed since {base}"));
+            continue;
+        }
+        let diff_file = scratch.join(format!("{}.diff", ws.replace('/', "-")));
+        if let Err(e) = std::fs::write(&diff_file, &diff) {
+            p.not_measured.push(format!("{ws}: the diff cannot be written ({e})"));
+            continue;
+        }
+        match count_listed(tool, &root.join(ws), &diff_file.to_string_lossy(), None, scratch) {
+            Ok(n) => {
+                p.count += n;
+                p.lines.push(format!("{ws}: {n} mutants in the changed lines"));
+            }
+            Err(e) => p.not_measured.push(format!("{ws}: the mutants of the diff cannot be listed ({e})")),
+        }
+    }
+    p.shards = shard_count(p.count);
+    p
+}
+
+/// The step outputs of a plan: `run` (whether shards follow), `count` and `shards` (a JSON list of `k/n`, the matrix of mutants.yml).
+pub fn plan_outputs(p: &Plan) -> String {
+    let list: Vec<String> = (0..p.shards).map(|k| format!("{k}/{}", p.shards)).collect();
+    format!("run={}\ncount={}\nshards={}\n", p.shards > 0, p.count, json!(list))
+}
+
+/// The log text of a plan.
+pub fn plan_text(p: &Plan) -> String {
+    let mut text = String::new();
+    for l in &p.lines {
+        text.push_str(&format!("mutants plan: {l}\n"));
+    }
+    for why in &p.not_measured {
+        text.push_str(&format!("::warning::mutants plan: NOT MEASURED: {why}\n"));
+    }
+    text.push_str(&format!(
+        "mutants plan: {} mutants, {} shard(s) of at most {SHARD_TARGET}\n",
+        p.count, p.shards
+    ));
+    text
+}
+
+/// `mutants plan --base <rev>`: the shards for the diff to `HEAD`, written to `GITHUB_OUTPUT` (standard output without it). Exit 0 whatever
+/// it found (report-only, ER-41): a diff it could not count plans no shard and says `NOT MEASURED`.
+pub fn command_plan(root: Option<PathBuf>, base: &str) -> Result<Report, CliError> {
+    let root = crate::gates::command::repo_root(root.as_deref())?;
+    // The run's own folder under the job's temp folder (or the system's), with an owner record, removed through `safe_remove` as the gate's is.
+    let parent = std::env::var("RUNNER_TEMP")
+        .ok()
+        .filter(|t| !t.is_empty())
+        .map_or_else(std::env::temp_dir, PathBuf::from)
+        .join("mutants-plan");
+    let scratch = parent.join(format!("run-{}-{}", std::process::id(), started_stamp()));
+    std::fs::create_dir_all(&scratch)
+        .map_err(|e| CliError::failure(format!("the scratch folder {} cannot be made: {e}", scratch.display())))?;
+    crate::disk::record::write(
+        &scratch,
+        &crate::disk::record::Record::new(crate::disk::record::Kind::Scratch, "dev:mutants-plan"),
+    )
+    .map_err(|e| CliError::failure(format!("the scratch folder {} has no owner record: {e}", scratch.display())))?;
+    let p = plan(&Real, &root, base, &scratch);
+    remove_scratch(&parent, &scratch);
+    let out = plan_outputs(&p);
+    let mut text = plan_text(&p);
+    match std::env::var("GITHUB_OUTPUT").ok().filter(|v| !v.is_empty()) {
+        Some(path) => {
+            use std::io::Write;
+            std::fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(&path)
+                .and_then(|mut f| f.write_all(out.as_bytes()))
+                .map_err(|e| CliError::failure(format!("{path} cannot be written: {e}")))?;
+        }
+        None => text.push_str(&out),
+    }
+    Ok(Report::new(
+        json!({"count": p.count, "shards": p.shards, "notMeasured": p.not_measured}),
+        text,
+    ))
 }
 
 /// `k/n` of `--shard` (`k` below `n`, as cargo-mutants reads it).
@@ -1072,5 +1204,62 @@ mod tests {
             PIN.split('.').count() == 3 && PIN.split('.').all(|p| p.parse::<u32>().is_ok()),
             "{PIN}"
         );
+    }
+
+    /// The planned shards follow the diff's mutant count (user decision 143, 2026-11-28), not a fixed eight: none for none, one more
+    /// for each `SHARD_TARGET`, never over `MAX_SHARDS`.
+    #[test]
+    fn the_shards_follow_the_mutant_count() {
+        assert_eq!(shard_count(0), 0);
+        assert_eq!(shard_count(1), 1);
+        assert_eq!(shard_count(SHARD_TARGET), 1);
+        assert_eq!(shard_count(SHARD_TARGET + 1), 2);
+        assert_eq!(shard_count(SHARD_TARGET * MAX_SHARDS), MAX_SHARDS);
+        assert_eq!(
+            shard_count(SHARD_TARGET * MAX_SHARDS + 1),
+            MAX_SHARDS,
+            "capped: the shard cap decides the rest"
+        );
+    }
+
+    #[test]
+    fn the_plan_counts_the_mutants_of_every_workspace_and_names_one_shard_for_each_slice() {
+        let mut f = Fake::new();
+        f.listed = 7;
+        let scratch = tempfile::tempdir().unwrap();
+        let p = plan(&f, scratch.path(), "base", scratch.path());
+        // Only `crates` has a diff in the fake: 7 mutants, two shards. Nothing is checked out or run: listing mutates nothing.
+        assert_eq!((p.count, p.shards), (7, 2), "{p:?}");
+        assert!(p.not_measured.is_empty(), "{p:?}");
+        assert!(
+            f.calls()
+                .iter()
+                .all(|c| c[0] != "checkout" && !c.contains(&"--in-place".to_string())),
+            "{:?}",
+            f.calls()
+        );
+        let out = plan_outputs(&p);
+        assert!(
+            out.contains("run=true\n") && out.contains("count=7\n") && out.contains("shards=[\"0/2\",\"1/2\"]\n"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn a_diff_without_mutants_plans_no_shard_and_a_listing_that_fails_is_not_measured_never_a_clean_run() {
+        let mut f = Fake::new();
+        f.listed = 0;
+        let scratch = tempfile::tempdir().unwrap();
+        let none = plan(&f, scratch.path(), "base", scratch.path());
+        assert_eq!((none.count, none.shards), (0, 0));
+        assert!(plan_outputs(&none).contains("run=false\n") && plan_outputs(&none).contains("shards=[]\n"));
+        // The pinned tool is missing: nothing can be listed, which is not "no mutants" (ER-33).
+        let mut g = Fake::new();
+        g.version = "cargo-mutants 0.0.1\n".into();
+        let broken = plan(&g, scratch.path(), "base", scratch.path());
+        assert_eq!(broken.shards, 0);
+        assert_eq!(broken.not_measured.len(), 1, "{broken:?}");
+        assert!(plan_outputs(&broken).contains("run=false\n"));
+        assert!(plan_text(&broken).contains("NOT MEASURED"), "{}", plan_text(&broken));
     }
 }

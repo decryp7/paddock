@@ -27,7 +27,6 @@ pub const CI_JOBS: &[(&str, &[&str])] = &[
     ("crates", &["crates"]),
     ("crate", &["crates"]),
     ("test-cache-shadow", &["crates"]),
-    ("mutants", &["paddock-dev", "crates"]),
     ("app", &["apps"]),
     ("gitleaks", &["conformance"]),
     // The short checks in one job (C99, audit, heavy tool). The job itself runs on every change (the audit step); its C99 step runs for `c99` and its heavy tool steps for `tools`, so an edit of it marks those two (and
