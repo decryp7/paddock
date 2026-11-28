@@ -162,10 +162,9 @@ fn the_shim_holds_a_slot_while_the_tool_runs_and_hands_the_tool_the_held_marker(
     g.child.stdout.take().unwrap().read_to_string(&mut o).unwrap();
     let held = o.lines().find_map(|l| l.strip_prefix("held=")).unwrap_or("");
     assert!(held.ends_with(&format!(":{}", g.pid())), "THROTTLE_HELD names the shim's pid: {o}");
-    assert!(
-        !paddock_throttle::slotfile::is_held(&r.slot_lock()).unwrap(),
-        "the slot is free when the tool ended"
-    );
+    paddock_testkit::lock::await_free("the slot is free when the tool ended", || {
+        paddock_throttle::slotfile::is_held(&r.slot_lock()).unwrap()
+    });
 }
 
 #[test]
@@ -189,15 +188,14 @@ fn a_shim_killed_with_sigkill_frees_its_slot_at_once_while_the_tool_still_runs()
     let r = rig();
     let flag = r.w.flag();
     let mut g = r.start(&["build"], &[("WAIT_FLAG", flag.to_str().unwrap())]);
-    wait_until("the shim holds the slot", || {
+    paddock_testkit::lock::await_held("the shim holds the slot", || {
         paddock_throttle::slotfile::is_held(&r.slot_lock()).unwrap_or(false)
     });
     g.child.kill().expect("SIGKILL");
     g.wait(DEADLINE).expect("the shim is gone");
-    assert!(
-        !paddock_throttle::slotfile::is_held(&r.slot_lock()).unwrap(),
-        "the kernel freed the lock, the tool did not keep it"
-    );
+    paddock_testkit::lock::await_free("the kernel freed the lock, the tool did not keep it", || {
+        paddock_throttle::slotfile::is_held(&r.slot_lock()).unwrap()
+    });
     // The next run does not wait for the orphaned tool.
     let (code, _, err) = r.run(&["next"], &[]);
     assert_eq!(code, 0, "{err}");
@@ -334,10 +332,9 @@ fn control_the_slot_probe_sees_a_slot_that_is_held_and_one_that_is_not() {
     let r = rig();
     let lock = r.slot_lock();
     let held = paddock_throttle::slotfile::take(&lock).unwrap().expect("free");
-    assert!(paddock_throttle::slotfile::is_held(&lock).unwrap(), "a held lock reads as held");
+    paddock_testkit::lock::await_held("a held lock reads as held", || paddock_throttle::slotfile::is_held(&lock).unwrap());
     drop(held);
-    assert!(
-        !paddock_throttle::slotfile::is_held(&lock).unwrap(),
-        "a released lock reads as free"
-    );
+    paddock_testkit::lock::await_free("a released lock reads as free", || {
+        paddock_throttle::slotfile::is_held(&lock).unwrap()
+    });
 }

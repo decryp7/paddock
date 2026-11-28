@@ -463,6 +463,12 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   (the lock file is not inherited), and still a spawn on another thread holds a copy until its exec. The test now overlaps a spawner on
   purpose, judges the lock freed on the observation that it clears while the child still runs, and has a control that a really
   inherited description stays held. The product needs no change: a waiter that sees a slot held for that moment polls again.
+  Fix for the class (user, 2026-11-28, in chat; twice is a class, ER-21): a test reads a lock's state through one shared wait,
+  `paddock_testkit::lock::await_free(what, || probe_reads_held)` after a release, drop or exit and `await_held` for a holder
+  (polls the caller's probe until it settles, bounded by the hang detector, no sleep of its own), never with one `assert!` on
+  `is_held`, `try_lock().is_err()` or the like. Report-only check C181 (`./dev conformance --only C181`) flags a direct read in
+  an assertion; every site it found that day was converted. Lexical by design: a read bound to a name first, or a helper under
+  another name, is not seen; a Mutex `try_lock` has no descriptor to copy and needs no wait (Dyno writes it as `lock_is_held`).
 - A Node script's "am I the main module" check must compare real paths: Node gives `import.meta.url` the resolved path
   and leaves `process.argv[1]` as given, so through a symlink (a CI work folder linked to a stable one, `node_modules`)
   `import.meta.url === pathToFileURL(process.argv[1]).href` is false and the script exits 0 doing nothing (the Chrome for

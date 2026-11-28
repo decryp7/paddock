@@ -80,16 +80,16 @@ mod tests {
     fn one_holder_per_folder_and_the_lock_ends_with_its_holder() {
         let tmp = paddock_testkit::private_tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
-        assert!(!is_held(&dirs));
+        paddock_testkit::lock::await_free("a fresh folder is free", || is_held(&dirs));
         let first = InstanceLock::acquire(&dirs).unwrap();
-        assert!(is_held(&dirs));
+        paddock_testkit::lock::await_held("a folder with its holder is held", || is_held(&dirs));
         let err = InstanceLock::acquire(&dirs).unwrap_err();
         assert!(matches!(err, LockError::Held { .. }), "{err}");
         assert!(err.to_string().contains("already running"));
         let other = Dirs::at(tmp.path().join("other"));
         drop(InstanceLock::acquire(&other).unwrap());
         drop(first);
-        assert!(!is_held(&dirs));
+        paddock_testkit::lock::await_free("the lock ends with its holder", || is_held(&dirs));
         drop(InstanceLock::acquire(&dirs).unwrap());
     }
 

@@ -1244,3 +1244,10 @@ owner = "ER-21 class: producer | grep -q under pipefail (run 9247 check broken i
 since = 2026-11-27
 review_by = 2026-12-11
 approved = "user"
+
+[[report_only]]
+id = "C181"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c181.rs, then flip the mode to Gate. In test code (a tests folder, tests.rs, testutil*.rs, or a #[test] or #[cfg(test)] item) an assert, assert_eq, assert_ne or debug_assert* macro whose checked expression holds a direct lock-state read (a call named is_held, is_held_now, is_held_settled, is_locked or is_free with an argument, or is_err, is_ok, is_some, is_none, unwrap_err or expect_err on a chain that began with try_lock*) outside paddock_testkit::lock::await_free or await_held is one finding at the read: a just-released lock can read held for a moment, so one read after a release judges the wrong state (user, 2026-11-28, in chat). Read with syn (ER-42), lexical by design: a read bound to a name first, a probe under another name and a Mutex try_lock (in-process, no descriptor; written as a lock_is_held helper in Dyno) are not told apart or not seen. First count 2026-11-28 on fix/settled-lock-reads: 31 warnings (4 were Evidence::is_held, a precondition and no lock, now excluded by the argument rule) plus 17 reads behind the is_free helpers of tools/paddock-dev's slots and isolation tests, all converted to the helper the same day; real tree after conversion: 0 warnings. No baseline file (ER-46). Positive control in the check and tests/it/check_c181.rs: direct reads go red, the helper form, a read bound to a name, production code and an argument-less is_held stay green"
+owner = "ER-21 class, seen twice: a just-released flock reads held while another thread spawns (Dyno InstanceLock 2026-10-31; throttle filelock test 2026-11-28); each fix repaired one test"
+since = 2026-11-28
+review_by = 2026-12-12
